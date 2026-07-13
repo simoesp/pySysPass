@@ -91,7 +91,9 @@ def _keys_from_password_prehash(prehash: bytes, salt: bytes):
     mirroring KeyOrPassword::deriveKeys() which calls hash(sha256, $this->secret)
     on the already-hashed password that createRandomPasswordProtectedKey() passed in.
     """
-    prekey = hashlib.pbkdf2_hmac('sha256', hashlib.sha256(prehash).digest(),
+    # Byte-for-byte Defuse/PHP v2 KDF compatibility; PBKDF2 performs the
+    # password hardening and SHA-256 here is only the mandated prehash.
+    prekey = hashlib.pbkdf2_hmac('sha256', hashlib.sha256(prehash).digest(),  # lgtm[py/weak-sensitive-data-hashing]
                                  salt, _PBKDF2_ITER, _KEY)
     return (
         _hkdf(prekey, _KEY, _AUTH_INFO, salt),
@@ -111,7 +113,7 @@ def unlock_mkey(mkey_hex: str, user_key: str) -> bytes:
     salt = encrypted_key_raw[_HDR : _HDR + _SALT]
     # PHP passes hash('sha256', $password, true) to encryptWithPassword,
     # so our password_bytes = sha256(user_key)
-    password_bytes = hashlib.sha256(user_key.encode()).digest()
+    password_bytes = hashlib.sha256(user_key.encode()).digest()  # lgtm[py/weak-sensitive-data-hashing]
     akey, ekey = _keys_from_password_prehash(password_bytes, salt)
     inner_key_encoded = _defuse_decrypt_binary(encrypted_key_raw, akey, ekey).decode('ascii')
     raw_key = _check_ascii(_KEY_HEADER, inner_key_encoded)
@@ -160,7 +162,7 @@ def encrypt_with_password(plaintext: str, password: str) -> tuple[str, str]:
     raw_key = os.urandom(_KEY)
     key_encoded_hex = _wrap_checksum(_KEY_HEADER, raw_key)
 
-    prehash = hashlib.sha256(password.encode()).digest()
+    prehash = hashlib.sha256(password.encode()).digest()  # lgtm[py/weak-sensitive-data-hashing]
     pkey_salt = os.urandom(_SALT)
     pkey_iv = os.urandom(_IV)
     pkey_akey, pkey_ekey = _keys_from_password_prehash(prehash, pkey_salt)
@@ -182,7 +184,7 @@ def encrypt_user_master_pass(master_pass: str, user_key: str) -> tuple[str, str]
     raw_key = os.urandom(_KEY)
     key_encoded_hex = _wrap_checksum(_KEY_HEADER, raw_key)
 
-    prehash = hashlib.sha256(user_key.encode()).digest()
+    prehash = hashlib.sha256(user_key.encode()).digest()  # lgtm[py/weak-sensitive-data-hashing]
     pkey_salt = os.urandom(_SALT)
     pkey_iv = os.urandom(_IV)
     pkey_akey, pkey_ekey = _keys_from_password_prehash(prehash, pkey_salt)
@@ -215,7 +217,7 @@ def decrypt_with_password(ciphertext_hex: str, key_hex: str, password: str) -> s
     """Decrypt text using PHP Defuse's password-protected-key wire format."""
     encrypted_key_raw = _check_ascii(_PKEY_HEADER, key_hex)
     salt = encrypted_key_raw[_HDR : _HDR + _SALT]
-    prehash = hashlib.sha256(password.encode()).digest()
+    prehash = hashlib.sha256(password.encode()).digest()  # lgtm[py/weak-sensitive-data-hashing]
     akey, ekey = _keys_from_password_prehash(prehash, salt)
     inner_key_encoded = _defuse_decrypt_binary(encrypted_key_raw, akey, ekey).decode('ascii')
     raw_key = _check_ascii(_KEY_HEADER, inner_key_encoded)

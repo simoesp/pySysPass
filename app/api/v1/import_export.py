@@ -1,6 +1,8 @@
 """Import/Export API Endpoints"""
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+import logging
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Response
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.db.base import get_db
@@ -15,6 +17,13 @@ from app.services.import_export_service import (
 )
 
 router = APIRouter(prefix="/import-export", tags=["Import/Export"])
+logger = logging.getLogger(__name__)
+
+
+class KdbxExportRequest(BaseModel):
+    export_password: str = Field(min_length=12, max_length=1024)
+    export_password_confirm: str = Field(min_length=12, max_length=1024)
+    account_ids: Optional[list[int]] = None
 
 
 @router.post("/import/csv")
@@ -38,8 +47,9 @@ async def import_csv(
         data = service.parse_csv(content_str, delimiter=delimiter)
         stats = service.import_accounts(data)
         return {'format': 'csv', 'stats': stats, 'errors': service.errors[:10]}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Import failed: {str(e)}")
+    except Exception as exc:
+        logger.exception("CSV import failed")
+        raise HTTPException(status_code=400, detail="CSV import failed") from exc
 
 
 @router.post("/import/xml")
@@ -72,8 +82,9 @@ async def import_xml(
         data = service.parse_xml(content_str)
         stats = service.import_accounts(data)
         return {'format': 'xml', 'stats': stats, 'errors': service.errors[:10]}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Import failed: {str(e)}")
+    except Exception as exc:
+        logger.exception("sysPass XML import failed")
+        raise HTTPException(status_code=400, detail="sysPass XML import failed") from exc
 
 
 @router.post("/import/keepass")
@@ -96,15 +107,16 @@ async def import_keepass(
         data = service.parse_keepass(content_str)
         stats = service.import_accounts(data)
         return {'format': 'keepass', 'stats': stats, 'errors': service.errors[:10]}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Import failed: {str(e)}")
+    except Exception as exc:
+        logger.exception("KeePass XML import failed")
+        raise HTTPException(status_code=400, detail="KeePass XML import failed") from exc
 
 
 @router.get("/export/csv")
 async def export_csv(
     account_ids: Optional[str] = None,
     db: Session = Depends(get_db),
-    current_user=Depends(require_permission('config_import')),
+    current_user=Depends(require_permission('config_backup')),
 ):
     """Export accounts to CSV format"""
     service = ExportService(db, get_encryption_service())
@@ -122,7 +134,7 @@ async def export_csv(
 async def export_xml(
     account_ids: Optional[str] = None,
     db: Session = Depends(get_db),
-    current_user=Depends(require_permission('config_import')),
+    current_user=Depends(require_permission('config_backup')),
 ):
     """Export accounts to sysPass XML format"""
     service = ExportService(db, get_encryption_service())
@@ -149,7 +161,7 @@ async def export_xml_protected(
     master_password: str = Form(""),
     account_ids: str = Form(""),
     db: Session = Depends(get_db),
-    current_user=Depends(require_permission('config_import')),
+    current_user=Depends(require_permission('config_backup')),
 ):
     """Export password-protected, PHP-native sysPass XML."""
     if not export_password:
@@ -188,7 +200,7 @@ async def export_xml_protected(
 async def export_keepass(
     account_ids: Optional[str] = None,
     db: Session = Depends(get_db),
-    current_user=Depends(require_permission('config_import')),
+    current_user=Depends(require_permission('config_backup')),
 ):
     """Export accounts to KeePass XML format"""
     service = ExportService(db, get_encryption_service())
@@ -198,5 +210,38 @@ async def export_keepass(
             account_id_list = [int(id.strip()) for id in account_ids.split(',')]
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid account IDs format")
-    keepass_content = service.export_to_keepass(account_id_list)
+    try:
+        keepass_content = service.export_to_keepass(
+            account_id_list,
+            master_password=current_user.get("master_pass"),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     return {'format': 'keepass', 'content': keepass_content, 'filename': 'syspass_export_keepass.xml'}
+
+
+@router.post("/export/keepass/kdbx")
+async def export_keepass_kdbx(
+    body: KdbxExportRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_permission('config_backup')),
+):
+    """Export accounts into a password-protected KDBX 4 database."""
+    if body.export_password != body.export_password_confirm:
+        raise HTTPException(status_code=422, detail="Export passwords do not match")
+    try:
+        content = ExportService(db, get_encryption_service()).export_to_kdbx(
+            body.export_password,
+            account_ids=body.account_ids,
+            master_password=current_user.get("master_pass"),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return Response(
+        content=content,
+        media_type="application/x-keepass2",
+        headers={
+            "Content-Disposition": 'attachment; filename="pysyspass_export.kdbx"',
+            "Cache-Control": "no-store",
+        },
+    )

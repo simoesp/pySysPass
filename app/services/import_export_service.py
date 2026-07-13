@@ -5,18 +5,23 @@ from sqlalchemy import select
 from app.models.account import Account, AccountToTag, Tag, Category, Client, User
 from app.models.custom_field import CustomFieldValue
 from app.core.security import EncryptionService
-from datetime import datetime
+from datetime import UTC, datetime
 import csv
+from pathlib import Path
+import tempfile
+import xml.etree.ElementTree as ET
 try:
-    import defusedxml.ElementTree as ET
+    from defusedxml.ElementTree import fromstring as parse_xml_safely
 except ModuleNotFoundError:  # pragma: no cover - environment-dependent fallback
-    import xml.etree.ElementTree as ET
+    parse_xml_safely = ET.fromstring
 import base64
 import hashlib
 import hmac
 import time
+import uuid
 
 from app.core.defuse_compat import (
+    decrypt_account_pass,
     decrypt_with_password,
     encrypt_account_pass,
     encrypt_with_password,
@@ -209,12 +214,12 @@ class XmlImportService(ImportService):
                 data_node.get("key", ""),
                 self.export_password,
             )
-            root.append(ET.fromstring(section_xml))
+            root.append(parse_xml_safely(section_xml))
         root.remove(encrypted)
     
     def parse_xml(self, content: str) -> List[Dict[str, Any]]:
         """Parse XML content into list of account dictionaries"""
-        root = ET.fromstring(content)
+        root = parse_xml_safely(content)
         self._expand_encrypted_sections(root)
 
         if root.tag == "Root" and (root.findtext("./Meta/Generator") or "").lower() == "syspass":
@@ -349,49 +354,47 @@ class KeePassImportService(ImportService):
     """KeePass XML import service"""
     
     def parse_keepass(self, content: str) -> List[Dict[str, Any]]:
-        """Parse KeePass XML format"""
-        root = ET.fromstring(content)
-        accounts = []
-        
-        # KeePass 2.x uses /KeePassFile/Root/Group/Entry
-        entries = root.findall('.//Entry')
-        
-        for entry in entries:
-            account_data = {}
-            
-            # Parse key-value pairs
-            for string_elem in entry.findall('String'):
-                key_elem = string_elem.find('Key')
-                value_elem = string_elem.find('Value')
-                if key_elem is not None and value_elem is not None:
-                    key = key_elem.text
-                    value = value_elem.text
-                    if key and value:
-                        # Map KeePass fields to sysPass
-                        if key.lower() == 'username':
-                            account_data['login'] = value
-                        elif key.lower() == 'password':
-                            account_data['pass'] = value
-                        elif key.lower() == 'url':
-                            account_data['url'] = value
-                        elif key.lower() == 'notes' or key.lower() == 'comments':
-                            account_data['notes'] = value
-                        else:
-                            account_data[key.lower()] = value
-            
-            # Get title for account name
-            title_elem = entry.find('Title')
-            if title_elem is not None and title_elem.text:
-                account_data['name'] = title_elem.text
-            
-            # Get group name for category
-            group_elem = entry.find('Group')
-            if group_elem is not None and group_elem.text:
-                account_data['category'] = group_elem.text
-            
-            if account_data.get('name'):
+        """Parse KeePass 2.x XML, preserving its group hierarchy as categories."""
+        root = parse_xml_safely(content)
+        if root.tag != "KeePassFile":
+            raise ValueError("File is not KeePass 2.x XML")
+        root_group = root.find("./Root/Group")
+        if root_group is None:
+            raise ValueError("KeePass XML is missing its root group")
+
+        accounts: List[Dict[str, Any]] = []
+
+        def walk_group(group, category: Optional[str] = None) -> None:
+            for entry in group.findall("Entry"):
+                fields = {
+                    item.findtext("Key", "").casefold(): item.findtext("Value", "")
+                    for item in entry.findall("String")
+                    if item.findtext("Key")
+                }
+                name = fields.get("title", "")
+                if not name:
+                    continue
+                tags = (entry.findtext("Tags") or "").replace(";", ",")
+                account_data = {
+                    "name": name,
+                    "login": fields.get("username"),
+                    "pass": fields.get("password", ""),
+                    "url": fields.get("url"),
+                    "notes": fields.get("notes") or fields.get("comments"),
+                    "client": fields.get("client"),
+                    "tags": tags,
+                }
+                if category:
+                    account_data["category"] = category
                 accounts.append(account_data)
-        
+
+            for child in group.findall("Group"):
+                child_name = child.findtext("Name") or category
+                walk_group(child, child_name)
+
+        # Entries directly inside the database root are uncategorized. Nested
+        # KeePass groups map to sysPass categories using the nearest group name.
+        walk_group(root_group)
         return accounts
     
     def _import_account(self, data: Dict[str, str]) -> Optional[Account]:
@@ -405,6 +408,10 @@ class KeePassImportService(ImportService):
         category = None
         if data.get('category'):
             category = self._get_or_create_category(data['category'])
+
+        client = None
+        if data.get('client'):
+            client = self._get_or_create_client(data['client'])
         
         # Encrypt password
         password = data.get('pass', '')
@@ -414,6 +421,7 @@ class KeePassImportService(ImportService):
             userGroupId=self._user_group_id(),
             userId=self.user_id,
             userEditId=self.user_id,
+            clientId=client.id if client else None,
             name=name,
             categoryId=category.id if category else None,
             login=data.get('login'),
@@ -425,6 +433,11 @@ class KeePassImportService(ImportService):
         
         self.db.add(account)
         self.db.flush()
+
+        tag_names = (value.strip() for value in data.get('tags', '').split(','))
+        for tag_name in filter(None, tag_names):
+            tag = self._get_or_create_tag(tag_name)
+            self.db.add(AccountToTag(accountId=account.id, tagId=tag.id))
         
         return account
 
@@ -436,11 +449,28 @@ class ExportService:
         self.db = db
         self.encryption = encryption_service
 
-    def _decrypt_for_export(self, account: Account) -> str:
+    def _decrypt_for_export(
+        self, account: Account, master_password: Optional[str] = None
+    ) -> str:
         if not account.pass_:
             return ""
-        raw = account.pass_.decode() if isinstance(account.pass_, bytes) else account.pass_
-        return self.encryption.decrypt(raw)
+        pass_text = (
+            account.pass_.decode("ascii")
+            if isinstance(account.pass_, bytes)
+            else str(account.pass_)
+        )
+        key_text = (
+            account.key.decode("ascii")
+            if isinstance(account.key, bytes)
+            else str(account.key or "")
+        )
+        if key_text.startswith("def10000"):
+            if not master_password:
+                raise ValueError(
+                    "The vault master password is required to export PHP-encrypted accounts"
+                )
+            return decrypt_account_pass(pass_text, key_text, master_password)
+        return self.encryption.decrypt(pass_text)
     
     def export_to_csv(self, account_ids: List[int] = None) -> str:
         """Export accounts to CSV format"""
@@ -617,10 +647,12 @@ class ExportService:
             root.extend(sections)
 
         hash_input = "".join(self._php_xml_fragment(node) for node in list(root) if node.tag != "Meta")
-        digest = hashlib.sha1(hash_input.encode("utf-8")).hexdigest()
+        # PHP's native XML format mandates these SHA-1 values. Integrity is
+        # separately authenticated by the HMAC-SHA-256 signature below.
+        digest = hashlib.sha1(hash_input.encode("utf-8")).hexdigest()  # lgtm[py/weak-sensitive-data-hashing]
         signing_key = export_password or hashlib.sha1(
             get_password_salt().encode("utf-8")
-        ).hexdigest()
+        ).hexdigest()  # lgtm[py/weak-sensitive-data-hashing]
         signature = hmac.new(
             signing_key.encode("utf-8"), digest.encode("ascii"), hashlib.sha256
         ).hexdigest()
@@ -630,16 +662,41 @@ class ExportService:
         body = self._php_xml_fragment(root)
         return '<?xml version="1.0" encoding="UTF-8"?>\n' + body
     
-    def export_to_keepass(self, account_ids: List[int] = None) -> str:
-        """Export to KeePass XML format"""
-        root = ET.Element('KeePassFile')
-        meta = ET.SubElement(root, 'Meta')
-        ET.SubElement(meta, 'Generator').text = 'sysPass Python'
+    def export_to_keepass(
+        self,
+        account_ids: List[int] = None,
+        master_password: Optional[str] = None,
+    ) -> str:
+        """Export plaintext KeePass 2.x interchange XML."""
+        root = ET.Element("KeePassFile")
+        meta = ET.SubElement(root, "Meta")
+        self._append_text(meta, "Generator", "pySysPass")
+        self._append_text(meta, "DatabaseName", "pySysPass Export")
+        self._append_text(
+            meta,
+            "DatabaseDescription",
+            "Accounts exported from pySysPass",
+        )
+        memory = ET.SubElement(meta, "MemoryProtection")
+        for field, value in (
+            ("ProtectTitle", "False"),
+            ("ProtectUserName", "False"),
+            ("ProtectPassword", "True"),
+            ("ProtectURL", "False"),
+            ("ProtectNotes", "False"),
+        ):
+            self._append_text(memory, field, value)
+        ET.SubElement(meta, "Binaries")
+        ET.SubElement(meta, "CustomData")
 
-        # Root group
-        root_group = ET.SubElement(root, 'Root')
-        group_elem = ET.SubElement(root_group, 'Group')
-        ET.SubElement(group_elem, 'Name').text = 'Imported from sysPass'
+        root_node = ET.SubElement(root, "Root")
+        root_group = ET.SubElement(root_node, "Group")
+        self._append_text(root_group, "UUID", self._keepass_uuid())
+        self._append_text(root_group, "Name", "pySysPass")
+        self._append_text(root_group, "Notes", "Imported from pySysPass")
+        self._append_text(root_group, "IconID", 48)
+        self._append_keepass_times(root_group)
+        self._append_text(root_group, "IsExpanded", "True")
         
         # Query accounts
         query = select(Account)
@@ -648,41 +705,160 @@ class ExportService:
         
         accounts = self.db.execute(query).scalars().all()
 
-        def add_string(entry, key: str, value: str, protect: bool = False):
-            string_elem = ET.SubElement(entry, 'String')
-            ET.SubElement(string_elem, 'Key').text = key
-            value_elem = ET.SubElement(string_elem, 'Value')
+        category_groups = {}
+
+        def group_for(account: Account):
+            if not account.categoryId:
+                return root_group
+            category = self.db.get(Category, account.categoryId)
+            if not category:
+                return root_group
+            if category.id not in category_groups:
+                group = ET.SubElement(root_group, "Group")
+                self._append_text(group, "UUID", self._keepass_uuid())
+                self._append_text(group, "Name", category.name)
+                self._append_text(group, "Notes", category.description)
+                self._append_text(group, "IconID", 48)
+                self._append_keepass_times(group)
+                self._append_text(group, "IsExpanded", "True")
+                category_groups[category.id] = group
+            return category_groups[category.id]
+
+        def add_string(entry, key: str, value: Any, protect: bool = False):
+            string_elem = ET.SubElement(entry, "String")
+            self._append_text(string_elem, "Key", key)
+            value_elem = ET.SubElement(string_elem, "Value")
             if protect:
-                value_elem.set('ProtectInMemory', 'True')
-            value_elem.text = value
+                value_elem.set("ProtectInMemory", "True")
+            value_elem.text = "" if value is None else str(value)
 
         for account in accounts:
-            entry = ET.SubElement(group_elem, 'Entry')
+            entry = ET.SubElement(group_for(account), "Entry")
+            self._append_text(entry, "UUID", self._keepass_uuid())
+            self._append_text(entry, "IconID", 0)
+            self._append_text(entry, "ForegroundColor", "")
+            self._append_text(entry, "BackgroundColor", "")
+            self._append_text(entry, "OverrideURL", "")
 
-            add_string(entry, 'Title', account.name or '')
-            if account.login:
-                add_string(entry, 'UserName', account.login)
+            tags = []
+            for account_tag in account.tags:
+                tag = self.db.get(Tag, account_tag.tagId)
+                if tag:
+                    tags.append(tag.name)
+            self._append_text(entry, "Tags", ";".join(tags))
+            self._append_keepass_times(entry, account.dateAdd, account.dateEdit)
 
-            password = ''  # nosec B105
-            if account.pass_:
-                try:
-                    password = self._decrypt_for_export(account)
-                except Exception:
-                    password = '[encrypted]'  # nosec B105
-            add_string(entry, 'Password', password, protect=True)
+            add_string(entry, "Title", account.name)
+            add_string(entry, "UserName", account.login)
+            add_string(
+                entry,
+                "Password",
+                self._decrypt_for_export(account, master_password),
+                protect=True,
+            )
+            add_string(entry, "URL", account.url)
+            add_string(entry, "Notes", account.notes)
+            if account.clientId:
+                client = self.db.get(Client, account.clientId)
+                if client:
+                    add_string(entry, "Client", client.name)
 
-            if account.url:
-                add_string(entry, 'URL', account.url)
-            if account.notes:
-                add_string(entry, 'Notes', account.notes)
+            auto_type = ET.SubElement(entry, "AutoType")
+            self._append_text(auto_type, "Enabled", "True")
+            self._append_text(auto_type, "DataTransferObfuscation", 0)
+            ET.SubElement(entry, "History")
 
-            if account.tags:
+        return ET.tostring(root, encoding='utf-8', xml_declaration=True).decode('utf-8')
+
+    def export_to_kdbx(
+        self,
+        export_password: str,
+        account_ids: List[int] = None,
+        master_password: Optional[str] = None,
+    ) -> bytes:
+        """Create a password-protected KDBX 4 database."""
+        if not export_password:
+            raise ValueError("An export password is required")
+
+        from pykeepass import create_database
+
+        query = select(Account)
+        if account_ids is not None:
+            query = query.where(Account.id.in_(account_ids))
+        accounts = self.db.execute(query).scalars().all()
+
+        with tempfile.TemporaryDirectory(prefix="pysyspass-kdbx-") as directory:
+            output_path = Path(directory) / "pysyspass_export.kdbx"
+            database = create_database(str(output_path), password=export_password)
+            database.root_group.name = "pySysPass"
+            database.root_group.notes = "Accounts exported from pySysPass"
+            category_groups = {}
+
+            for account in accounts:
+                destination = database.root_group
+                if account.categoryId:
+                    category = self.db.get(Category, account.categoryId)
+                    if category:
+                        destination = category_groups.get(category.id)
+                        if destination is None:
+                            destination = database.add_group(
+                                database.root_group,
+                                category.name,
+                                notes=category.description or "",
+                            )
+                            category_groups[category.id] = destination
+
                 tags = []
                 for account_tag in account.tags:
                     tag = self.db.get(Tag, account_tag.tagId)
                     if tag:
                         tags.append(tag.name)
-                if tags:
-                    ET.SubElement(entry, 'Tags').text = ';'.join(tags)
 
-        return ET.tostring(root, encoding='utf-8', xml_declaration=True).decode('utf-8')
+                entry = database.add_entry(
+                    destination,
+                    account.name or "",
+                    account.login or "",
+                    self._decrypt_for_export(account, master_password),
+                    url=account.url or "",
+                    notes=account.notes or "",
+                    tags=tags,
+                )
+                if account.clientId:
+                    client = self.db.get(Client, account.clientId)
+                    if client:
+                        entry.set_custom_property("Client", client.name)
+
+            database.save()
+            return output_path.read_bytes()
+
+    @staticmethod
+    def _keepass_uuid() -> str:
+        return base64.b64encode(uuid.uuid4().bytes).decode("ascii")
+
+    def _append_keepass_times(
+        self,
+        parent,
+        created: Optional[datetime] = None,
+        modified: Optional[datetime] = None,
+    ) -> None:
+        now = datetime.now(UTC)
+
+        def keepass_time(value: Optional[datetime]) -> str:
+            value = value or now
+            if value.tzinfo is None:
+                value = value.replace(tzinfo=UTC)
+            return value.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        created_at = keepass_time(created)
+        modified_at = keepass_time(modified or created)
+        times = ET.SubElement(parent, "Times")
+        for name, value in (
+            ("CreationTime", created_at),
+            ("LastModificationTime", modified_at),
+            ("LastAccessTime", modified_at),
+            ("ExpiryTime", modified_at),
+            ("Expires", "False"),
+            ("UsageCount", 0),
+            ("LocationChanged", modified_at),
+        ):
+            self._append_text(times, name, value)

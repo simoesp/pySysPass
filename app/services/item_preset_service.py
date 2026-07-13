@@ -12,7 +12,8 @@ VALID_TYPES = {"AccountPermission", "AccountPrivate", "Password", "SessionTimeou
 def _compute_hash(preset_type: str, user_id: Optional[int],
                   user_group_id: Optional[int], user_profile_id: Optional[int]) -> bytes:
     key = f"{preset_type}|{user_id}|{user_group_id}|{user_profile_id}"
-    return hashlib.sha1(key.encode()).digest()  # nosec B324 — non-crypto fingerprint
+    # PHP schema compatibility: this is a row-identity fingerprint, not security.
+    return hashlib.sha1(key.encode()).digest()  # lgtm[py/weak-sensitive-data-hashing] # nosec B324
 
 
 def _to_dict(row: ItemPreset) -> Dict[str, Any]:

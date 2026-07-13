@@ -7,7 +7,9 @@ from app.schemas.client import ClientCreate, ClientUpdate
 
 
 def make_item_hash(name: str) -> bytes:
-    return hashlib.sha1(name.encode("utf-8")).hexdigest().encode("ascii")
+    # PHP sysPass persists this exact SHA-1 hex identifier in varbinary(40).
+    # It is a lookup fingerprint, never a password or authenticity primitive.
+    return hashlib.sha1(name.encode("utf-8")).hexdigest().encode("ascii")  # lgtm[py/weak-sensitive-data-hashing]
 
 
 class CategoryService:

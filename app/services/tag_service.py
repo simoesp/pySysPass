@@ -1,8 +1,8 @@
 from typing import List, Optional
-import hashlib
 from sqlalchemy.orm import Session
 from app.models.account import Tag, AccountToTag, Account
 from app.schemas.tag import TagCreate, TagUpdate
+from app.services.category_service import make_item_hash
 
 class TagService:
     def __init__(self, db: Session):
@@ -21,7 +21,7 @@ class TagService:
         """Create a new tag"""
         tag = Tag(
             name=tag_data.name,
-            hash=hashlib.sha1(tag_data.name.encode("utf-8")).hexdigest().encode("ascii"),
+            hash=make_item_hash(tag_data.name),
         )
         if getattr(tag_data, "color", None) is not None:
             tag.color = tag_data.color
@@ -40,7 +40,7 @@ class TagService:
         
         if tag_data.name is not None:
             tag.name = tag_data.name
-            tag.hash = hashlib.sha1(tag.name.encode("utf-8")).hexdigest().encode("ascii")
+            tag.hash = make_item_hash(tag.name)
         if tag_data.color is not None:
             tag.color = tag_data.color
         

@@ -30,8 +30,17 @@ class BackupService:
     """Service for creating and managing backups"""
 
     def __init__(self, backup_dir: str = "./backups"):
-        self.backup_dir = Path(backup_dir)
+        self.backup_dir = Path(backup_dir).resolve()
         self.backup_dir.mkdir(parents=True, exist_ok=True)
+
+    def resolve_backup_path(self, filename: str) -> Path:
+        """Resolve one direct-child ZIP filename inside the backup directory."""
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*\.zip", filename):
+            raise ValueError("Invalid backup filename")
+        path = (self.backup_dir / filename).resolve()
+        if path.parent != self.backup_dir:
+            raise ValueError("Invalid backup filename")
+        return path
 
     # ── DB dump ──────────────────────────────────────────────────────────────
 
@@ -101,12 +110,26 @@ class BackupService:
 
     def _extract_archive(self, archive_path: Path, target_dir: Path) -> None:
         """Extract an archive while blocking path traversal entries."""
+        target_dir = target_dir.resolve()
         with zipfile.ZipFile(archive_path, "r") as archive:
             for member in archive.infolist():
-                dest_path = (target_dir / member.filename).resolve()
-                if not str(dest_path).startswith(str(target_dir.resolve())):
+                member_path = Path(member.filename)
+                if member_path.is_absolute() or ".." in member_path.parts:
                     raise RuntimeError("Backup archive contains invalid paths")
-            archive.extractall(target_dir)
+                dest_path = (target_dir / member_path).resolve()
+                try:
+                    dest_path.relative_to(target_dir)
+                except ValueError as exc:
+                    raise RuntimeError("Backup archive contains invalid paths") from exc
+                # ZIP symlinks can redirect later members outside the staging tree.
+                if (member.external_attr >> 16) & 0o170000 == 0o120000:
+                    raise RuntimeError("Backup archive contains symbolic links")
+                if member.is_dir():
+                    dest_path.mkdir(parents=True, exist_ok=True)
+                    continue
+                dest_path.parent.mkdir(parents=True, exist_ok=True)
+                with archive.open(member, "r") as source, dest_path.open("wb") as dest:
+                    shutil.copyfileobj(source, dest)
 
     # ── Public API ───────────────────────────────────────────────────────────
 
@@ -203,12 +226,11 @@ class BackupService:
         backups.sort(key=lambda x: x['created_at'], reverse=True)
         return backups
     
-    def restore_backup(self, backup_path: str, db_url: Optional[str] = None) -> Dict:
+    def restore_backup(self, filename: str, db_url: Optional[str] = None) -> Dict:
         """Restore from a backup archive."""
-        if not os.path.exists(backup_path):
-            raise FileNotFoundError(f"Backup not found: {backup_path}")
-
-        archive_path = Path(backup_path)
+        archive_path = self.resolve_backup_path(filename)
+        if not archive_path.exists():
+            raise FileNotFoundError("Backup not found")
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         restore_dir = self.backup_dir / f"restore_{timestamp}"
         staged_data_dir = self.backup_dir / f"data_restore_{timestamp}"
@@ -258,12 +280,13 @@ class BackupService:
             if rollback_data_dir.exists():
                 shutil.rmtree(rollback_data_dir, ignore_errors=True)
     
-    def delete_backup(self, backup_path: str) -> bool:
+    def delete_backup(self, filename: str) -> bool:
         """Delete a backup file"""
-        if not os.path.exists(backup_path):
+        backup_path = self.resolve_backup_path(filename)
+        if not backup_path.exists():
             return False
-        
-        os.remove(backup_path)
+
+        backup_path.unlink()
         return True
     
     def cleanup_old_backups(self, days: int = 30) -> int:

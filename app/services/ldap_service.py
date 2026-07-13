@@ -8,6 +8,7 @@ logger = logging.getLogger(__name__)
 try:
     from ldap3 import Server, Connection, ALL, SUBTREE, SIMPLE, AUTO_BIND_NO_TLS
     from ldap3.core.exceptions import LDAPException
+    from ldap3.utils.conv import escape_filter_chars
     _LDAP_AVAILABLE = True
 except ImportError:
     _LDAP_AVAILABLE = False
@@ -27,6 +28,16 @@ except ImportError:
 
     class LDAPException(Exception):
         pass
+
+    def escape_filter_chars(value: str) -> str:
+        """Dependency-free RFC 4515 fallback used without ldap3."""
+        return (
+            value.replace("\\", r"\5c")
+            .replace("*", r"\2a")
+            .replace("(", r"\28")
+            .replace(")", r"\29")
+            .replace("\x00", r"\00")
+        )
 
 
 class LdapService:
@@ -99,12 +110,11 @@ class LdapService:
             results.append({"dn": entry.entry_dn, "attributes": attr_dict})
         return results
 
-    def authenticate(self, username: str, password: str,
-                     user_filter: str = "(uid={username})") -> Optional[str]:
+    def authenticate(self, username: str, password: str) -> Optional[str]:
         """Authenticate user; returns the user's DN on success, None on failure."""
         if not self._conn or not self._conn.bound:
             self.connect()
-        search_filter = user_filter.replace("{username}", username)
+        search_filter = f"(uid={escape_filter_chars(username)})"
         entries = self.search(filter_str=search_filter, attributes=["dn"])
         if not entries:
             return None
@@ -125,21 +135,19 @@ class LdapService:
         except LDAPException:
             return None
 
-    def get_user_info(self, username: str,
-                      user_filter: str = "(uid={username})") -> Optional[Dict]:
+    def get_user_info(self, username: str) -> Optional[Dict]:
         """Fetch a single user's attributes from LDAP."""
-        search_filter = user_filter.replace("{username}", username)
+        search_filter = f"(uid={escape_filter_chars(username)})"
         results = self.search(
             filter_str=search_filter,
             attributes=["cn", "sn", "givenName", "mail", "uid", "memberOf"],
         )
         return results[0] if results else None
 
-    def import_users(self, user_filter: str = "(objectClass=person)",
-                     attributes: List[str] = None) -> List[Dict]:
+    def import_users(self, attributes: List[str] = None) -> List[Dict]:
         """Return normalised user dicts suitable for import into sysPass."""
         attrs = attributes or ["cn", "sn", "givenName", "mail", "uid", "sAMAccountName"]
-        raw = self.search(filter_str=user_filter, attributes=attrs)
+        raw = self.search(filter_str="(objectClass=person)", attributes=attrs)
         users = []
         for entry in raw:
             a = entry["attributes"]

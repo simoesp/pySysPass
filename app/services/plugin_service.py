@@ -5,6 +5,7 @@ from datetime import datetime
 import importlib.util
 import json
 from pathlib import Path
+import re
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
@@ -105,21 +106,48 @@ class PluginService:
 
     def __init__(self, db: Optional[Session] = None, plugins_dir: str = "./plugins"):
         self.db = db
-        self.plugins_dir = Path(plugins_dir)
+        self.plugins_dir = Path(plugins_dir).resolve()
         self.plugins_dir.mkdir(parents=True, exist_ok=True)
         self.loaded_plugins: Dict[str, Plugin] = {}
         self.plugin_info: Dict[str, PluginInfo] = {}
 
     # ── Discovery and persistence ────────────────────────────────────────
 
+    @staticmethod
+    def _validated_plugin_name(plugin_name: str) -> str:
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", plugin_name):
+            raise ValueError("Invalid plugin name")
+        return plugin_name
+
+    def _plugin_dir(self, plugin_name: str) -> Path:
+        name = self._validated_plugin_name(plugin_name)
+        path = (self.plugins_dir / name).resolve()
+        if path.parent != self.plugins_dir:
+            raise ValueError("Invalid plugin path")
+        return path
+
     def _manifest_path(self, plugin_name: str) -> Path:
-        return self.plugins_dir / plugin_name / "manifest.json"
+        return self._plugin_dir(plugin_name) / "manifest.json"
 
     def _module_path(self, plugin_name: str, manifest: Dict[str, Any]) -> Path:
         module_name = manifest.get("module") or f"{plugin_name}.py"
-        return self.plugins_dir / plugin_name / module_name
+        if not isinstance(module_name, str) or not module_name.endswith(".py"):
+            raise ValueError("Invalid plugin module")
+        plugin_dir = self._plugin_dir(plugin_name)
+        module_path = (plugin_dir / module_name).resolve()
+        try:
+            module_path.relative_to(plugin_dir)
+        except ValueError as exc:
+            raise ValueError("Plugin module must remain inside its directory") from exc
+        return module_path
 
     def _load_manifest(self, manifest_path: Path) -> Dict[str, Any]:
+        manifest_path = manifest_path.resolve()
+        if (
+            manifest_path.name != "manifest.json"
+            or manifest_path.parent.parent != self.plugins_dir
+        ):
+            raise ValueError("Invalid plugin manifest path")
         with manifest_path.open("r", encoding="utf-8") as f:
             manifest = json.load(f)
         if not manifest.get("name"):
@@ -178,6 +206,8 @@ class PluginService:
                 continue
             try:
                 manifest = self._load_manifest(manifest_path)
+                if manifest.get("name") != plugin_dir.name:
+                    continue
                 manifest["path"] = str(plugin_dir)
                 manifest["hooks"] = manifest.get("hooks") or []
                 manifests.append(manifest)
@@ -374,7 +404,7 @@ class PluginService:
                     self.db.delete(row)
                 self.db.commit()
 
-        plugin_dir = self.plugins_dir / plugin_name
+        plugin_dir = self._plugin_dir(plugin_name)
         if plugin_dir.exists():
             import shutil
 

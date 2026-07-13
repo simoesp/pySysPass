@@ -1,5 +1,5 @@
 """Backup API — create, list, download, restore, and delete backups."""
-from pathlib import Path
+import logging
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -15,21 +15,19 @@ from app.services.plugin_service import PluginService
 router = APIRouter(prefix="/backup", tags=["Backup"])
 
 BACKUP_DIR = "./backups"
+logger = logging.getLogger(__name__)
 
 
 def _svc() -> BackupService:
     return BackupService(backup_dir=BACKUP_DIR)
 
 
-def _safe_path(filename: str) -> Path:
+def _safe_path(filename: str):
     """Resolve filename inside backup dir, reject path traversal."""
-    path = (Path(BACKUP_DIR) / filename).resolve()
-    base = Path(BACKUP_DIR).resolve()
-    if not str(path).startswith(str(base)):
-        raise HTTPException(status_code=400, detail="Invalid filename")
-    if path.suffix != ".zip":
-        raise HTTPException(status_code=400, detail="Only .zip backups are served")
-    return path
+    try:
+        return _svc().resolve_backup_path(filename)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid backup filename") from exc
 
 
 @router.get("/")
@@ -51,7 +49,8 @@ async def create_backup(
         PluginService(db).call_plugin_hook("on_backup_created", payload=result, actor_user_id=current_user.get("id"))
         return result
     except RuntimeError as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        logger.exception("Backup creation failed")
+        raise HTTPException(status_code=500, detail="Backup creation failed") from exc
 
 
 @router.get("/{filename}/download")
@@ -74,11 +73,12 @@ async def restore_backup(
     if not path.exists():
         raise HTTPException(status_code=404, detail="Backup not found")
     try:
-        result = _svc().restore_backup(str(path), db_url=settings.DATABASE_URL)
+        result = _svc().restore_backup(filename, db_url=settings.DATABASE_URL)
         PluginService(db).call_plugin_hook("on_backup_restored", payload=result, actor_user_id=current_user.get("id"))
         return result
     except RuntimeError as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        logger.exception("Backup restore failed")
+        raise HTTPException(status_code=500, detail="Backup restore failed") from exc
 
 
 @router.delete("/{filename}")
@@ -87,5 +87,5 @@ async def delete_backup(filename: str, current_user=Depends(require_permission('
     path = _safe_path(filename)
     if not path.exists():
         raise HTTPException(status_code=404, detail="Backup not found")
-    path.unlink()
+    _svc().delete_backup(filename)
     return {"message": "Backup deleted"}

@@ -1,5 +1,6 @@
 """LDAP API — test connection and import users."""
 from typing import Dict, List, Optional
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -10,6 +11,7 @@ from app.services.config_service import ConfigService
 from app.services.ldap_service import LdapService, LdapImportService
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _ldap_from_config(db: Session) -> LdapService:
@@ -37,7 +39,6 @@ class LdapTestBody(BaseModel):
 
 
 class LdapImportBody(BaseModel):
-    user_filter: str = "(objectClass=person)"
     default_group_id: Optional[int] = None
 
 
@@ -62,13 +63,13 @@ async def test_ldap_connection(
         svc.connect()
         svc.disconnect()
         return {"success": True, "detail": "Connection successful."}
-    except Exception as exc:
-        return {"success": False, "detail": str(exc)}
+    except Exception:
+        logger.exception("LDAP connection test failed")
+        return {"success": False, "detail": "LDAP connection failed."}
 
 
 @router.get("/ldap/users")
 async def list_ldap_users(
-    user_filter: str = "(objectClass=person)",
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_general')),
 ) -> List[Dict]:
@@ -76,11 +77,12 @@ async def list_ldap_users(
     svc = _ldap_from_config(db)
     try:
         svc.connect()
-        users = svc.import_users(user_filter=user_filter)
+        users = svc.import_users()
         svc.disconnect()
         return users
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
+        logger.exception("LDAP user preview failed")
+        raise HTTPException(status_code=502, detail="LDAP query failed") from exc
 
 
 @router.post("/ldap/import")
@@ -95,8 +97,9 @@ async def import_ldap_users(
     group_id = body.default_group_id or cfg.ldap_defaultgroup or 1
     try:
         ldap_svc.connect()
-        ldap_users = ldap_svc.import_users(user_filter=body.user_filter)
+        ldap_users = ldap_svc.import_users()
         ldap_svc.disconnect()
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
+        logger.exception("LDAP user import query failed")
+        raise HTTPException(status_code=502, detail="LDAP query failed") from exc
     return LdapImportService(db, user_group_id=group_id).import_ldap_users(ldap_users)
