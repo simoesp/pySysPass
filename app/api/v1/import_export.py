@@ -47,9 +47,9 @@ async def import_csv(
         data = service.parse_csv(content_str, delimiter=delimiter)
         stats = service.import_accounts(data)
         return {'format': 'csv', 'stats': stats, 'errors': service.errors[:10]}
-    except Exception as exc:
+    except Exception:
         logger.exception("CSV import failed")
-        raise HTTPException(status_code=400, detail="CSV import failed") from exc
+        raise HTTPException(status_code=400, detail="CSV import failed")
 
 
 @router.post("/import/xml")
@@ -82,9 +82,9 @@ async def import_xml(
         data = service.parse_xml(content_str)
         stats = service.import_accounts(data)
         return {'format': 'xml', 'stats': stats, 'errors': service.errors[:10]}
-    except Exception as exc:
+    except Exception:
         logger.exception("sysPass XML import failed")
-        raise HTTPException(status_code=400, detail="sysPass XML import failed") from exc
+        raise HTTPException(status_code=400, detail="sysPass XML import failed")
 
 
 @router.post("/import/keepass")
@@ -107,9 +107,9 @@ async def import_keepass(
         data = service.parse_keepass(content_str)
         stats = service.import_accounts(data)
         return {'format': 'keepass', 'stats': stats, 'errors': service.errors[:10]}
-    except Exception as exc:
+    except Exception:
         logger.exception("KeePass XML import failed")
-        raise HTTPException(status_code=400, detail="KeePass XML import failed") from exc
+        raise HTTPException(status_code=400, detail="KeePass XML import failed")
 
 
 @router.get("/export/csv")

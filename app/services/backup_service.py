@@ -35,7 +35,16 @@ class BackupService:
 
     def resolve_backup_path(self, filename: str) -> Path:
         """Resolve one direct-child ZIP filename inside the backup directory."""
-        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*\.zip", filename):
+        allowed = frozenset(
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-"
+        )
+        if (
+            not filename
+            or len(filename) > 255
+            or not filename[0].isalnum()
+            or not filename.endswith(".zip")
+            or any(character not in allowed for character in filename)
+        ):
             raise ValueError("Invalid backup filename")
         path = (self.backup_dir / filename).resolve()
         if path.parent != self.backup_dir:

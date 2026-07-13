@@ -7,6 +7,7 @@ from app.models.custom_field import CustomFieldValue
 from app.core.security import EncryptionService
 from datetime import UTC, datetime
 import csv
+import logging
 from pathlib import Path
 import tempfile
 import xml.etree.ElementTree as ET
@@ -29,6 +30,8 @@ from app.core.defuse_compat import (
 from app.core.syspass_runtime_config import get_password_salt
 from app.services.auth_service import get_password_hash
 from app.services.category_service import make_item_hash
+
+logger = logging.getLogger(__name__)
 
 
 class ImportService:
@@ -109,8 +112,9 @@ class ImportService:
                     self.imported_accounts.append(account)
                 else:
                     stats['skipped'] += 1
-            except Exception as e:
-                self.errors.append(str(e))
+            except Exception:
+                logger.exception("Account import row failed")
+                self.errors.append("Account import failed")
                 stats['failed'] += 1
         
         self.db.commit()
