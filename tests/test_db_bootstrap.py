@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from sqlalchemy import create_engine, text
 from sqlalchemy.pool import StaticPool
 
@@ -121,7 +123,7 @@ def test_execute_schema_statements_runs_each_statement():
 
 
 def test_bootstrap_schema_uses_matching_integer_sizes_for_user_foreign_keys():
-    schema = open("schemas/dbstructure.sql", "r", encoding="utf-8").read()
+    schema = Path("schemas/dbstructure.sql").read_text(encoding="utf-8")
 
     assert "`id`              smallint(5) unsigned NOT NULL AUTO_INCREMENT" in schema
     assert "`userId`             smallint(5) unsigned  NOT NULL" in schema

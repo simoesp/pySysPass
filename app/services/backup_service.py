@@ -34,7 +34,7 @@ class BackupService:
         self.backup_dir.mkdir(parents=True, exist_ok=True)
 
     def resolve_backup_path(self, filename: str) -> Path:
-        """Resolve one direct-child ZIP filename inside the backup directory."""
+        """Select an existing direct-child ZIP without building a user path."""
         allowed = frozenset(
             "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-"
         )
@@ -46,10 +46,16 @@ class BackupService:
             or any(character not in allowed for character in filename)
         ):
             raise ValueError("Invalid backup filename")
-        path = (self.backup_dir / filename).resolve()
-        if path.parent != self.backup_dir:
-            raise ValueError("Invalid backup filename")
-        return path
+        for candidate in self.backup_dir.iterdir():
+            if candidate.name != filename:
+                continue
+            if candidate.is_symlink() or not candidate.is_file():
+                raise ValueError("Invalid backup filename")
+            path = candidate.resolve()
+            if path.parent != self.backup_dir:
+                raise ValueError("Invalid backup filename")
+            return path
+        raise FileNotFoundError("Backup not found")
 
     # ── DB dump ──────────────────────────────────────────────────────────────
 
@@ -238,8 +244,6 @@ class BackupService:
     def restore_backup(self, filename: str, db_url: Optional[str] = None) -> Dict:
         """Restore from a backup archive."""
         archive_path = self.resolve_backup_path(filename)
-        if not archive_path.exists():
-            raise FileNotFoundError("Backup not found")
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         restore_dir = self.backup_dir / f"restore_{timestamp}"
         staged_data_dir = self.backup_dir / f"data_restore_{timestamp}"
@@ -292,9 +296,6 @@ class BackupService:
     def delete_backup(self, filename: str) -> bool:
         """Delete a backup file"""
         backup_path = self.resolve_backup_path(filename)
-        if not backup_path.exists():
-            return False
-
         backup_path.unlink()
         return True
     

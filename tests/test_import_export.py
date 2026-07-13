@@ -1,4 +1,7 @@
 import xml.etree.ElementTree as ET
+import base64
+import json
+from pathlib import Path
 
 import pytest
 
@@ -6,12 +9,24 @@ from app.core.security import EncryptionService
 from app.core.defuse_compat import decrypt_with_password
 from app.models.account import Account, AccountToTag, Category, Client, Tag
 from app.services.category_service import make_item_hash
-from app.services.import_export_service import ExportService, XmlImportService
+from app.services.import_export_service import (
+    ExportService,
+    KeePassImportService,
+    XmlImportService,
+)
+
+
+PHP_CRYPTO_FIXTURE = Path(__file__).parent / "fixtures" / "php_syspass_3211_crypto.json"
+PHP_KEEPASS_FIXTURE = Path("../phpSysPass/tests/res/import/data_keepass.xml")
 
 
 def test_keepass_export_generates_valid_string_entries(db_session):
     encryption = EncryptionService("test-encryption-key-32bytes!!")
     encrypted_password = encryption.encrypt("secret-pass").encode("utf-8")
+    category = Category(id=1, name="Infrastructure", hash=make_item_hash("Infrastructure"))
+    client = Client(id=1, name="Example Client", hash=make_item_hash("Example Client"))
+    tag = Tag(id=1, name="production", hash=make_item_hash("production"))
+    db_session.add_all([category, client, tag])
 
     account = Account(
         id=1,
@@ -28,6 +43,7 @@ def test_keepass_export_generates_valid_string_entries(db_session):
         notes="Imported notes",
     )
     db_session.add(account)
+    db_session.add(AccountToTag(accountId=account.id, tagId=tag.id))
     db_session.commit()
 
     xml_output = ExportService(db_session, encryption).export_to_keepass()
@@ -35,6 +51,11 @@ def test_keepass_export_generates_valid_string_entries(db_session):
 
     entry = root.find(".//Entry")
     assert entry is not None
+    assert root.findtext("./Meta/Generator") == "pySysPass"
+    assert entry.find("Times") is not None
+    assert len(base64.b64decode(entry.findtext("UUID"))) == 16
+    assert root.findtext("./Root/Group/Group/Name") == "Infrastructure"
+    assert entry.findtext("Tags") == "production"
 
     values = {}
     for string_elem in entry.findall("String"):
@@ -47,6 +68,37 @@ def test_keepass_export_generates_valid_string_entries(db_session):
     assert values["Password"] == "secret-pass"
     assert values["URL"] == "https://example.com"
     assert values["Notes"] == "Imported notes"
+    assert values["Client"] == "Example Client"
+    assert "[encrypted]" not in xml_output
+
+    parsed = KeePassImportService(db_session, encryption, 1).parse_keepass(xml_output)
+    assert parsed == [{
+        "name": "Demo Account",
+        "login": "alice",
+        "pass": "secret-pass",
+        "url": "https://example.com",
+        "notes": "Imported notes",
+        "client": "Example Client",
+        "tags": "production",
+        "category": "Infrastructure",
+    }]
+
+
+def test_keepass_parser_accepts_upstream_php_fixture():
+    if not PHP_KEEPASS_FIXTURE.exists():
+        pytest.skip("../phpSysPass KeePass fixture is not available")
+
+    parsed = KeePassImportService(None, None, 1).parse_keepass(
+        PHP_KEEPASS_FIXTURE.read_text(encoding="utf-8")
+    )
+
+    assert len(parsed) == 5
+    assert parsed[0]["name"] == "Sample Entry"
+    assert parsed[0]["pass"] == "Password"
+    assert {item.get("category") for item in parsed if item.get("category")} == {
+        "Linux",
+        "Windows",
+    }
 
 
 def test_php_native_protected_xml_round_trip(db_session, test_user):
@@ -148,3 +200,67 @@ def test_php_native_protected_xml_round_trip(db_session, test_user):
         imported.key.decode("ascii"),
         master_password,
     ) == "native-secret"
+
+
+def test_keepass_export_decrypts_php_authored_password(db_session, test_user, tmp_path):
+    from pykeepass import PyKeePass
+    from pykeepass.exceptions import CredentialsError
+
+    fixture = json.loads(PHP_CRYPTO_FIXTURE.read_text(encoding="utf-8"))
+    fixture_account = fixture["account"]
+    master_password = fixture["known_values"]["master_password"]
+    category = Category(id=1, name="PHP Category", hash=make_item_hash("PHP Category"))
+    client = Client(id=1, name="PHP Client", hash=make_item_hash("PHP Client"))
+    tag = Tag(id=1, name="php-authored", hash=make_item_hash("php-authored"))
+    db_session.add_all([category, client, tag])
+    account = Account(
+        id=99,
+        userGroupId=test_user.userGroupId,
+        userId=test_user.id,
+        userEditId=test_user.id,
+        clientId=client.id,
+        categoryId=category.id,
+        name=fixture_account["name"],
+        pass_=fixture_account["pass"].encode("ascii"),
+        key=fixture_account["key"].encode("ascii"),
+        notes="PHP-authored Defuse fixture",
+    )
+    db_session.add(account)
+    db_session.add(AccountToTag(accountId=account.id, tagId=tag.id))
+    db_session.commit()
+
+    with pytest.raises(ValueError, match="master password"):
+        ExportService(db_session, EncryptionService("fallback-key")).export_to_keepass()
+
+    xml_output = ExportService(
+        db_session, EncryptionService("fallback-key")
+    ).export_to_keepass(master_password=master_password)
+    values = {
+        item.findtext("Key"): item.findtext("Value")
+        for item in ET.fromstring(xml_output).findall(".//Entry/String")
+    }
+
+    assert values["Password"] == fixture["known_values"]["account_password"]
+    assert "[encrypted]" not in xml_output
+
+    export_password = "SeparateExport!2026"
+    kdbx_content = ExportService(
+        db_session, EncryptionService("fallback-key")
+    ).export_to_kdbx(
+        export_password,
+        master_password=master_password,
+    )
+    output_path = tmp_path / "export.kdbx"
+    output_path.write_bytes(kdbx_content)
+
+    with pytest.raises(CredentialsError):
+        PyKeePass(str(output_path), password="wrong-export-password")
+
+    database = PyKeePass(str(output_path), password=export_password)
+    entry = database.entries[0]
+    assert database.version[0] == 4
+    assert entry.title == fixture_account["name"]
+    assert entry.password == fixture["known_values"]["account_password"]
+    assert entry.group.name == "PHP Category"
+    assert entry.tags == ["php-authored"]
+    assert entry.get_custom_property("Client") == "PHP Client"

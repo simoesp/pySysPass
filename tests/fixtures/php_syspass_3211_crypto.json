@@ -1,0 +1,39 @@
+{
+  "source": {
+    "application": "sysPass",
+    "version": "3.2.11",
+    "authored_by": "PHP account/saveCreate"
+  },
+  "known_values": {
+    "login_password": "qazwsx!!",
+    "master_password": "QazWsxEdcRfvTgb",
+    "account_password": "TestPass123!",
+    "password_salt": "269d86217a7628d6a586dd99065ffd3c0934f92560b2fc3821ab6fadc30d"
+  },
+  "config": {
+    "masterPwd": "$2y$10$6LB.JqP4PjHKUcJjXyxUguGivTUCZ2jYBx7cVRxb3ApvJmQF65CaO"
+  },
+  "user": {
+    "id": 1,
+    "login": "admin",
+    "pass": "$2y$10$CQOhYeylZlDA.DXf9LTc6eXrRH14u8wmqtsn7g0XvcRPMhVteFovm",
+    "mPass": "def5020080834952f44bd49a1b4917b6ab8bbfed256d6b1c21d6c36b89f89fc6eaaa169f31097fb17c03168e177720bd9e8c59f592b0ee1782e12f95df4159b090f28549e9d89631182388fc3d68c3e561579f107f32893deefc4892c3e5aaf009752a",
+    "mKey": "def10000def50200db0337646dbeff77f96335d1eef8c75fdb6218909c6a020139b03a646af19e073a03b20ac0112009812b20e97ae94b0263c18090730ff8ca2a8beeef059266e76c62135d94886801121fb02ff6a5dfcd17fd3b68fb419a81ca1306a84537fa3b5e62d9ca8b21455acd0506a1b9cd85c6b381b4d19b7784576e69ffa3e2bba36bc72b460ea988d9c819da8262b8521d6026e706305a9d9342ef703eb2baa7ac00d6a42cc3933c149f49c8c1e3d2b7177df9616cf48f46c0a97349451691537f57cd561edc54e6ec31a9d264af0f3b4220c5b51cf74cc36a989b65acc6477f2eaab576b384e2c02bb59b7ef56e1c9337686be1711e1155c04d",
+    "userProfileId": 1
+  },
+  "profile": {
+    "id": 1,
+    "name": "Admin",
+    "profile_base64": "TzoyNDoiU1BcRGF0YU1vZGVsXFByb2ZpbGVEYXRhIjozMDp7czoxMDoiACoAYWNjVmlldyI7YjowO3M6MTQ6IgAqAGFjY1ZpZXdQYXNzIjtiOjA7czoxNzoiACoAYWNjVmlld0hpc3RvcnkiO2I6MDtzOjEwOiIAKgBhY2NFZGl0IjtiOjA7czoxNDoiACoAYWNjRWRpdFBhc3MiO2I6MDtzOjk6IgAqAGFjY0FkZCI7YjowO3M6MTI6IgAqAGFjY0RlbGV0ZSI7YjowO3M6MTE6IgAqAGFjY0ZpbGVzIjtiOjA7czoxMzoiACoAYWNjUHJpdmF0ZSI7YjowO3M6MTg6IgAqAGFjY1ByaXZhdGVHcm91cCI7YjowO3M6MTY6IgAqAGFjY1Blcm1pc3Npb24iO2I6MDtzOjE3OiIAKgBhY2NQdWJsaWNMaW5rcyI7YjowO3M6MTg6IgAqAGFjY0dsb2JhbFNlYXJjaCI7YjowO3M6MTY6IgAqAGNvbmZpZ0dlbmVyYWwiO2I6MDtzOjE5OiIAKgBjb25maWdFbmNyeXB0aW9uIjtiOjA7czoxNToiACoAY29uZmlnQmFja3VwIjtiOjA7czoxNToiACoAY29uZmlnSW1wb3J0IjtiOjA7czoxMToiACoAbWdtVXNlcnMiO2I6MDtzOjEyOiIAKgBtZ21Hcm91cHMiO2I6MDtzOjE0OiIAKgBtZ21Qcm9maWxlcyI7YjowO3M6MTY6IgAqAG1nbUNhdGVnb3JpZXMiO2I6MDtzOjE1OiIAKgBtZ21DdXN0b21lcnMiO2I6MDtzOjE1OiIAKgBtZ21BcGlUb2tlbnMiO2I6MDtzOjE3OiIAKgBtZ21QdWJsaWNMaW5rcyI7YjowO3M6MTQ6IgAqAG1nbUFjY291bnRzIjtiOjA7czoxMDoiACoAbWdtVGFncyI7YjowO3M6MTE6IgAqAG1nbUZpbGVzIjtiOjA7czoxNzoiACoAbWdtSXRlbXNQcmVzZXQiO2I6MDtzOjY6IgAqAGV2bCI7YjowO3M6MTg6IgAqAG1nbUN1c3RvbUZpZWxkcyI7YjowO30="
+  },
+  "account": {
+    "id": 2,
+    "name": "PyTest Account",
+    "pass": "def502007f01982ecc1d3e86835d95cd00821c303e4d1694cd0cb0ecb237faa97c25d33dc7359c815c305fa7a6dc84d2d0dd987750dbbc9a081bc95c0e3b6d1a400e43d24f8127a13312443e400ccd01d7add35fa5cbfe0999a29d41c4a1d4f8",
+    "key": "def10000def50200d77c9926a54896e091a7ee9eb1dfbf4a643a4eb646f28c5af1e6e67031cac9ed0080fe6e148a00bfeda527498ffdb4e392749ef288c639047073efb891d50349579a5fc79d1779ad019b537db07fb2a2d70895a93411bb74d7350e9873d93c4c37761fadcc41d53959ad35082c56c79dabb112fcebc45227833c9733aa0102084a1293dc8c0b2ecd8bdeac05fa4634aae1f5e90a9a3d76b344cb20868f9dec7471dabea95e1b2c2cdf426ca1137bfbe70cbf53bfd66ee28389becfa2e7eafd190f963fd32ba733fd993f03645545b28b2460170d914a0ad47f5663f2456aad14887b26b73cdee0828bf0c4463ff4327106be8c6709e93174",
+    "clientId": 1,
+    "categoryId": 1,
+    "userId": 1,
+    "userGroupId": 1
+  }
+}

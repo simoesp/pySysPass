@@ -5,7 +5,6 @@ from datetime import datetime
 import importlib.util
 import json
 from pathlib import Path
-import re
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
@@ -115,39 +114,67 @@ class PluginService:
 
     @staticmethod
     def _validated_plugin_name(plugin_name: str) -> str:
-        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", plugin_name):
+        allowed = frozenset(
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
+        )
+        if (
+            not plugin_name
+            or len(plugin_name) > 128
+            or not plugin_name[0].isalnum()
+            or any(character not in allowed for character in plugin_name)
+        ):
             raise ValueError("Invalid plugin name")
         return plugin_name
 
     def _plugin_dir(self, plugin_name: str) -> Path:
         name = self._validated_plugin_name(plugin_name)
-        path = (self.plugins_dir / name).resolve()
-        if path.parent != self.plugins_dir:
-            raise ValueError("Invalid plugin path")
-        return path
+        for candidate in self.plugins_dir.iterdir():
+            if candidate.name != name:
+                continue
+            if candidate.is_symlink() or not candidate.is_dir():
+                raise ValueError("Invalid plugin path")
+            path = candidate.resolve()
+            if path.parent != self.plugins_dir:
+                raise ValueError("Invalid plugin path")
+            return path
+        raise FileNotFoundError("Plugin directory not found")
 
     def _manifest_path(self, plugin_name: str) -> Path:
-        return self._plugin_dir(plugin_name) / "manifest.json"
+        plugin_dir = self._plugin_dir(plugin_name)
+        for candidate in plugin_dir.iterdir():
+            if candidate.name == "manifest.json" and candidate.is_file():
+                return candidate
+        raise FileNotFoundError("Plugin manifest not found")
 
     def _module_path(self, plugin_name: str, manifest: Dict[str, Any]) -> Path:
         module_name = manifest.get("module") or f"{plugin_name}.py"
-        if not isinstance(module_name, str) or not module_name.endswith(".py"):
-            raise ValueError("Invalid plugin module")
-        plugin_dir = self._plugin_dir(plugin_name)
-        module_path = (plugin_dir / module_name).resolve()
-        try:
-            module_path.relative_to(plugin_dir)
-        except ValueError as exc:
-            raise ValueError("Plugin module must remain inside its directory") from exc
-        return module_path
-
-    def _load_manifest(self, manifest_path: Path) -> Dict[str, Any]:
-        manifest_path = manifest_path.resolve()
         if (
-            manifest_path.name != "manifest.json"
-            or manifest_path.parent.parent != self.plugins_dir
+            not isinstance(module_name, str)
+            or not module_name.endswith(".py")
         ):
-            raise ValueError("Invalid plugin manifest path")
+            raise ValueError("Invalid plugin module")
+        module_stem = module_name[:-3]
+        try:
+            self._validated_plugin_name(module_stem)
+        except ValueError as exc:
+            raise ValueError("Invalid plugin module") from exc
+        plugin_dir = self._plugin_dir(plugin_name)
+        for candidate in plugin_dir.iterdir():
+            if candidate.name == module_name and candidate.is_file():
+                return candidate
+        raise FileNotFoundError("Plugin module not found")
+
+    def _load_manifest(self, plugin_dir: Path) -> Dict[str, Any]:
+        manifest_path = next(
+            (
+                candidate
+                for candidate in plugin_dir.iterdir()
+                if candidate.name == "manifest.json" and candidate.is_file()
+            ),
+            None,
+        )
+        if manifest_path is None:
+            raise FileNotFoundError("Plugin manifest not found")
         with manifest_path.open("r", encoding="utf-8") as f:
             manifest = json.load(f)
         if not manifest.get("name"):
@@ -205,13 +232,13 @@ class PluginService:
             if not manifest_path.exists():
                 continue
             try:
-                manifest = self._load_manifest(manifest_path)
+                manifest = self._load_manifest(plugin_dir)
                 if manifest.get("name") != plugin_dir.name:
                     continue
                 manifest["path"] = str(plugin_dir)
                 manifest["hooks"] = manifest.get("hooks") or []
                 manifests.append(manifest)
-            except (OSError, json.JSONDecodeError):
+            except (OSError, ValueError, json.JSONDecodeError):
                 continue
         return manifests
 
@@ -280,13 +307,12 @@ class PluginService:
 
         self.sync_plugins()
         info = self.plugin_info.get(plugin_name)
-        manifest_path = self._manifest_path(plugin_name)
-        if not manifest_path.exists():
+        try:
+            plugin_dir = self._plugin_dir(plugin_name)
+            manifest = self._load_manifest(plugin_dir)
+            module_path = self._module_path(plugin_name, manifest)
+        except FileNotFoundError:
             return None
-        manifest = self._load_manifest(manifest_path)
-        module_path = self._module_path(plugin_name, manifest)
-        if not module_path.exists():
-            raise RuntimeError(f"Plugin module not found for {plugin_name}")
 
         spec = importlib.util.spec_from_file_location(f"plugin_{plugin_name}", module_path)
         if spec is None or spec.loader is None:

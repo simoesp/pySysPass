@@ -50,7 +50,7 @@ def test_restore_backup_restores_data_and_db(tmp_path, monkeypatch):
 
     monkeypatch.setattr(service, "_try_mysql_restore", fake_mysql_restore)
 
-    result = service.restore_backup(str(archive_path), db_url="mysql+pymysql://u:p@localhost:3306/db")
+    result = service.restore_backup(archive_path.name, db_url="mysql+pymysql://u:p@localhost:3306/db")
 
     assert result["filename"] == "restore.zip"
     assert result["db_restored"] is True
@@ -71,7 +71,33 @@ def test_restore_backup_requires_db_client_for_database_dump(tmp_path, monkeypat
     monkeypatch.setattr(service, "_try_mysql_restore", lambda db_url, source: False)
 
     with pytest.raises(RuntimeError, match="Failed to restore database dump"):
-        service.restore_backup(str(archive_path), db_url="mysql+pymysql://u:p@localhost:3306/db")
+        service.restore_backup(archive_path.name, db_url="mysql+pymysql://u:p@localhost:3306/db")
+
+
+@pytest.mark.parametrize(
+    "filename",
+    ["../outside.zip", "/tmp/outside.zip", "nested/backup.zip", "backup.sql"],
+)
+def test_backup_paths_reject_untrusted_filenames(tmp_path, filename):
+    service = BackupService(backup_dir=str(tmp_path / "backups"))
+
+    with pytest.raises(ValueError, match="Invalid backup filename"):
+        service.resolve_backup_path(filename)
+
+
+def test_restore_rejects_zip_path_traversal(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir()
+    archive_path = backup_dir / "malicious.zip"
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        archive.writestr("../escaped.txt", "not allowed")
+
+    service = BackupService(backup_dir=str(backup_dir))
+    with pytest.raises(RuntimeError, match="invalid paths"):
+        service.restore_backup(archive_path.name)
+
+    assert not (tmp_path / "escaped.txt").exists()
 
 
 def test_backup_routes_are_registered():

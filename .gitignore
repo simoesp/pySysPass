@@ -99,6 +99,8 @@ archive/
 htmlcov/
 .pytest_cache/
 .tox/
+.codeql/
+*.sarif
 .codex/
 .agents/
 

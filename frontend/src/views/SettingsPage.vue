@@ -386,20 +386,65 @@
         <div class="q-gutter-md" style="max-width: 640px">
           <div class="text-subtitle1 text-weight-medium q-mb-sm">Export / Backup</div>
           <p class="text-body2 text-grey-7">
-            Download a full export of all accounts. Store it in a secure location.
-            The export contains decrypted passwords — handle with care.
+            Use encrypted KDBX for a portable KeePass database. KeePass XML is
+            available only as a plaintext interoperability format.
           </p>
 
           <q-banner rounded class="bg-warning text-black q-mb-md">
             <template v-slot:avatar><q-icon name="warning" /></template>
-            Export files contain plaintext passwords. Protect them accordingly.
+            CSV and KeePass XML exports contain plaintext passwords. Protect them accordingly.
           </q-banner>
 
           <div class="row q-gutter-md">
+            <q-btn color="positive" icon="enhanced_encryption" label="Export encrypted KDBX" :loading="exporting.kdbx" @click="kdbxDialog = true" />
             <q-btn color="primary" icon="download" label="Export as XML" :loading="exporting.xml" @click="doExport('xml')" />
             <q-btn color="secondary" icon="download" label="Export as CSV" :loading="exporting.csv" @click="doExport('csv')" />
-            <q-btn color="accent" icon="download" label="Export as KeePass" :loading="exporting.keepass" @click="doExport('keepass')" />
+            <q-btn flat color="accent" icon="download" label="KeePass XML (plaintext)" :loading="exporting.keepass" @click="doExport('keepass')" />
           </div>
+
+          <q-dialog v-model="kdbxDialog" persistent>
+            <q-card style="min-width: 420px; max-width: 92vw">
+              <q-card-section>
+                <div class="text-h6">Protect KeePass export</div>
+                <div class="text-body2 text-grey-7 q-mt-xs">
+                  Choose a new password for the exported KDBX file. Do not reuse your sysPass master password.
+                </div>
+              </q-card-section>
+              <q-card-section class="q-gutter-md">
+                <q-input
+                  v-model="kdbxForm.password"
+                  :type="showKdbxPassword ? 'text' : 'password'"
+                  label="Export password"
+                  outlined
+                  autofocus
+                >
+                  <template v-slot:append>
+                    <q-icon :name="showKdbxPassword ? 'visibility_off' : 'visibility'" class="cursor-pointer" @click="showKdbxPassword = !showKdbxPassword" />
+                  </template>
+                </q-input>
+                <q-input
+                  v-model="kdbxForm.confirm"
+                  :type="showKdbxPassword ? 'text' : 'password'"
+                  label="Confirm export password"
+                  outlined
+                  :error="Boolean(kdbxForm.confirm) && kdbxForm.password !== kdbxForm.confirm"
+                  error-message="Passwords do not match"
+                  @keyup.enter="doKdbxExport"
+                />
+              </q-card-section>
+              <q-card-actions align="right">
+                <q-btn flat label="Cancel" @click="closeKdbxDialog" />
+                <q-btn
+                  color="positive"
+                  icon="download"
+                  label="Create KDBX"
+                  :loading="exporting.kdbx"
+                  :disable="kdbxForm.password.length < 12 || kdbxForm.password !== kdbxForm.confirm"
+                  @click="doKdbxExport"
+                />
+              </q-card-actions>
+            </q-card>
+          </q-dialog>
         </div>
       </q-tab-panel>
 
@@ -552,7 +597,10 @@ const tempMasterGroupOptions = ref([{ label: 'All users', value: null }])
 const activeTheme = ref(getSavedTheme())
 
 // Backup / export
-const exporting = ref({ xml: false, csv: false, keepass: false })
+const exporting = ref({ xml: false, csv: false, keepass: false, kdbx: false })
+const kdbxDialog = ref(false)
+const showKdbxPassword = ref(false)
+const kdbxForm = ref({ password: '', confirm: '' })
 
 // Import
 const importFormat = ref('csv')
@@ -766,7 +814,8 @@ async function doExport(format) {
   exporting.value[format] = true
   try {
     const r = await api.get(`/import-export/export/${format}`)
-    const blob = new Blob([r.data.content], { type: 'text/plain' })
+    const mimeTypes = { csv: 'text/csv;charset=utf-8', xml: 'application/xml', keepass: 'application/xml' }
+    const blob = new Blob([r.data.content], { type: mimeTypes[format] || 'text/plain' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
@@ -778,6 +827,35 @@ async function doExport(format) {
     Notify.create({ message: e.response?.data?.detail || 'Export failed', color: 'negative' })
   } finally {
     exporting.value[format] = false
+  }
+}
+
+function closeKdbxDialog() {
+  kdbxDialog.value = false
+  showKdbxPassword.value = false
+  kdbxForm.value = { password: '', confirm: '' }
+}
+
+async function doKdbxExport() {
+  if (kdbxForm.value.password.length < 12 || kdbxForm.value.password !== kdbxForm.value.confirm) return
+  exporting.value.kdbx = true
+  try {
+    const response = await api.post('/import-export/export/keepass/kdbx', {
+      export_password: kdbxForm.value.password,
+      export_password_confirm: kdbxForm.value.confirm,
+    }, { responseType: 'blob' })
+    const url = URL.createObjectURL(response.data)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'pysyspass_export.kdbx'
+    link.click()
+    URL.revokeObjectURL(url)
+    closeKdbxDialog()
+    Notify.create({ message: 'Encrypted KeePass database created', color: 'positive' })
+  } catch (e) {
+    Notify.create({ message: 'KDBX export failed', color: 'negative' })
+  } finally {
+    exporting.value.kdbx = false
   }
 }
 

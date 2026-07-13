@@ -26,6 +26,8 @@ def _safe_path(filename: str):
     """Resolve filename inside backup dir, reject path traversal."""
     try:
         return _svc().resolve_backup_path(filename)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Backup not found") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Invalid backup filename") from exc
 
@@ -57,8 +59,6 @@ async def create_backup(
 async def download_backup(filename: str, current_user=Depends(require_permission('config_backup'))):
     """Download a backup archive by filename."""
     path = _safe_path(filename)
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="Backup not found")
     return FileResponse(path=str(path), media_type="application/zip", filename=filename)
 
 
@@ -69,9 +69,7 @@ async def restore_backup(
     current_user=Depends(require_permission('config_backup')),
 ):
     """Restore a backup archive into the current runtime."""
-    path = _safe_path(filename)
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="Backup not found")
+    _safe_path(filename)
     try:
         result = _svc().restore_backup(filename, db_url=settings.DATABASE_URL)
         PluginService(db).call_plugin_hook("on_backup_restored", payload=result, actor_user_id=current_user.get("id"))
@@ -84,8 +82,6 @@ async def restore_backup(
 @router.delete("/{filename}")
 async def delete_backup(filename: str, current_user=Depends(require_permission('config_backup'))):
     """Delete a backup archive."""
-    path = _safe_path(filename)
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="Backup not found")
+    _safe_path(filename)
     _svc().delete_backup(filename)
     return {"message": "Backup deleted"}

@@ -153,3 +153,26 @@ def test_plugin_routes_and_hook_catalog_are_registered():
     assert "/plugins/{plugin_name}/disable" in route_paths
     assert "/plugins/{plugin_name}/config" in route_paths
     assert "on_account_created" in PLATFORM_HOOKS
+
+
+def test_plugin_module_cannot_escape_plugin_directory(db_session, tmp_path):
+    plugin_dir = _make_plugin(tmp_path, name="contained")
+    manifest_path = plugin_dir / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["module"] = "../../outside.py"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    (tmp_path / "outside.py").write_text("class Plugin: pass", encoding="utf-8")
+
+    service = PluginService(db_session, plugins_dir=str(tmp_path / "plugins"))
+    service.sync_plugins()
+
+    with pytest.raises(ValueError, match="Invalid plugin module"):
+        service.load_plugin("contained")
+
+
+@pytest.mark.parametrize("plugin_name", ["../outside", "nested/plugin", ".hidden"])
+def test_plugin_names_reject_path_syntax(db_session, tmp_path, plugin_name):
+    service = PluginService(db_session, plugins_dir=str(tmp_path / "plugins"))
+
+    with pytest.raises(ValueError, match="Invalid plugin name"):
+        service._manifest_path(plugin_name)

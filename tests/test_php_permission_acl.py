@@ -4,7 +4,7 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.deps import require_permission
-from app.api.v1 import accounts, custom_fields
+from app.api.v1 import accounts, custom_fields, import_export
 from app.core.security import get_encryption_service
 from app.db.base import get_db
 from app.schemas.account import AccountCreate
@@ -19,6 +19,7 @@ def _client(db_session):
     app = FastAPI()
     app.include_router(accounts.router, prefix="/api/v1")
     app.include_router(custom_fields.router, prefix="/api/v1")
+    app.include_router(import_export.router, prefix="/api/v1")
 
     @app.get("/config-probe")
     def config_probe(current_user=Depends(require_permission("config_general"))):
@@ -62,6 +63,38 @@ def test_php_admin_scopes_remain_distinct(db_session, test_user):
     assert claims["is_admin_app"] is False
     assert claims["is_admin_acc"] is True
     assert claims["is_admin"] is False
+
+
+def test_exports_require_backup_not_import_permission(
+    db_session, test_user, monkeypatch
+):
+    client = _client(db_session)
+    headers = _headers(test_user)
+    monkeypatch.setattr(
+        import_export.ExportService,
+        "export_to_kdbx",
+        lambda self, export_password, **kwargs: b"kdbx-test",
+    )
+    payload = {
+        "export_password": "separate-export-password",
+        "export_password_confirm": "separate-export-password",
+    }
+
+    _set_permissions(db_session, test_user, config_backup=True)
+    response = client.post(
+        "/api/v1/import-export/export/keepass/kdbx",
+        json=payload,
+        headers=headers,
+    )
+    assert response.status_code == 200
+    assert response.content == b"kdbx-test"
+
+    _set_permissions(db_session, test_user, config_import=True)
+    assert client.post(
+        "/api/v1/import-export/export/keepass/kdbx",
+        json=payload,
+        headers=headers,
+    ).status_code == 403
 
 
 def test_php_account_view_accepts_view_or_edit_permission(db_session, test_user):
