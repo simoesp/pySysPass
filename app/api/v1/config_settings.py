@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from app.db.base import get_db
 from app.schemas.config import (
@@ -12,6 +13,16 @@ from app.services.temporary_master_password_service import TemporaryMasterPasswo
 from app.api.deps import require_admin, require_permission
 
 router = APIRouter()
+
+
+def _count_non_null_column(db: Session, column) -> int:
+    """Count a physical column without materializing its ORM entity."""
+    statement = (
+        select(func.count())
+        .select_from(column.table)
+        .where(column.is_not(None))
+    )
+    return db.execute(statement).scalar_one()
 
 
 def require_master_pass(current_user: dict):
@@ -152,8 +163,8 @@ async def get_encryption_status(
     default_key = "change-this-in-production-32-byte-key!!"
     active_key = db_key if db_key else app_settings.ENCRYPTION_KEY
 
-    encrypted_accounts = db.query(Account).filter(Account.pass_ != None).count()
-    encrypted_history = db.query(AccountHistory).filter(AccountHistory.pass_ != None).count()
+    encrypted_accounts = _count_non_null_column(db, Account.pass_)
+    encrypted_history = _count_non_null_column(db, AccountHistory.pass_)
 
     return EncryptionStatus(
         algorithm="AES-256-CTR + PBKDF2-SHA256",
