@@ -1,0 +1,44 @@
+{
+  "allowlist": [
+    {
+      "rule_id": "py/weak-sensitive-data-hashing",
+      "primary_location_line_hash": "f6daafbc8b3cd94c:1",
+      "reason": "PHP sysPass SHA-1 lookup fingerprint; not a password hash."
+    },
+    {
+      "rule_id": "py/weak-sensitive-data-hashing",
+      "primary_location_line_hash": "3b03b7454a0a771:1",
+      "reason": "Defuse v2 requires this SHA-256 prehash before PBKDF2."
+    },
+    {
+      "rule_id": "py/weak-sensitive-data-hashing",
+      "primary_location_line_hash": "421d9c8ed5ee20ec:1",
+      "reason": "Defuse v2 requires this SHA-256 prehash before PBKDF2."
+    },
+    {
+      "rule_id": "py/weak-sensitive-data-hashing",
+      "primary_location_line_hash": "58cdae864aa9b6cf:1",
+      "reason": "Defuse v2 requires this SHA-256 prehash before PBKDF2."
+    },
+    {
+      "rule_id": "py/weak-sensitive-data-hashing",
+      "primary_location_line_hash": "60c9faf3a8ba5a83:1",
+      "reason": "Defuse v2 requires this SHA-256 prehash before PBKDF2."
+    },
+    {
+      "rule_id": "py/weak-sensitive-data-hashing",
+      "primary_location_line_hash": "33c44f12e317985b:1",
+      "reason": "Defuse v2 requires this SHA-256 prehash before PBKDF2."
+    },
+    {
+      "rule_id": "py/weak-sensitive-data-hashing",
+      "primary_location_line_hash": "445a2d38591b4b1d:1",
+      "reason": "PHP sysPass row identity fingerprint; not a password hash."
+    },
+    {
+      "rule_id": "py/weak-sensitive-data-hashing",
+      "primary_location_line_hash": "17d45cb327a14115:1",
+      "reason": "PHP native XML format mandates SHA-1 before HMAC-SHA-256."
+    }
+  ]
+}
