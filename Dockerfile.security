@@ -1,0 +1,25 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Install security scanning tools in the image
+RUN pip install --no-cache-dir \
+    pip-audit \
+    safety \
+    bandit \
+    trivy
+
+# Copy requirements first for better caching
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY app/ ./app/
+COPY tests/ ./tests/
+
+# Security scan before application starts (optional entrypoint)
+RUN pip-audit -r requirements.txt && \
+    safety check -r requirements.txt && \
+    bandit -r app/ -q
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -1,0 +1,29 @@
+# FastAPI
+fastapi>=0.115.6,<1.0.0
+uvicorn[standard]>=0.34.0
+pydantic>=2.10.5
+pydantic-settings==2.14.2
+email-validator>=2.2.0
+
+# Database
+sqlalchemy>=2.0.37
+alembic>=1.14.1
+pymysql>=1.1.1
+
+# Security
+cryptography>=49.0.0
+defusedxml>=0.7.1
+python-jose[cryptography]>=3.4.0
+passlib[bcrypt]>=1.7.4
+python-multipart>=0.0.31
+pyotp>=2.9.0
+
+# Testing
+pytest==9.1.1
+pytest-asyncio>=1.4.0
+pytest-cov>=6.0.0
+
+# Utilities
+python-dotenv>=1.2.2
+schedule>=1.2.0
+ldap3>=2.9.1

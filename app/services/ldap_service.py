@@ -1,0 +1,221 @@
+"""LDAP/Active Directory Authentication Service (uses ldap3 - pure Python)"""
+from typing import List, Optional, Dict
+import logging
+
+logger = logging.getLogger(__name__)
+
+# ldap3 is an optional dependency — only required when LDAP features are used.
+try:
+    from ldap3 import Server, Connection, ALL, SUBTREE, SIMPLE, AUTO_BIND_NO_TLS
+    from ldap3.core.exceptions import LDAPException
+    _LDAP_AVAILABLE = True
+except ImportError:
+    _LDAP_AVAILABLE = False
+    logger.warning("ldap3 not installed — LDAP features disabled. Install with: pip install ldap3")
+
+    # Provide lightweight stubs so importing the module and route registration
+    # remains safe even when LDAP support is not installed.
+    class Server:  # type: ignore[no-redef]
+        def __init__(self, *args, **kwargs):
+            pass
+
+    class Connection:  # type: ignore[no-redef]
+        def __init__(self, *args, **kwargs):
+            pass
+
+    ALL = SUBTREE = SIMPLE = AUTO_BIND_NO_TLS = None
+
+    class LDAPException(Exception):
+        pass
+
+
+class LdapService:
+    """LDAP/Active Directory authentication and import service"""
+
+    def __init__(self, ldap_uri: str, base_dn: str,
+                 bind_dn: str = None, bind_password: str = None,
+                 use_ssl: bool = False, use_tls: bool = False):
+        if not _LDAP_AVAILABLE:
+            raise ImportError(
+                "ldap3 is not installed. LDAP features require: pip install ldap3"
+            )
+        self.ldap_uri = ldap_uri
+        self.base_dn = base_dn
+        self.bind_dn = bind_dn
+        self.bind_password = bind_password
+        self.use_ssl = use_ssl
+        self.use_tls = use_tls
+        self._conn: Optional[Connection] = None
+
+    def _server(self) -> Server:
+        return Server(self.ldap_uri, use_ssl=self.use_ssl, get_info=ALL)
+
+    def connect(self) -> bool:
+        """Establish LDAP connection and bind."""
+        try:
+            server = self._server()
+            if self.bind_dn and self.bind_password:
+                self._conn = Connection(
+                    server,
+                    user=self.bind_dn,
+                    password=self.bind_password,
+                    authentication=SIMPLE,
+                    auto_bind=AUTO_BIND_NO_TLS,
+                )
+            else:
+                self._conn = Connection(server, auto_bind=AUTO_BIND_NO_TLS)
+            if self.use_tls:
+                self._conn.start_tls()
+            self._conn.bind()
+            return True
+        except LDAPException as exc:
+            raise ConnectionError(f"LDAP connection failed: {exc}") from exc
+
+    def disconnect(self):
+        if self._conn and self._conn.bound:
+            self._conn.unbind()
+        self._conn = None
+
+    def search(self, filter_str: str = "(objectClass=*)",
+               attributes: List[str] = None) -> List[Dict]:
+        """Search LDAP directory; returns list of {dn, attributes} dicts."""
+        if not self._conn or not self._conn.bound:
+            self.connect()
+        attrs = attributes or ["*"]
+        ok = self._conn.search(
+            search_base=self.base_dn,
+            search_filter=filter_str,
+            search_scope=SUBTREE,
+            attributes=attrs,
+        )
+        if not ok:
+            return []
+        results = []
+        for entry in self._conn.entries:
+            attr_dict: Dict = {}
+            for attr in entry.entry_attributes:
+                val = entry[attr].value
+                attr_dict[attr] = val
+            results.append({"dn": entry.entry_dn, "attributes": attr_dict})
+        return results
+
+    def authenticate(self, username: str, password: str,
+                     user_filter: str = "(uid={username})") -> Optional[str]:
+        """Authenticate user; returns the user's DN on success, None on failure."""
+        if not self._conn or not self._conn.bound:
+            self.connect()
+        search_filter = user_filter.replace("{username}", username)
+        entries = self.search(filter_str=search_filter, attributes=["dn"])
+        if not entries:
+            return None
+        user_dn = entries[0]["dn"]
+        server = self._server()
+        try:
+            test_conn = Connection(
+                server,
+                user=user_dn,
+                password=password,
+                authentication=SIMPLE,
+                auto_bind=AUTO_BIND_NO_TLS,
+            )
+            test_conn.bind()
+            bound = test_conn.bound
+            test_conn.unbind()
+            return user_dn if bound else None
+        except LDAPException:
+            return None
+
+    def get_user_info(self, username: str,
+                      user_filter: str = "(uid={username})") -> Optional[Dict]:
+        """Fetch a single user's attributes from LDAP."""
+        search_filter = user_filter.replace("{username}", username)
+        results = self.search(
+            filter_str=search_filter,
+            attributes=["cn", "sn", "givenName", "mail", "uid", "memberOf"],
+        )
+        return results[0] if results else None
+
+    def import_users(self, user_filter: str = "(objectClass=person)",
+                     attributes: List[str] = None) -> List[Dict]:
+        """Return normalised user dicts suitable for import into sysPass."""
+        attrs = attributes or ["cn", "sn", "givenName", "mail", "uid", "sAMAccountName"]
+        raw = self.search(filter_str=user_filter, attributes=attrs)
+        users = []
+        for entry in raw:
+            a = entry["attributes"]
+            username = (
+                _first(a.get("uid"))
+                or _first(a.get("sAMAccountName"))
+                or ""
+            )
+            users.append({
+                "username": username,
+                "email": _first(a.get("mail")) or "",
+                "first_name": _first(a.get("givenName")) or "",
+                "last_name": _first(a.get("sn")) or "",
+                "full_name": _first(a.get("cn")) or username,
+                "dn": entry["dn"],
+                "groups": a.get("memberOf") or [],
+            })
+        return users
+
+
+def _first(val):
+    """Return scalar or first element of list; None if empty."""
+    if val is None:
+        return None
+    if isinstance(val, list):
+        return val[0] if val else None
+    return val
+
+
+class LdapImportService:
+    """Import LDAP users into the sysPass database."""
+
+    def __init__(self, db, user_group_id: int = 1):
+        self.db = db
+        self.user_group_id = user_group_id
+
+    def import_ldap_users(self, ldap_users: List[Dict],
+                          default_password: str = None) -> Dict:
+        from app.models.account import User
+        from app.services.auth_service import get_password_hash
+        from app.services.user_profile_service import UserProfileService
+        import secrets
+
+        stats = {"success": 0, "failed": 0, "skipped": 0}
+        default_profile = UserProfileService(self.db).ensure_default_profile()
+        for ldap_user in ldap_users:
+            username = ldap_user.get("username")
+            if not username:
+                stats["failed"] += 1
+                continue
+            if self.db.query(User).filter(User.username == username).first():
+                stats["skipped"] += 1
+                continue
+            try:
+                email = ldap_user.get("email") or f"{username}@ldap.local"
+                raw_pass = default_password or secrets.token_urlsafe(16)
+                hashed = get_password_hash(raw_pass)
+                if isinstance(hashed, str):
+                    hashed = hashed.encode("utf-8")
+                user = User(
+                    userGroupId=self.user_group_id,
+                    userProfileId=default_profile.id,
+                    name=ldap_user.get("full_name") or username,
+                    username=username,
+                    email=email,
+                    password=hashed,
+                    hashSalt=secrets.token_bytes(32),
+                    loginCount=0,
+                    lastUpdateMPass=0,
+                    isUserEnabled=True,
+                    isChangePass=True,
+                )
+                self.db.add(user)
+                self.db.commit()
+                stats["success"] += 1
+            except Exception:
+                self.db.rollback()
+                stats["failed"] += 1
+        return stats

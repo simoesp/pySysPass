@@ -1,0 +1,81 @@
+version: "3.8"
+
+services:
+  db:
+    image: docker.io/library/mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-syspass}
+      MYSQL_USER: ${MYSQL_USER:-syspass}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - syspass_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p\"$${MYSQL_ROOT_PASSWORD}\" --silent"]
+      start_period: 30s
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - syspass
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    labels:
+      com.pysyspass.stack-revision: "2026-07-02-user-group-schema-fix"
+    environment:
+      DATABASE_URL: mysql+pymysql://${MYSQL_USER:-syspass}:${MYSQL_PASSWORD}@db:3306/${MYSQL_DATABASE:-syspass}
+      SECRET_KEY: ${SECRET_KEY}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      SYSPASS_PASSWORD_SALT: ${SYSPASS_PASSWORD_SALT:-}
+      SQLALCHEMY_SCHEMA_GUARD: ${SQLALCHEMY_SCHEMA_GUARD:-true}
+      AUTO_INIT_DB_ON_STARTUP: ${AUTO_INIT_DB_ON_STARTUP:-true}
+      DEBUG: ${DEBUG:-false}
+      CORS_ORIGINS_FILE: /app/config/cors-origins.json
+      SYSPASS_RUNTIME_CONFIG_JSON_PATH: /app/config/runtime-config.json
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips=*
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - syspass
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    labels:
+      com.pysyspass.stack-revision: "2026-07-02-user-group-schema-fix"
+    ports:
+      - "${FRONTEND_PORT:-8080}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    networks:
+      - syspass
+
+networks:
+  syspass:
+    driver: bridge
+
+volumes:
+  syspass_mysql_data:

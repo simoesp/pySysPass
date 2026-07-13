@@ -1,0 +1,115 @@
+version: "3.8"
+
+services:
+  db:
+    image: docker.io/library/mysql:8.0
+    container_name: syspass-db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: syspass
+      MYSQL_USER: syspass
+      MYSQL_PASSWORD: syspass_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p\"$${MYSQL_ROOT_PASSWORD}\" --silent"]
+      start_period: 30s
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - syspass-network
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: syspass-backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: mysql+pymysql://syspass:syspass_password@db:3306/syspass
+      SQLALCHEMY_SCHEMA_GUARD: "true"
+      SECRET_KEY: change-this-in-production-very-secure-key
+      ENCRYPTION_KEY: change-this-in-production-32-byte-key!!
+      SYSPASS_PASSWORD_SALT: d4f0430a25f464b8f284e1726f692f8f175937b33bf963669f8d80499231
+      AUTO_INIT_DB_ON_STARTUP: "true"
+      DEBUG: "true"
+      CORS_ORIGINS_FILE: /app/config/cors-origins.json
+      SYSPASS_RUNTIME_CONFIG_JSON_PATH: /app/config/runtime-config.json
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./app:/app/app:ro
+      - ./tests:/app/tests:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - syspass-network
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --proxy-headers --forwarded-allow-ips='*'
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: syspass-frontend
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    networks:
+      - syspass-network
+
+  graphify:
+    image: docker.io/library/nginx:alpine
+    container_name: syspass-graphify
+    restart: unless-stopped
+    ports:
+      - "8090:80"
+    volumes:
+      - ./graphify-out:/usr/share/nginx/html:ro
+    networks:
+      - syspass-network
+
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: syspass-test
+    restart: "no"
+    environment:
+      DATABASE_URL: mysql+pymysql://syspass:syspass_password@db:3306/syspass
+      SECRET_KEY: test-secret-key-for-testing-only
+      ENCRYPTION_KEY: test-encryption-key-32bytes!!
+      DEBUG: "true"
+    volumes:
+      - ./app:/app/app:ro
+      - ./tests:/app/tests:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - syspass-network
+    command: pytest
+
+networks:
+  syspass-network:
+    driver: bridge
+
+volumes:
+  mysql_data:

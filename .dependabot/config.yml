@@ -1,0 +1,35 @@
+# Dependabot Configuration for CVE/Security Updates
+# Gitea supports Dependabot via the "dependabot" service
+
+version: 2
+enable-beta-ecosystems: true
+updates:
+  # Python dependencies
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "sunday"
+      time: "01:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 10
+    target-branch: "master"
+    labels:
+      - "dependencies"
+      - "security"
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+    # Group security updates together
+    groups:
+      security-updates:
+        patterns:
+          - "*"
+        update-types:
+          - "patch"
+          - "minor"
+    # Ignore specific problematic updates if needed
+    ignore:
+      # Example: Ignore breaking changes to major versions
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]

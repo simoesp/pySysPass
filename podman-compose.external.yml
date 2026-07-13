@@ -1,0 +1,53 @@
+version: "3.8"
+
+# Full pySysPass application stack for an existing, externally managed
+# sysPass database. This stack deliberately contains no database service.
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pysyspass-external-backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${PYSYSPASS_DATABASE_URL:?Set PYSYSPASS_DATABASE_URL}
+      SECRET_KEY: ${PYSYSPASS_SECRET_KEY:?Set PYSYSPASS_SECRET_KEY}
+      ENCRYPTION_KEY: ${PYSYSPASS_ENCRYPTION_KEY:?Set PYSYSPASS_ENCRYPTION_KEY}
+      SYSPASS_PASSWORD_SALT: ${SYSPASS_PASSWORD_SALT:?Set SYSPASS_PASSWORD_SALT}
+      SQLALCHEMY_SCHEMA_GUARD: "true"
+      AUTO_INIT_DB_ON_STARTUP: "false"
+      DEBUG: ${PYSYSPASS_DEBUG:-false}
+    ports:
+      - "${PYSYSPASS_BACKEND_PORT:-8001}:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - pysyspass-external
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: pysyspass-external-frontend
+    restart: unless-stopped
+    ports:
+      - "${PYSYSPASS_FRONTEND_PORT:-8081}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - pysyspass-external
+
+networks:
+  pysyspass-external:
+    driver: bridge

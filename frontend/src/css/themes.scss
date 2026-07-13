@@ -1,0 +1,16 @@
+// CSS variable defaults (overridden at runtime by applyTheme)
+:root {
+  --sp-header-bg: #1a237e;
+  --sp-sidebar-bg: #0f1729;
+  --sp-accent-color: #5c9dff;
+  --sp-content-bg: #f4f6fb;
+  --sp-card-bg: #ffffff;
+  --sp-card-bg-alt: #f9fafc;
+  --sp-text-primary: #111827;
+  --sp-text-secondary: #6b7280;
+  --sp-border-color: #e5e7eb;
+}
+
+.body--dark {
+  color-scheme: dark;
+}
