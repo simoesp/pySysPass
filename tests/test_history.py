@@ -1,234 +1,175 @@
 import pytest
+
+from app.models.account import Account, AccountHistory, Config
+from app.schemas.account import AccountCreate, AccountUpdate
+from app.services.account_service import AccountService
 from app.services.history_service import HistoryService
-from app.schemas.history import AccountHistoryCreate
+
+
+def _create_account(db_session, encryption_service, user, title="Test Account", password="secret"):
+    return AccountService(db_session, encryption_service).create_account(
+        AccountCreate(title=title, password=password), user.id
+    )
+
 
 @pytest.mark.asyncio
-async def test_create_history_entry(db_session, encryption_service, test_user):
-    """Test creating a history entry"""
-    from app.services.account_service import AccountService
-    from app.schemas.account import AccountCreate
-    
-    account_service = AccountService(db_session, encryption_service)
-    account = account_service.create_account(
-        AccountCreate(title="Test Account", password="secret"),
-        test_user.id
-    )
-    
-    service = HistoryService(db_session)
-    history = service.create_history(
-        account_id=account.id,
-        user_id=test_user.id,
-        action="create",
-        new_value="Account created"
-    )
-    
-    assert history.id is not None
-    assert history.accountId == account.id
-    assert history.userId == test_user.id
-    assert history.action == "create"
-    assert history.newValue == "Account created"
+async def test_account_update_creates_php_compatible_preupdate_snapshot(
+    db_session, encryption_service, test_user
+):
+    db_session.add(Config(parameter="masterPwd", value="$2y$10$php-master-hash"))
+    db_session.commit()
+    created = _create_account(db_session, encryption_service, test_user,
+                              title="Original Title", password="old-secret")
+    original = db_session.query(Account).filter(Account.id == created.id).one()
+    original_password = original.pass_
 
-@pytest.mark.asyncio
-async def test_get_account_history(db_session, encryption_service, test_user):
-    """Test getting history for an account"""
-    from app.services.account_service import AccountService
-    from app.schemas.account import AccountCreate
-    
-    account_service = AccountService(db_session, encryption_service)
-    account = account_service.create_account(
-        AccountCreate(title="Test Account", password="secret"),
-        test_user.id
-    )
-    
-    service = HistoryService(db_session)
-    
-    # Create multiple history entries
-    service.create_history(account.id, test_user.id, "create", new_value="Created")
-    service.create_history(account.id, test_user.id, "update", old_value="Title: Old", new_value="Title: New")
-    service.create_history(account.id, test_user.id, "decrypt")
-    
-    history = service.get_account_history(account.id, test_user.id)
-    
-    assert len(history) == 3
-
-@pytest.mark.asyncio
-async def test_get_user_history(db_session, encryption_service, test_user):
-    """Test getting all history for a user"""
-    from app.services.account_service import AccountService
-    from app.schemas.account import AccountCreate
-    
-    account_service = AccountService(db_session, encryption_service)
-    
-    # Create multiple accounts
-    account1 = account_service.create_account(
-        AccountCreate(title="Account 1", password="secret"),
-        test_user.id
-    )
-    account2 = account_service.create_account(
-        AccountCreate(title="Account 2", password="secret"),
-        test_user.id
-    )
-    
-    service = HistoryService(db_session)
-    service.create_history(account1.id, test_user.id, "create")
-    service.create_history(account2.id, test_user.id, "create")
-    service.create_history(account1.id, test_user.id, "view")
-    
-    history = service.get_user_history(test_user.id)
-    
-    assert len(history) == 3
-
-@pytest.mark.asyncio
-async def test_log_view(db_session, encryption_service, test_user):
-    """Test logging a view event"""
-    from app.services.account_service import AccountService
-    from app.schemas.account import AccountCreate
-    
-    account_service = AccountService(db_session, encryption_service)
-    account = account_service.create_account(
-        AccountCreate(title="Test Account", password="secret"),
-        test_user.id
-    )
-    
-    service = HistoryService(db_session)
-    history = service.log_view(account.id, test_user.id)
-    
-    assert history.action == "view"
-
-@pytest.mark.asyncio
-async def test_log_decrypt(db_session, encryption_service, test_user):
-    """Test logging a decrypt event"""
-    from app.services.account_service import AccountService
-    from app.schemas.account import AccountCreate
-    
-    account_service = AccountService(db_session, encryption_service)
-    account = account_service.create_account(
-        AccountCreate(title="Test Account", password="secret"),
-        test_user.id
-    )
-    
-    service = HistoryService(db_session)
-    history = service.log_decrypt(account.id, test_user.id)
-    
-    assert history.action == "decrypt"
-
-@pytest.mark.asyncio
-async def test_log_password_change(db_session, encryption_service, test_user):
-    """Test logging a password change"""
-    from app.services.account_service import AccountService
-    from app.schemas.account import AccountCreate
-    
-    account_service = AccountService(db_session, encryption_service)
-    account = account_service.create_account(
-        AccountCreate(title="Test Account", password="secret"),
-        test_user.id
-    )
-    
-    service = HistoryService(db_session)
-    history = service.log_password_change(account.id, test_user.id)
-    
-    assert history.action == "password_change"
-
-@pytest.mark.asyncio
-async def test_get_decrypt_count(db_session, encryption_service, test_user):
-    """Test getting decrypt count for an account"""
-    from app.services.account_service import AccountService
-    from app.schemas.account import AccountCreate
-    
-    account_service = AccountService(db_session, encryption_service)
-    account = account_service.create_account(
-        AccountCreate(title="Test Account", password="secret"),
-        test_user.id
-    )
-    
-    service = HistoryService(db_session)
-    
-    # Log multiple decrypt events
-    service.log_decrypt(account.id, test_user.id)
-    service.log_decrypt(account.id, test_user.id)
-    service.log_decrypt(account.id, test_user.id)
-    
-    count = service.get_account_decrypt_count(account.id)
-    
-    assert count == 3
-
-@pytest.mark.asyncio
-async def test_get_view_count(db_session, encryption_service, test_user):
-    """Test getting view count for an account"""
-    from app.services.account_service import AccountService
-    from app.schemas.account import AccountCreate
-    
-    account_service = AccountService(db_session, encryption_service)
-    account = account_service.create_account(
-        AccountCreate(title="Test Account", password="secret"),
-        test_user.id
-    )
-    
-    service = HistoryService(db_session)
-    
-    # Log multiple view events
-    service.log_view(account.id, test_user.id)
-    service.log_view(account.id, test_user.id)
-    service.log_view(account.id, test_user.id)
-    service.log_view(account.id, test_user.id)
-    
-    count = service.get_account_view_count(account.id)
-    
-    assert count == 4
-
-@pytest.mark.asyncio
-async def test_history_includes_old_and_new_values(db_session, encryption_service, test_user):
-    """Test that update history includes old and new values"""
-    from app.services.account_service import AccountService
-    from app.schemas.account import AccountCreate
-    
-    account_service = AccountService(db_session, encryption_service)
-    account = account_service.create_account(
-        AccountCreate(title="Original Title", password="secret"),
-        test_user.id
-    )
-    
-    service = HistoryService(db_session)
-    history = service.log_update(
-        account.id,
+    updated = AccountService(db_session, encryption_service).update_account(
+        created.id,
+        AccountUpdate(title="Updated Title", password="new-secret"),
         test_user.id,
-        "title",
-        "Original Title",
-        "Updated Title"
     )
-    
-    assert "title: Original Title" in history.oldValue
-    assert "title: Updated Title" in history.newValue
+
+    rows = HistoryService(db_session).get_account_history(created.id, test_user.id)
+    assert updated.title == "Updated Title"
+    assert len(rows) == 1
+    assert rows[0].name == "Original Title"
+    assert rows[0].pass_ == original_password
+    assert rows[0].mPassHash == b"$2y$10$php-master-hash"
+    assert rows[0].isModify is True
+    assert rows[0].isDeleted is False
+    assert rows[0].action == "update"
+    assert rows[0].old_value is None
+    assert rows[0].new_value is None
+
 
 @pytest.mark.asyncio
-async def test_history_logged_for_file_operations(db_session, encryption_service, test_user):
-    """Test that file upload/download events are logged"""
-    from app.services.account_service import AccountService
-    from app.schemas.account import AccountCreate
-    
-    account_service = AccountService(db_session, encryption_service)
-    account = account_service.create_account(
-        AccountCreate(title="Test Account", password="secret"),
-        test_user.id
+async def test_multiple_updates_create_ordered_restore_snapshots(
+    db_session, encryption_service, test_user
+):
+    created = _create_account(db_session, encryption_service, test_user, title="Version 1")
+    service = AccountService(db_session, encryption_service)
+    service.update_account(created.id, AccountUpdate(title="Version 2"), test_user.id)
+    service.update_account(created.id, AccountUpdate(title="Version 3"), test_user.id)
+
+    rows = HistoryService(db_session).get_account_history(created.id, test_user.id)
+    assert [row.name for row in rows] == ["Version 2", "Version 1"]
+    assert all(row.action == "update" for row in rows)
+
+
+@pytest.mark.asyncio
+async def test_delete_preserves_php_compatible_snapshot(
+    db_session, encryption_service, test_user
+):
+    created = _create_account(db_session, encryption_service, test_user, title="Deleted Account")
+
+    assert AccountService(db_session, encryption_service).delete_account(
+        created.id, test_user.id
+    ) is True
+
+    row = db_session.query(AccountHistory).filter(
+        AccountHistory.accountId == created.id
+    ).one()
+    assert row.name == "Deleted Account"
+    assert row.isModify is False
+    assert row.isDeleted is True
+    assert row.action == "delete"
+
+
+@pytest.mark.asyncio
+async def test_view_and_decrypt_counts_use_php_account_counters(
+    db_session, encryption_service, test_user
+):
+    created = _create_account(db_session, encryption_service, test_user)
+    accounts = AccountService(db_session, encryption_service)
+    accounts.get_account(created.id, test_user.id)
+    accounts.get_account(created.id, test_user.id)
+    accounts.get_decrypted_password(created.id, test_user.id)
+
+    history = HistoryService(db_session)
+    assert history.get_account_view_count(created.id) == 2
+    assert history.get_account_decrypt_count(created.id) == 1
+    assert history.get_account_history(created.id, test_user.id) == []
+
+
+@pytest.mark.asyncio
+async def test_audit_only_helpers_do_not_invent_php_history_rows(
+    db_session, encryption_service, test_user
+):
+    created = _create_account(db_session, encryption_service, test_user)
+    history = HistoryService(db_session)
+
+    assert history.log_view(created.id, test_user.id) is None
+    assert history.log_decrypt(created.id, test_user.id) is None
+    assert history.log_file_upload(created.id, test_user.id, "document.pdf") is None
+    assert history.log_file_download(created.id, test_user.id, "document.pdf") is None
+    assert db_session.query(AccountHistory).count() == 0
+
+
+def test_account_history_has_no_python_only_physical_columns():
+    columns = set(AccountHistory.__table__.columns.keys())
+    assert {"action", "oldValue", "newValue"}.isdisjoint(columns)
+
+
+def test_history_api_returns_snapshots_to_shared_users(
+    db_session, encryption_service, test_user
+):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.api.v1 import history as history_api
+    from app.db.base import get_db
+    from app.models.account import User
+    from app.services.auth_service import create_access_token, get_password_hash
+
+    viewer = User(
+        username="history-viewer",
+        email="history-viewer@example.com",
+        password=get_password_hash("testpassword"),
+        isUserAdmin=False,
+        userGroupId=1,
+        userProfileId=1,
+        hashSalt=b"history-viewer-salt",
     )
-    
-    service = HistoryService(db_session)
-    
-    # Log file operations
-    service.log_file_upload(account.id, test_user.id, "document.pdf")
-    service.log_file_download(account.id, test_user.id, "document.pdf")
-    
-    history = service.get_account_history(account.id, test_user.id)
-    
-    file_ops = [h for h in history if h.action in ["file_upload", "file_download"]]
-    assert len(file_ops) == 2
+    db_session.add(viewer)
+    db_session.commit()
+    db_session.refresh(viewer)
+
+    created = AccountService(db_session, encryption_service).create_account(
+        AccountCreate(
+            title="Shared History Version 1",
+            password="secret",
+            is_public=True,
+            shared_users=[{"user_id": viewer.id, "is_edit": False}],
+        ),
+        test_user.id,
+    )
+    AccountService(db_session, encryption_service).update_account(
+        created.id, AccountUpdate(title="Shared History Version 2"), test_user.id
+    )
+
+    app = FastAPI()
+    app.include_router(history_api.router, prefix="/api/v1")
+
+    def override_get_db():
+        yield db_session
+
+    app.dependency_overrides[get_db] = override_get_db
+    token = create_access_token({"user_id": viewer.id, "username": viewer.username})
+    response = TestClient(app).get(
+        f"/api/v1/accounts/{created.id}/history",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()[0]["action"] == "update"
+    assert response.json()[0]["old_value"] is None
+    assert response.json()[0]["new_value"] is None
+
 
 def test_history_routes_are_registered():
-    """Test that history routes are registered"""
     from app.main import app
-    
+
     route_paths = [route.path for route in app.routes]
-    
     assert "/api/v1/accounts/{account_id}/history" in route_paths
     assert "/api/v1/accounts/{account_id}/history/decrypt-count" in route_paths
     assert "/api/v1/accounts/{account_id}/history/view-count" in route_paths

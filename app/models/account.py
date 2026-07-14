@@ -386,9 +386,6 @@ class AccountHistory(Base):
     isModify         = Column(Boolean,      default=False, server_default=text("0"))
     isDeleted        = Column(Boolean,      default=False, server_default=text("0"))
     mPassHash        = Column(FlexibleBinary(255, mysql_type=mysql.VARBINARY(255)), nullable=False)
-    actionName       = Column('action', String(50), nullable=True)
-    oldValue         = Column(Text, nullable=True)
-    newValue         = Column(Text, nullable=True)
     otherUserEdit    = Column(Boolean,      default=False, server_default=text("0"))
     otherUserGroupEdit = Column(Boolean,    default=False, server_default=text("0"))
     passDate         = Column(mysql_integer(), nullable=True)
@@ -403,13 +400,18 @@ class AccountHistory(Base):
     @property
     def user_id(self):    return self.userId
     @property
-    def date_add(self):   return self.dateAdd
+    def date_add(self):   return self.dateEdit or self.dateAdd
     @property
-    def action(self):     return self.actionName
+    def action(self):
+        if self.isDeleted:
+            return 'delete'
+        if self.isModify:
+            return 'update'
+        return 'snapshot'
     @property
-    def old_value(self): return self.oldValue
+    def old_value(self): return None
     @property
-    def new_value(self): return self.newValue
+    def new_value(self): return None
 
     account = relationship(
         'Account',

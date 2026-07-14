@@ -13,6 +13,7 @@ from app.core.security import EncryptionService
 from app.core.rsa_service import maybe_decrypt
 from app.core.defuse_compat import encrypt_account_pass
 from app.services.config_service import ConfigService
+from app.services.history_service import HistoryService
 from app.services.plugin_service import PluginService
 
 
@@ -376,6 +377,10 @@ class AccountService:
         if not self._can_edit_account(account, user_id, group_ids):
             return None
 
+        # sysPass PHP saves the complete pre-update account state in the same
+        # transaction, so password and metadata changes can be restored.
+        HistoryService(self.db).stage_snapshot(account, is_modify=True)
+
         if data.title is not None:
             account.name = data.title
         if data.login is not None:
@@ -416,6 +421,7 @@ class AccountService:
             else:
                 enc = self.encryption.encrypt(plaintext)
                 account.pass_ = enc.encode() if isinstance(enc, str) else enc
+            account.passDate = int(datetime.now().timestamp())
         account.userEditId = user_id
         if data.tag_ids is not None:
             self._sync_tags(account_id, data.tag_ids)
@@ -435,6 +441,7 @@ class AccountService:
         if not account:
             return False
         payload = self._to_response(account, user_id, self._get_user_group_ids(user_id))
+        HistoryService(self.db).stage_snapshot(account, is_deleted=True)
         self.db.delete(account)
         self.db.commit()
         self._emit_hook("on_account_deleted", payload=payload, actor_user_id=user_id)

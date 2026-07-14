@@ -21,13 +21,7 @@ SCHEMA_PATH = ROOT / "schemas" / "dbstructure.sql"
 UPSTREAM_SCHEMA_DIR = ROOT.parent / "phpSysPass" / "schemas"
 ORM_VIEWS = {"account_data_v", "account_search_v"}
 
-# These fields predate the parity guard and do not exist in sysPass PHP. Keep
-# the exception narrow so no additional persisted semantics can be introduced.
-# Replacing them with compatibility-preserving derived/API data is tracked in
-# docs/project/php-compatibility-checklist.md.
-KNOWN_PYTHON_ONLY_COLUMNS = {
-    "AccountHistory": {"action", "oldValue", "newValue"},
-}
+KNOWN_PYTHON_ONLY_COLUMNS = {}
 KNOWN_NULLABILITY_DRIFT = {
     "Account.clientId",
     "Account.categoryId",

@@ -70,7 +70,8 @@
       <q-tabs v-model="tab" dense align="left" class="q-mb-sm"
         active-color="primary" indicator-color="primary">
         <q-tab name="details" icon="info_outline" label="Details" no-caps />
-        <q-tab name="history" icon="history" label="History" no-caps />
+        <q-tab v-if="store.hasPermission('acc_view_history')"
+          name="history" icon="history" label="History" no-caps />
       </q-tabs>
 
       <q-tab-panels v-model="tab" animated keep-alive>
@@ -247,9 +248,13 @@
         </q-tab-panel>
 
         <!-- ── History panel ── -->
-        <q-tab-panel name="history" class="q-pa-none">
+        <q-tab-panel v-if="store.hasPermission('acc_view_history')" name="history" class="q-pa-none">
           <div v-if="historyLoading" class="sp-center-state">
             <q-spinner-dots size="36px" color="primary" />
+          </div>
+          <div v-else-if="historyError" class="sp-center-state text-negative">
+            <q-icon name="error_outline" size="48px" />
+            <div class="text-body2 q-mt-md">{{ historyError }}</div>
           </div>
           <div v-else-if="!history.length" class="sp-center-state">
             <q-icon name="history" size="48px" color="grey-3" />
@@ -411,11 +416,13 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Notify, Dialog } from 'quasar'
 import api from '@/api/axios'
+import { useMainStore } from '@/stores'
 import { encryptPassword } from '@/composables/useClientEncryption'
 import PasswordGenerator from '@/components/PasswordGenerator.vue'
 
 const route = useRoute()
 const router = useRouter()
+const store = useMainStore()
 
 const account = ref(null)
 const categories = ref([])
@@ -427,6 +434,7 @@ const tagOpts = ref([])
 const userOptions = ref([])
 const groupOptions = ref([])
 const history = ref([])
+const historyError = ref('')
 const loading = ref(true)
 const historyLoading = ref(false)
 const tab = ref('details')
@@ -729,6 +737,8 @@ async function saveEdit() {
     account.value = r.data
     decryptedPwd.value = null
     await saveCustomFields(account.value.id)
+    history.value = []
+    if (tab.value === 'history') await loadHistory()
     showEdit.value = false
     Notify.create({ message: 'Account updated', color: 'positive' })
   } catch (e) {
@@ -761,11 +771,13 @@ function confirmDelete() {
 async function loadHistory() {
   if (historyLoading.value || !account.value) return
   historyLoading.value = true
+  historyError.value = ''
   try {
     const r = await api.get(`/accounts/${account.value.id}/history`)
     history.value = r.data
-  } catch {
+  } catch (e) {
     history.value = []
+    historyError.value = e.response?.data?.detail || 'Failed to load account history'
   } finally {
     historyLoading.value = false
   }

@@ -1,12 +1,15 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
 from app.db.base import get_db
 from app.schemas.history import AccountHistoryResponse
+from app.core.security import get_encryption_service
+from app.services.account_service import AccountService
 from app.services.history_service import HistoryService
-from app.api.deps import get_current_user, require_admin
+from app.api.deps import get_current_user, require_any_permission
 
 router = APIRouter()
+account_history_view = require_any_permission("acc_view_history", account_admin=True)
 
 @router.get("/accounts/{account_id}/history", response_model=List[AccountHistoryResponse])
 async def get_account_history(
@@ -14,22 +17,15 @@ async def get_account_history(
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
+    current_user = Depends(account_history_view)
 ):
     """Get the history of changes for an account"""
-    service = HistoryService(db)
-    
-    # Verify user has access to this account
-    from app.models.account import Account
-    account = db.query(Account).filter(
-        Account.id == account_id,
-        Account.userId == current_user["id"]
-    ).first()
-    
-    if not account:
+    if not AccountService(db, get_encryption_service()).can_access_account(
+        account_id, current_user["id"]
+    ):
         raise HTTPException(status_code=404, detail="Account not found")
-    
-    return service.get_account_history(account_id, current_user["id"], limit, skip)
+
+    return HistoryService(db).get_account_history(account_id, None, limit, skip)
 
 @router.get("/users/{user_id}/history", response_model=List[AccountHistoryResponse])
 async def get_user_history(
@@ -50,18 +46,12 @@ async def get_user_history(
 async def get_decrypt_count(
     account_id: int,
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
+    current_user = Depends(account_history_view)
 ):
     """Get the number of times an account's password has been decrypted"""
-    from app.models.account import Account
-    
-    # Verify user has access
-    account = db.query(Account).filter(
-        Account.id == account_id,
-        Account.userId == current_user["id"]
-    ).first()
-    
-    if not account:
+    if not AccountService(db, get_encryption_service()).can_access_account(
+        account_id, current_user["id"]
+    ):
         raise HTTPException(status_code=404, detail="Account not found")
     
     service = HistoryService(db)
@@ -73,18 +63,12 @@ async def get_decrypt_count(
 async def get_view_count(
     account_id: int,
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
+    current_user = Depends(account_history_view)
 ):
     """Get the number of times an account has been viewed"""
-    from app.models.account import Account
-    
-    # Verify user has access
-    account = db.query(Account).filter(
-        Account.id == account_id,
-        Account.userId == current_user["id"]
-    ).first()
-    
-    if not account:
+    if not AccountService(db, get_encryption_service()).can_access_account(
+        account_id, current_user["id"]
+    ):
         raise HTTPException(status_code=404, detail="Account not found")
     
     service = HistoryService(db)
