@@ -417,6 +417,10 @@
                   label="Export password"
                   outlined
                   autofocus
+                  hint="At least 12 characters"
+                  counter
+                  :error="Boolean(kdbxForm.password) && kdbxForm.password.length < 12"
+                  error-message="Password must be at least 12 characters"
                 >
                   <template v-slot:append>
                     <q-icon :name="showKdbxPassword ? 'visibility_off' : 'visibility'" class="cursor-pointer" @click="showKdbxPassword = !showKdbxPassword" />

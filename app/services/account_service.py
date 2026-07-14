@@ -94,7 +94,17 @@ class AccountService:
             ),
         )
 
+    def _is_admin(self, user_id: int) -> bool:
+        user = self._get_user(user_id)
+        return bool(user and (user.isAdminApp or user.isAdminAcc))
+
     def _access_filter(self, user_id: int, group_ids: Set[int]):
+        # PHP AccountFilterUser skips the ownership/group filter entirely for
+        # isAdminApp/isAdminAcc users; only the private-account visibility
+        # filter still applies to searches.
+        if self._is_admin(user_id):
+            return self._visibility_filter(user_id, group_ids)
+
         group_share_ids = self._get_group_share_ids(user_id, group_ids)
         filters = [
             Account.userId == user_id,
@@ -121,6 +131,10 @@ class AccountService:
         return and_(or_(*filters), self._visibility_filter(user_id, group_ids))
 
     def _can_edit_account(self, account: Account, user_id: int, group_ids: Set[int]) -> bool:
+        # PHP compileAccountAccess grants admins view+edit before any other
+        # check, including the private flags.
+        if self._is_admin(user_id):
+            return True
         if account.userId == user_id:
             return True
         if account.isPrivate:
@@ -272,11 +286,14 @@ class AccountService:
         query = self.db.query(Account).filter(Account.id == account_id)
         if user_id is not None:
             group_ids = self._get_user_group_ids(user_id)
-            query = query.filter(self._access_filter(user_id, group_ids))
-            if not self.db.query(Account).filter(Account.id == account_id, Account.userId == user_id).first():
-                account = self.db.query(Account).filter(Account.id == account_id).first()
-                if account and account.isPrivate:
-                    return None
+            # PHP applies the private filter only to searches; object-level
+            # ACL (compileAccountAccess) lets admins open any account by id.
+            if not self._is_admin(user_id):
+                query = query.filter(self._access_filter(user_id, group_ids))
+                if not self.db.query(Account).filter(Account.id == account_id, Account.userId == user_id).first():
+                    account = self.db.query(Account).filter(Account.id == account_id).first()
+                    if account and account.isPrivate:
+                        return None
         else:
             group_ids = None
         account = query.first()

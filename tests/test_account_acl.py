@@ -164,6 +164,39 @@ def test_primary_group_member_can_edit_like_php_acl(db_session, encryption_servi
     assert updated["title"] == "Edited by teammate"
 
 
+def test_admin_sees_and_edits_all_accounts_like_php(db_session, encryption_service, test_user):
+    admin_group = create_group(db_session, "Admins")
+    admin = create_user(db_session, "aclattest", "aclattest@example.com", admin_group.id)
+    admin.isUserAdmin = True
+    db_session.commit()
+
+    service = AccountService(db_session, encryption_service)
+    account = service.create_account(
+        AccountCreate(title="Unshared Account", password="secret123", is_public=True),
+        test_user.id,
+    )
+    private = service.create_account(
+        AccountCreate(title="Private Account", password="secret123", is_public=False),
+        test_user.id,
+    )
+
+    listed_ids = {a["id"] for a in service.get_accounts(admin.id)}
+    assert account["id"] in listed_ids
+    # PHP keeps the private filter in searches even for admins...
+    assert private["id"] not in listed_ids
+
+    visible = service.get_account(account["id"], admin.id)
+    assert visible is not None
+    assert visible["can_edit"] is True
+
+    # ...but object-level ACL (compileAccountAccess) grants direct access.
+    assert service.get_account(private["id"], admin.id) is not None
+
+    updated = service.update_account(account["id"], AccountUpdate(title="Edited by admin"), admin.id)
+    assert updated is not None
+    assert updated["title"] == "Edited by admin"
+
+
 def test_group_access_grant_and_revoke_controls_visibility(db_session, encryption_service, test_user):
     shared_group = create_group(db_session, "Project Group")
     member = create_user(db_session, "projectmember", "projectmember@example.com", shared_group.id)
