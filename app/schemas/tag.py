@@ -17,7 +17,7 @@ class TagResponse(TagBase):
     id: int
     user_id: Optional[int] = None
     created_at: Optional[datetime] = None
-    
+
     model_config = {"from_attributes": True}
 
 class AccountWithTag(BaseModel):

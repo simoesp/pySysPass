@@ -36,14 +36,14 @@ logger = logging.getLogger(__name__)
 
 class ImportService:
     """Base import service with common functionality"""
-    
+
     def __init__(self, db: Session, encryption_service: EncryptionService, user_id: int):
         self.db = db
         self.encryption = encryption_service
         self.user_id = user_id
         self.imported_accounts = []
         self.errors = []
-    
+
     def _encrypt_password(self, password: str) -> tuple:
         """Encrypt password using the encryption service"""
         encrypted = self.encryption.encrypt(password)
@@ -52,26 +52,26 @@ class ImportService:
     def _user_group_id(self) -> int:
         user = self.db.get(User, self.user_id)
         return user.userGroupId if user else 1
-    
+
     def _get_or_create_category(self, name: str) -> Category:
         """Get existing category or create new one"""
         result = self.db.execute(
             select(Category).where(Category.name == name)
         ).scalars().first()
-        
+
         if not result:
             result = Category(name=name, hash=make_item_hash(name))
             self.db.add(result)
             self.db.flush()
-        
+
         return result
-    
+
     def _get_or_create_client(self, name: str, contact: str = None, notes: str = None) -> Client:
         """Get existing client or create new one"""
         result = self.db.execute(
             select(Client).where(Client.name == name)
         ).scalars().first()
-        
+
         if not result:
             result = Client(
                 name=name,
@@ -83,27 +83,27 @@ class ImportService:
             result.contact = contact
             self.db.add(result)
             self.db.flush()
-        
+
         return result
-    
+
     def _get_or_create_tag(self, name: str, color: str = '#000000') -> Tag:
         """Get or create tag"""
         result = self.db.execute(
             select(Tag).where(Tag.name == name)
         ).scalars().first()
-        
+
         if not result:
             result = Tag(name=name, hash=make_item_hash(name))
             result.color = color
             self.db.add(result)
             self.db.flush()
-        
+
         return result
-    
+
     def import_accounts(self, data: List[Dict[str, Any]]) -> Dict[str, int]:
         """Import accounts from parsed data"""
         stats = {'success': 0, 'failed': 0, 'skipped': 0}
-        
+
         for item in data:
             try:
                 account = self._import_account(item)
@@ -116,19 +116,19 @@ class ImportService:
                 logger.exception("Account import row failed")
                 self.errors.append("Account import failed")
                 stats['failed'] += 1
-        
+
         self.db.commit()
         return stats
 
 
 class CsvImportService(ImportService):
     """CSV import service"""
-    
+
     def parse_csv(self, content: str, delimiter: str = ',') -> List[Dict[str, Any]]:
         """Parse CSV content into list of dictionaries"""
         reader = csv.DictReader(content.splitlines(), delimiter=delimiter)
         return list(reader)
-    
+
     def _import_account(self, data: Dict[str, str]) -> Optional[Account]:
         """Import a single account from CSV row"""
         # Map CSV columns to account fields
@@ -136,12 +136,12 @@ class CsvImportService(ImportService):
         if not name:
             self.errors.append("Account name is required")
             return None
-        
+
         # Get or create category
         category = None
         if data.get('category'):
             category = self._get_or_create_category(data['category'])
-        
+
         # Get or create client
         client = None
         if data.get('client'):
@@ -150,11 +150,11 @@ class CsvImportService(ImportService):
                 contact=data.get('contact') or '',
                 notes=data.get('client_notes') or ''
             )
-        
+
         # Encrypt password
         password = data.get('password', '')
         encrypted_pass, key = self._encrypt_password(password)
-        
+
         # Create account
         account = Account(
             userGroupId=self._user_group_id(),
@@ -170,10 +170,10 @@ class CsvImportService(ImportService):
             notes=data.get('notes') or data.get('description'),
             passDateChange=int(data['passDateChange']) if data.get('passDateChange') else None
         )
-        
+
         self.db.add(account)
         self.db.flush()
-        
+
         # Import tags
         if data.get('tags'):
             tag_names = [t.strip() for t in data['tags'].split(',')]
@@ -182,7 +182,7 @@ class CsvImportService(ImportService):
                     tag = self._get_or_create_tag(tag_name)
                     account_tag = AccountToTag(accountId=account.id, tagId=tag.id)
                     self.db.add(account_tag)
-        
+
         return account
 
 
@@ -220,7 +220,7 @@ class XmlImportService(ImportService):
             )
             root.append(parse_xml_safely(section_xml))
         root.remove(encrypted)
-    
+
     def parse_xml(self, content: str) -> List[Dict[str, Any]]:
         """Parse XML content into list of account dictionaries"""
         root = parse_xml_safely(content)
@@ -230,29 +230,29 @@ class XmlImportService(ImportService):
             return self._parse_native_xml(root)
 
         accounts = []
-        
+
         for account_elem in root.findall('.//account'):
             account_data = {}
-            
+
             # Basic fields
             for field in ['name', 'login', 'url', 'pass', 'notes', 'category', 'client']:
                 elem = account_elem.find(field)
                 if elem is not None and elem.text:
                     account_data[field] = elem.text
-            
+
             # Additional fields
             for field in ['passDateChange', 'countView', 'countDecrypt']:
                 elem = account_elem.find(field)
                 if elem is not None and elem.text:
                     account_data[field] = elem.text
-            
+
             # Tags
             tags_elem = account_elem.find('tags')
             if tags_elem is not None:
                 account_data['tags'] = ','.join([t.text for t in tags_elem.findall('tag') if t.text])
-            
+
             accounts.append(account_data)
-        
+
         return accounts
 
     def _parse_native_xml(self, root) -> List[Dict[str, Any]]:
@@ -289,24 +289,24 @@ class XmlImportService(ImportService):
             )
             accounts.append(account)
         return accounts
-    
+
     def _import_account(self, data: Dict[str, str]) -> Optional[Account]:
         """Import account from XML data"""
         name = data.get('name')
         if not name:
             self.errors.append("Account name is required")
             return None
-        
+
         # Get or create category
         category = None
         if data.get('category'):
             category = self._get_or_create_category(data['category'])
-        
+
         # Get or create client
         client = None
         if data.get('client'):
             client = self._get_or_create_client(data['client'])
-        
+
         password = data.get('pass', '')
         if data.get("_native_ciphertext") and password and data.get("key"):
             encrypted_pass = password
@@ -321,7 +321,7 @@ class XmlImportService(ImportService):
             encrypted_pass, key = self._encrypt_password(password)
         else:
             encrypted_pass, key = self._encrypt_password("")
-        
+
         account = Account(
             userGroupId=self._user_group_id(),
             userId=self.user_id,
@@ -338,10 +338,10 @@ class XmlImportService(ImportService):
             countView=int(data['countView']) if data.get('countView') else 0,
             countDecrypt=int(data['countDecrypt']) if data.get('countDecrypt') else 0
         )
-        
+
         self.db.add(account)
         self.db.flush()
-        
+
         # Import tags
         if data.get('tags'):
             tag_names = [t.strip() for t in data['tags'].split(',')]
@@ -350,13 +350,13 @@ class XmlImportService(ImportService):
                     tag = self._get_or_create_tag(tag_name)
                     account_tag = AccountToTag(accountId=account.id, tagId=tag.id)
                     self.db.add(account_tag)
-        
+
         return account
 
 
 class KeePassImportService(ImportService):
     """KeePass XML import service"""
-    
+
     def parse_keepass(self, content: str) -> List[Dict[str, Any]]:
         """Parse KeePass 2.x XML, preserving its group hierarchy as categories."""
         root = parse_xml_safely(content)
@@ -400,14 +400,14 @@ class KeePassImportService(ImportService):
         # KeePass groups map to sysPass categories using the nearest group name.
         walk_group(root_group)
         return accounts
-    
+
     def _import_account(self, data: Dict[str, str]) -> Optional[Account]:
         """Import account from KeePass data"""
         name = data.get('name')
         if not name:
             self.errors.append("Account name is required")
             return None
-        
+
         # Get or create category from KeePass group
         category = None
         if data.get('category'):
@@ -416,11 +416,11 @@ class KeePassImportService(ImportService):
         client = None
         if data.get('client'):
             client = self._get_or_create_client(data['client'])
-        
+
         # Encrypt password
         password = data.get('pass', '')
         encrypted_pass, key = self._encrypt_password(password)
-        
+
         account = Account(
             userGroupId=self._user_group_id(),
             userId=self.user_id,
@@ -434,7 +434,7 @@ class KeePassImportService(ImportService):
             key=key,
             notes=data.get('notes')
         )
-        
+
         self.db.add(account)
         self.db.flush()
 
@@ -442,13 +442,13 @@ class KeePassImportService(ImportService):
         for tag_name in filter(None, tag_names):
             tag = self._get_or_create_tag(tag_name)
             self.db.add(AccountToTag(accountId=account.id, tagId=tag.id))
-        
+
         return account
 
 
 class ExportService:
     """Export accounts to various formats"""
-    
+
     def __init__(self, db: Session, encryption_service: EncryptionService):
         self.db = db
         self.encryption = encryption_service
@@ -475,47 +475,47 @@ class ExportService:
                 )
             return decrypt_account_pass(pass_text, key_text, master_password)
         return self.encryption.decrypt(pass_text)
-    
+
     def export_to_csv(self, account_ids: List[int] = None) -> str:
         """Export accounts to CSV format"""
         from io import StringIO
-        
+
         output = StringIO()
         writer = csv.writer(output)
-        
+
         # Write header
         writer.writerow([
-            'name', 'login', 'url', 'password', 'notes', 
+            'name', 'login', 'url', 'password', 'notes',
             'category', 'client', 'tags', 'passDateChange'
         ])
-        
+
         # Query accounts
         query = select(Account)
         if account_ids is not None:
             query = query.where(Account.id.in_(account_ids))
-        
+
         accounts = self.db.execute(query).scalars().all()
-        
+
         for account in accounts:
             # Get category name
             category_name = ''
             if account.categoryId:
                 category = self.db.get(Category, account.categoryId)
                 category_name = category.name if category else ''
-            
+
             # Get client name
             client_name = ''
             if account.clientId:
                 client = self.db.get(Client, account.clientId)
                 client_name = client.name if client else ''
-            
+
             # Get tags
             tags = []
             for account_tag in account.tags:
                 tag = self.db.get(Tag, account_tag.tagId)
                 if tag:
                     tags.append(tag.name)
-            
+
             # Decrypt password for export
             password = ''  # nosec B105
             if account.pass_:
@@ -523,7 +523,7 @@ class ExportService:
                     password = self._decrypt_for_export(account)
                 except Exception:
                     password = '[encrypted]'  # nosec B105
-            
+
             writer.writerow([
                 account.name,
                 account.login or '',
@@ -535,9 +535,9 @@ class ExportService:
                 ','.join(tags),
                 account.passDateChange or ''
             ])
-        
+
         return output.getvalue()
-    
+
     @staticmethod
     def _php_xml_fragment(node) -> str:
         return ET.tostring(node, encoding="unicode", short_empty_elements=True).replace(" />", "/>")
@@ -665,7 +665,7 @@ class ExportService:
 
         body = self._php_xml_fragment(root)
         return '<?xml version="1.0" encoding="UTF-8"?>\n' + body
-    
+
     def export_to_keepass(
         self,
         account_ids: List[int] = None,
@@ -701,12 +701,12 @@ class ExportService:
         self._append_text(root_group, "IconID", 48)
         self._append_keepass_times(root_group)
         self._append_text(root_group, "IsExpanded", "True")
-        
+
         # Query accounts
         query = select(Account)
         if account_ids is not None:
             query = query.where(Account.id.in_(account_ids))
-        
+
         accounts = self.db.execute(query).scalars().all()
 
         category_groups = {}

@@ -108,7 +108,8 @@ class ConfigService:
             "check_notices": str(s.check_notices).lower() if s.check_notices is not None else "false",
             "log_enabled": str(s.log_enabled).lower() if s.log_enabled is not None else "true",
             "syslog_enabled": str(s.syslog_enabled).lower() if s.syslog_enabled is not None else "false",
-            "syslog_remote_enabled": str(s.syslog_remote_enabled).lower() if s.syslog_remote_enabled is not None else "false",
+            "syslog_remote_enabled":
+                str(s.syslog_remote_enabled).lower() if s.syslog_remote_enabled is not None else "false",
             "syslog_server": s.syslog_server,
             "syslog_port": str(s.syslog_port) if s.syslog_port is not None else None,
             "proxy_enabled": str(s.proxy_enabled).lower() if s.proxy_enabled is not None else "false",
@@ -140,7 +141,8 @@ class ConfigService:
             "mail_pass": s.mail_pass,
             "mail_security": s.mail_security,
             "mail_from": s.mail_from,
-            "mail_requests_enabled": str(s.mail_requests_enabled).lower() if s.mail_requests_enabled is not None else "false",
+            "mail_requests_enabled":
+                str(s.mail_requests_enabled).lower() if s.mail_requests_enabled is not None else "false",
             "mail_auth_enabled": str(s.mail_auth_enabled).lower() if s.mail_auth_enabled is not None else "false",
             "mail_recipients": s.mail_recipients,
         })
@@ -197,9 +199,12 @@ class ConfigService:
         self.set_many({
             "account_count": str(s.account_count) if s.account_count is not None else "12",
             "account_link": str(s.account_link).lower() if s.account_link is not None else "true",
-            "account_pass_to_image": str(s.account_pass_to_image).lower() if s.account_pass_to_image is not None else "false",
-            "account_full_group_access": str(s.account_full_group_access).lower() if s.account_full_group_access is not None else "false",
-            "account_expire_enabled": str(s.account_expire_enabled).lower() if s.account_expire_enabled is not None else "false",
+            "account_pass_to_image":
+                str(s.account_pass_to_image).lower() if s.account_pass_to_image is not None else "false",
+            "account_full_group_access":
+                str(s.account_full_group_access).lower() if s.account_full_group_access is not None else "false",
+            "account_expire_enabled":
+                str(s.account_expire_enabled).lower() if s.account_expire_enabled is not None else "false",
             "account_expire_time": str(s.account_expire_time) if s.account_expire_time is not None else "10368000",
             "global_search": str(s.global_search).lower() if s.global_search is not None else "true",
             "results_as_cards": str(s.results_as_cards).lower() if s.results_as_cards is not None else "false",
@@ -208,7 +213,8 @@ class ConfigService:
             "files_allowed_size": str(s.files_allowed_size) if s.files_allowed_size is not None else "1024",
             "files_allowed_exts": s.files_allowed_exts,
             "publinks_enabled": str(s.publinks_enabled).lower() if s.publinks_enabled is not None else "false",
-            "publinks_image_enabled": str(s.publinks_image_enabled).lower() if s.publinks_image_enabled is not None else "false",
+            "publinks_image_enabled":
+                str(s.publinks_image_enabled).lower() if s.publinks_image_enabled is not None else "false",
             "publinks_max_time": str(s.publinks_max_time) if s.publinks_max_time is not None else "600",
             "publinks_max_views": str(s.publinks_max_views) if s.publinks_max_views is not None else "3",
         })

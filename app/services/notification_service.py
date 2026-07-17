@@ -46,7 +46,7 @@ class NotificationService:
         if send_email:
             self._try_email(user_id, notification_type, message)
         return notification
-    
+
     def get_notifications(
         self,
         user_id: int,
@@ -58,14 +58,14 @@ class NotificationService:
         query = self.db.query(Notification).filter(
             Notification.userId == user_id
         )
-        
+
         if unread_only:
-            query = query.filter(Notification.checked == False)
-        
+            query = query.filter(Notification.checked.is_(False))
+
         return query.order_by(
             Notification.date.desc()
         ).offset(skip).limit(limit).all()
-    
+
     def get_notification(self, notification_id: int, user_id: int) -> Optional[Notification]:
         """Get a specific notification"""
         notification = self.db.query(Notification).filter(
@@ -76,56 +76,56 @@ class NotificationService:
         if getattr(notification, "userId", None) != user_id:
             return None
         return notification
-    
+
     def mark_as_read(self, notification_id: int, user_id: int) -> Optional[Notification]:
         """Mark a notification as read"""
         notification = self.get_notification(notification_id, user_id)
-        
+
         if not notification:
             return None
-        
+
         notification.checked = True
         self.db.commit()
         self.db.refresh(notification)
         return notification
-    
+
     def mark_all_as_read(self, user_id: int) -> int:
         """Mark all notifications as read for a user"""
         count = self.db.query(Notification).filter(
             Notification.userId == user_id,
-            Notification.checked == False
+            Notification.checked.is_(False)
         ).update({"checked": True})
-        
+
         self.db.commit()
         return count
-    
+
     def delete_notification(self, notification_id: int, user_id: int) -> bool:
         """Delete a notification"""
         notification = self.get_notification(notification_id, user_id)
-        
+
         if not notification:
             return False
-        
+
         self.db.delete(notification)
         self.db.commit()
         return True
-    
+
     def delete_all_notifications(self, user_id: int) -> int:
         """Delete all notifications for a user"""
         count = self.db.query(Notification).filter(
             Notification.userId == user_id
         ).delete()
-        
+
         self.db.commit()
         return count
-    
+
     def get_unread_count(self, user_id: int) -> int:
         """Get the number of unread notifications for a user"""
         return self.db.query(Notification).filter(
             Notification.userId == user_id,
-            Notification.checked == False
+            Notification.checked.is_(False)
         ).count()
-    
+
     def get_notifications_by_type(
         self,
         user_id: int,

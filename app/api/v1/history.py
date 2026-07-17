@@ -53,10 +53,10 @@ async def get_decrypt_count(
         account_id, current_user["id"]
     ):
         raise HTTPException(status_code=404, detail="Account not found")
-    
+
     service = HistoryService(db)
     count = service.get_account_decrypt_count(account_id)
-    
+
     return {"account_id": account_id, "decrypt_count": count}
 
 @router.get("/accounts/{account_id}/history/view-count")
@@ -70,8 +70,8 @@ async def get_view_count(
         account_id, current_user["id"]
     ):
         raise HTTPException(status_code=404, detail="Account not found")
-    
+
     service = HistoryService(db)
     count = service.get_account_view_count(account_id)
-    
+
     return {"account_id": account_id, "view_count": count}

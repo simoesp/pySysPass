@@ -12,9 +12,9 @@ async def test_create_user(db_session):
         password="securepassword123",
         is_admin=False
     )
-    
+
     user = service.create_user(user_data)
-    
+
     assert user.id is not None
     assert user.username == "testuser"
     assert user.email == "test@example.com"
@@ -23,7 +23,7 @@ async def test_create_user(db_session):
 @pytest.mark.asyncio
 async def test_get_users(db_session):
     service = UserService(db_session)
-    
+
     # Create test users
     for i in range(3):
         service.create_user(UserCreate(
@@ -31,9 +31,9 @@ async def test_get_users(db_session):
             email=f"user{i}@example.com",
             password="password123"
         ))
-    
+
     users = service.get_users()
-    
+
     assert len(users) == 3
 
 @pytest.mark.asyncio
@@ -44,9 +44,9 @@ async def test_get_user(db_session):
         email="single@example.com",
         password="password123"
     ))
-    
+
     found = service.get_user(user.id)
-    
+
     assert found is not None
     assert found.id == user.id
 
@@ -58,9 +58,9 @@ async def test_get_user_by_username(db_session):
         email="unique@example.com",
         password="password123"
     ))
-    
+
     found = service.get_user_by_username("uniqueuser")
-    
+
     assert found is not None
     assert found.username == "uniqueuser"
 
@@ -72,12 +72,12 @@ async def test_update_user(db_session):
         email="old@example.com",
         password="password123"
     ))
-    
+
     updated = service.update_user(user.id, UserUpdate(
         email="new@example.com",
         is_admin=True
     ))
-    
+
     assert updated.email == "new@example.com"
     assert updated.isUserAdmin
 
@@ -89,10 +89,10 @@ async def test_delete_user(db_session):
         email="delete@example.com",
         password="password123"
     ))
-    
+
     result = service.delete_user(user.id)
-    
-    assert result == True
+
+    assert result
     assert service.get_user(user.id) is None
 
 @pytest.mark.asyncio
@@ -103,7 +103,7 @@ async def test_verify_password(db_session):
         email="password@example.com",
         password="correctpassword"
     ))
-    
+
     assert service.verify_user_password(user, "correctpassword")
     assert not service.verify_user_password(user, "wrongpassword")
 
@@ -115,9 +115,9 @@ async def test_update_password(db_session):
         email="newpass@example.com",
         password="oldpassword"
     ))
-    
+
     updated = service.update_user_password(user.id, "newpassword")
-    
+
     assert service.verify_user_password(updated, "newpassword")
     assert not service.verify_user_password(updated, "oldpassword")
     assert updated.isChangedPass is True
@@ -131,7 +131,7 @@ async def test_cannot_create_duplicate_username(db_session):
         email="first@example.com",
         password="password123"
     ))
-    
+
     with pytest.raises(Exception):
         service.create_user(UserCreate(
             username="duplicate",

@@ -142,6 +142,20 @@ def test_ldap_unreachable_falls_back_to_none(db_session, ldap_enabled, monkeypat
     assert authenticate_ldap_login(db_session, "unixuser", "QazWsxEdc!!") is None
 
 
+def test_user_response_exposes_ldap_origin(db_session, ldap_enabled, fake_ldap, test_user):
+    from app.schemas.user import UserResponse
+    from app.services.user_service import UserService
+
+    ldap_user = authenticate_ldap_login(db_session, "unixuser", "QazWsxEdc!!")
+    assert UserResponse.model_validate(ldap_user).is_ldap is True
+    assert UserResponse.model_validate(test_user).is_ldap is False
+
+    # The /users list endpoint serializes through UserService.to_response
+    service = UserService(db_session)
+    assert service.to_response(ldap_user)["is_ldap"] is True
+    assert service.to_response(test_user)["is_ldap"] is False
+
+
 def test_ldap_login_uses_default_group_and_profile(db_session, ldap_enabled, fake_ldap):
     runtime_json_config.set_runtime_config_value("ldap_defaultgroup", "3")
     user = authenticate_ldap_login(db_session, "unixuser", "QazWsxEdc!!")

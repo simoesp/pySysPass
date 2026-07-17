@@ -76,9 +76,9 @@ async def get_accounts_by_tag(
     tag = service.get_tag(tag_id)
     if not tag:
         raise HTTPException(status_code=404, detail="Tag not found")
-    
+
     accounts = service.search_accounts_by_tag(tag_id, current_user["id"])
-    
+
     # Format response
     result = []
     for account in accounts:
@@ -100,25 +100,25 @@ async def add_tag_to_account(
 ):
     """Add a tag to an account"""
     service = TagService(db)
-    
+
     # Verify account exists and belongs to user
     from app.models.account import Account
     account = db.query(Account).filter(
         Account.id == account_id,
         Account.userId == current_user["id"]
     ).first()
-    
+
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
-    
+
     # Verify tag exists
     tag = service.get_tag(tag_id)
     if not tag:
         raise HTTPException(status_code=404, detail="Tag not found")
-    
+
     if not service.add_tag_to_account(account_id, tag_id):
         raise HTTPException(status_code=409, detail="Tag already added to this account")
-    
+
     return {"message": "Tag added successfully"}
 
 @router.delete("/accounts/{account_id}/tags/{tag_id}")
@@ -130,20 +130,20 @@ async def remove_tag_from_account(
 ):
     """Remove a tag from an account"""
     service = TagService(db)
-    
+
     # Verify account exists and belongs to user
     from app.models.account import Account
     account = db.query(Account).filter(
         Account.id == account_id,
         Account.userId == current_user["id"]
     ).first()
-    
+
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
-    
+
     if not service.remove_tag_from_account(account_id, tag_id):
         raise HTTPException(status_code=404, detail="Tag not associated with this account")
-    
+
     return {"message": "Tag removed successfully"}
 
 @router.get("/accounts/{account_id}/tags", response_model=List[TagResponse])
@@ -158,9 +158,9 @@ async def get_account_tags(
         Account.id == account_id,
         Account.userId == current_user["id"]
     ).first()
-    
+
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
-    
+
     service = TagService(db)
     return service.get_account_tags(account_id)

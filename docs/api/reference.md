@@ -76,12 +76,17 @@ Successful response:
   "name": "Alice Example",
   "is_admin": false,
   "is_active": true,
+  "is_ldap": false,
   "user_profile_id": 1,
   "two_factor_enabled": false,
   "created_at": "2026-06-30T12:34:56",
   "permissions": null
 }
 ```
+
+`is_ldap` reports the user's origin: `true` for accounts provisioned or
+synced from the directory, `false` for internal accounts. The Users page
+shows it as the Source column.
 
 ### Login
 

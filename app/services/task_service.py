@@ -54,7 +54,7 @@ class Task:
         self.last_run = None
         self.next_run = None
         self.status = "pending"
-    
+
     def to_dict(self) -> Dict:
         return {
             'name': self.name,
@@ -70,7 +70,7 @@ class Task:
 
 class TaskService:
     """Service for managing and executing scheduled tasks"""
-    
+
     def __init__(self, db=None):
         self.tasks: Dict[str, Task] = {}
         self.db = db
@@ -80,7 +80,7 @@ class TaskService:
     @staticmethod
     def _utc_now_naive() -> datetime:
         return datetime.now(UTC).replace(tzinfo=None)
-    
+
     def register_task(self, task: Task) -> bool:
         """Register a new task"""
         try:
@@ -89,7 +89,7 @@ class TaskService:
             return True
         except Exception as e:
             raise Exception(f"Failed to register task: {str(e)}")
-    
+
     def unregister_task(self, task_name: str) -> bool:
         """Unregister a task"""
         if task_name in self.tasks:
@@ -97,24 +97,24 @@ class TaskService:
             del self.tasks[task_name]
             return True
         return False
-    
+
     def get_all_tasks(self) -> List[Dict]:
         """Get all registered tasks"""
         return [task.to_dict() for task in self.tasks.values()]
-    
+
     def get_task(self, task_name: str) -> Optional[Dict]:
         """Get a specific task"""
         if task_name in self.tasks:
             return self.tasks[task_name].to_dict()
         return None
-    
+
     def enable_task(self, task_name: str) -> bool:
         """Enable a task"""
         if task_name in self.tasks:
             self.tasks[task_name].enabled = True
             return True
         return False
-    
+
     def disable_task(self, task_name: str) -> bool:
         """Disable a task"""
         if task_name in self.tasks:
@@ -122,20 +122,20 @@ class TaskService:
             schedule.clear(task_name)
             return True
         return False
-    
+
     def run_task_now(self, task_name: str) -> bool:
         """Run a task immediately"""
         if task_name not in self.tasks:
             return False
-        
+
         task = self.tasks[task_name]
         return self._execute_task(task)
-    
+
     def _schedule_task(self, task: Task):
         """Schedule a task based on its configuration"""
         if not task.enabled:
             return
-        
+
         schedule.clear(task.name)
         if task.schedule_type == 'daily':
             if task.schedule_time:
@@ -155,38 +155,38 @@ class TaskService:
             schedule.every().hour.do(self._execute_task, task).tag(task.name)
         else:
             raise ValueError(f"Unsupported schedule_type: {task.schedule_type}")
-    
+
     def _execute_task(self, task: Task) -> bool:
         """Execute a task"""
         try:
             task.status = "running"
             task.last_run = datetime.now()
-            
+
             if task.callback:
                 task.callback()
-            
+
             task.status = "completed"
             task.next_run = self._calculate_next_run(task)
             return True
-        
+
         except Exception as e:
             task.status = f"failed: {str(e)}"
             return False
-    
+
     def _calculate_next_run(self, task: Task) -> datetime:
         """Calculate next run time for a task"""
         now = datetime.now()
-        
+
         if task.schedule_type == 'daily' and task.schedule_time:
             hour, minute = self._parse_schedule_time(task.schedule_time)
             next_run = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
             if next_run < now:
                 next_run += timedelta(days=1)
             return next_run
-        
+
         elif task.schedule_type == 'hourly':
             return now + timedelta(hours=1)
-        
+
         elif task.schedule_type == 'weekly':
             hour, minute = self._parse_schedule_time(task.schedule_time or "00:00")
             next_run = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
@@ -194,7 +194,7 @@ class TaskService:
             if next_run <= now:
                 next_run += timedelta(weeks=1)
             return next_run
-        
+
         return now + timedelta(days=1)
 
     def _parse_schedule_time(self, value: str) -> tuple[int, int]:
@@ -205,28 +205,28 @@ class TaskService:
         if hour not in range(24) or minute not in range(60):
             raise ValueError("schedule_time must use HH:MM format")
         return hour, minute
-    
+
     def start_scheduler(self):
         """Start the task scheduler in background thread"""
         if self._running:
             return
-        
+
         self._running = True
-        
+
         def run_scheduler():
             while self._running:
                 schedule.run_pending()
                 threading.Event().wait(1)
-        
+
         self._thread = threading.Thread(target=run_scheduler, daemon=True)
         self._thread.start()
-    
+
     def stop_scheduler(self):
         """Stop the task scheduler"""
         self._running = False
         if self._thread:
             self._thread.join(timeout=5)
-    
+
     # Default task implementations
     def check_password_expiry(self) -> Dict:
         """Check for expired account passwords, create notifications, and email users."""
@@ -269,7 +269,7 @@ class TaskService:
                         pass
         self.db.commit()
         return {"checked": checked, "expiring": expiring, "notifications_created": created, "emails_sent": emails_sent}
-    
+
     def cleanup_old_notifications(self, days: int = 30) -> Dict:
         """Delete notifications older than specified days"""
         if self.db is None:
@@ -281,7 +281,7 @@ class TaskService:
         deleted = self.db.query(Notification).filter(Notification.date < cutoff).delete()
         self.db.commit()
         return {"deleted": deleted}
-    
+
     def generate_weekly_report(self) -> Dict:
         """Generate weekly activity report counters."""
         if self.db is None:

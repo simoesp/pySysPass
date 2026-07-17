@@ -234,7 +234,7 @@ async def rekey_encryption(
     new_enc = EncryptionService(body.new_key)
 
     # Re-key accounts
-    accounts = db.query(Account).filter(Account.pass_ != None).all()
+    accounts = db.query(Account).filter(Account.pass_.is_not(None)).all()
     errors = []
     rekey_count = 0
 
@@ -248,7 +248,7 @@ async def rekey_encryption(
             errors.append(f"Account {acc.id}: {e}")
 
     # Re-key account history snapshots
-    history_rows = db.query(AccountHistory).filter(AccountHistory.pass_ != None).all()
+    history_rows = db.query(AccountHistory).filter(AccountHistory.pass_.is_not(None)).all()
     history_count = 0
     for row in history_rows:
         try:

@@ -19,5 +19,5 @@ class CategoryResponse(CategoryBase):
     id: int
     dateCreate: Optional[datetime] = None
     dateUpdate: Optional[datetime] = None
-    
+
     model_config = {"from_attributes": True}

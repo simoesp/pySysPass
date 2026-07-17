@@ -189,7 +189,11 @@ async def update_custom_field_type(
 
 
 @router.delete("/types/{type_id}")
-async def delete_custom_field_type(type_id: int, db: Session = Depends(get_db), current_user=Depends(require_permission('mgm_custom_fields'))):
+async def delete_custom_field_type(
+    type_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_permission('mgm_custom_fields')),
+):
     """Delete a custom field type"""
     service = CustomFieldTypeService(db, get_encryption_service())
     success = service.delete(type_id)
@@ -313,7 +317,11 @@ async def update_custom_field_definition(
 
 
 @router.delete("/definitions/{def_id}")
-async def delete_custom_field_definition(def_id: int, db: Session = Depends(get_db), current_user=Depends(require_permission('mgm_custom_fields'))):
+async def delete_custom_field_definition(
+    def_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_permission('mgm_custom_fields')),
+):
     """Delete a custom field definition"""
     service = CustomFieldDefService(db, get_encryption_service())
     success = service.delete(def_id)

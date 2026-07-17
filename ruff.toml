@@ -1,0 +1,16 @@
+# PEP 8 enforcement (see AGENTS.md "Code style").
+# The project's established line limit is 120 columns.
+line-length = 120
+
+[lint]
+select = ["E", "W", "N"]
+
+[lint.per-file-ignores]
+# PHP schema parity (AGENTS.md): columns, shims and API fields must keep
+# the upstream sysPass PHP names (userGroupId, isLdap, dateAdd, ...).
+"app/models/*" = ["N802", "N815", "E501"]  # E501: aligned column tables
+"app/schemas/*" = ["N815"]
+# Mirrors the Defuse PHP reference implementation's HKDF variable naming.
+"app/core/defuse_compat.py" = ["N806"]
+# Fallback stub keeps ldap3's exception class name.
+"app/services/ldap_service.py" = ["N818"]

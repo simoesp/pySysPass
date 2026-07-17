@@ -181,50 +181,50 @@ class BackupService:
             if staging.exists():
                 shutil.rmtree(staging)
             raise RuntimeError(f"Backup failed: {exc}") from exc
-    
+
     def create_database_backup(self, db_dump_path: str) -> str:
         """Create a database-only backup"""
         if not os.path.exists(db_dump_path):
             raise FileNotFoundError(f"Database dump not found: {db_dump_path}")
-        
+
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         backup_name = f"syspass_db_backup_{timestamp}.sql"
         backup_path = self.backup_dir / backup_name
-        
+
         shutil.copy2(db_dump_path, backup_path)
         return str(backup_path)
-    
+
     def create_data_backup(self) -> str:
         """Backup data directory (RSA keys, etc.)"""
         data_dir = Path("./data")
         if not data_dir.exists():
             raise FileNotFoundError("Data directory not found")
-        
+
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         backup_name = f"syspass_data_backup_{timestamp}"
         backup_path = self.backup_dir / backup_name
-        
+
         try:
             shutil.copytree(data_dir, backup_path)
-            
+
             # Create archive
             archive_path = self.backup_dir / f"{backup_name}.zip"
             shutil.make_archive(str(backup_path), 'zip', backup_path)
-            
+
             # Clean up
             shutil.rmtree(backup_path)
-            
+
             return str(archive_path)
-        
+
         except Exception as e:
             if backup_path.exists():
                 shutil.rmtree(backup_path)
             raise Exception(f"Data backup failed: {str(e)}")
-    
+
     def list_backups(self) -> list:
         """List all available backups"""
         backups = []
-        
+
         for file in self.backup_dir.glob("*.zip"):
             stat = file.stat()
             contents = self._inspect_archive(file)
@@ -236,11 +236,11 @@ class BackupService:
                 'db_included': contents["db_included"],
                 'data_included': contents["data_included"],
             })
-        
+
         # Sort by creation time (newest first)
         backups.sort(key=lambda x: x['created_at'], reverse=True)
         return backups
-    
+
     def restore_backup(self, filename: str, db_url: Optional[str] = None) -> Dict:
         """Restore from a backup archive."""
         archive_path = self.resolve_backup_path(filename)
@@ -292,26 +292,26 @@ class BackupService:
                 shutil.rmtree(restore_dir, ignore_errors=True)
             if rollback_data_dir.exists():
                 shutil.rmtree(rollback_data_dir, ignore_errors=True)
-    
+
     def delete_backup(self, filename: str) -> bool:
         """Delete a backup file"""
         backup_path = self.resolve_backup_path(filename)
         backup_path.unlink()
         return True
-    
+
     def cleanup_old_backups(self, days: int = 30) -> int:
         """Delete backups older than specified days"""
         from datetime import timedelta
-        
+
         cutoff_date = datetime.now() - timedelta(days=days)
         deleted_count = 0
-        
+
         for file in self.backup_dir.glob("*.zip"):
             stat = file.stat()
             file_date = datetime.fromtimestamp(stat.st_ctime)
-            
+
             if file_date < cutoff_date:
                 os.remove(file)
                 deleted_count += 1
-        
+
         return deleted_count

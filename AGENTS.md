@@ -13,11 +13,13 @@ Rules:
 
 ## Code style
 
-All Python code must follow PEP 8 conventions.
+All Python code must follow PEP 8 conventions. Enforcement is codified in
+`ruff.toml` (120-column limit, pycodestyle + naming rules, with documented
+exemptions for PHP-parity names); run `ruff check` before committing.
 
 Rules:
 - Use 4 spaces per indentation level; never tabs.
-- Keep lines within 79 characters (72 for docstrings/comments), unless the surrounding code consistently uses a longer project limit.
+- Keep lines within the project limit of 120 characters (set in `ruff.toml`).
 - Naming: `snake_case` for functions, methods, and variables; `PascalCase` for classes; `UPPER_SNAKE_CASE` for constants; a leading underscore for internal names.
 - Imports at the top of the file, one per line, grouped in order: standard library, third-party, local — with a blank line between groups.
 - Two blank lines around top-level functions and classes; one blank line between methods.

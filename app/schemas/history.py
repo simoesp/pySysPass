@@ -15,7 +15,7 @@ class AccountHistoryResponse(AccountHistoryBase):
     account_id: int
     user_id: int
     date_add: Optional[datetime] = None
-    
+
     model_config = {"from_attributes": True}
 
 class HistoryAction:

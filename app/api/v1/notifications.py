@@ -54,7 +54,7 @@ async def create_notification(
     # In production, add admin check here
     if notification.user_id != current_user["id"] and not current_user.get("is_admin", False):
         raise HTTPException(status_code=403, detail="Not authorized")
-    
+
     service = NotificationService(db)
     return service.create_notification(
         user_id=notification.user_id,
@@ -71,10 +71,10 @@ async def get_notification(
     """Get a specific notification"""
     service = NotificationService(db)
     notification = service.get_notification(notification_id, current_user["id"])
-    
+
     if not notification:
         raise HTTPException(status_code=404, detail="Notification not found")
-    
+
     return notification
 
 @router.post("/notifications/{notification_id}/read")
@@ -86,10 +86,10 @@ async def mark_as_read(
     """Mark a notification as read"""
     service = NotificationService(db)
     updated = service.mark_as_read(notification_id, current_user["id"])
-    
+
     if not updated:
         raise HTTPException(status_code=404, detail="Notification not found")
-    
+
     return {"message": "Notification marked as read"}
 
 @router.post("/notifications/read-all")
@@ -100,7 +100,7 @@ async def mark_all_as_read(
     """Mark all notifications as read"""
     service = NotificationService(db)
     count = service.mark_all_as_read(current_user["id"])
-    
+
     return {"message": f"{count} notifications marked as read"}
 
 @router.delete("/notifications/{notification_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -111,10 +111,10 @@ async def delete_notification(
 ):
     """Delete a notification"""
     service = NotificationService(db)
-    
+
     if not service.delete_notification(notification_id, current_user["id"]):
         raise HTTPException(status_code=404, detail="Notification not found")
-    
+
     return None
 
 @router.delete("/notifications")
@@ -125,7 +125,7 @@ async def delete_all_notifications(
     """Delete all notifications for the current user"""
     service = NotificationService(db)
     count = service.delete_all_notifications(current_user["id"])
-    
+
     return {"message": f"{count} notifications deleted"}
 
 @router.get("/notifications/type/{notification_type}", response_model=List[NotificationResponse])

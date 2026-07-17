@@ -13,7 +13,7 @@ class NotificationResponse(NotificationBase):
     user_id: int
     is_read: bool
     date_add: int
-    
+
     model_config = {"from_attributes": True}
 
 class NotificationType:

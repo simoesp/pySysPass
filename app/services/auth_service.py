@@ -95,7 +95,8 @@ def get_master_password_hash_row(db) -> Optional[Config]:
 
 def _encrypt_short(plaintext: str) -> str:
     """Encrypt a short string (master password) with ENCRYPTION_KEY for JWT embedding."""
-    import os, base64
+    import os
+    import base64
     from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
     key = settings.ENCRYPTION_KEY.encode()[:32].ljust(32, b'\x00')
@@ -110,7 +111,7 @@ def _decrypt_short(token_value: str) -> Optional[str]:
     try:
         import base64
         from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-    
+
         raw = base64.b64decode(token_value)
         iv, enc = raw[:16], raw[16:]
         key = settings.ENCRYPTION_KEY.encode()[:32].ljust(32, b'\x00')

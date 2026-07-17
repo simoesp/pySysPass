@@ -23,7 +23,7 @@ class UserGroupResponse(UserGroupBase):
     id: int
     date_create: Optional[datetime] = None
     date_update: Optional[datetime] = None
-    
+
     model_config = {"from_attributes": True}
 
 class UserGroupMember(BaseModel):

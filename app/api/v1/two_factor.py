@@ -45,22 +45,22 @@ async def setup_two_factor(
     """
     service = UserService(db)
     user = service.get_user(current_user["id"])
-    
+
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    
+
     # Verify password
     if not service.verify_user_password(user, request.password):
         raise HTTPException(status_code=401, detail="Invalid password")
-    
+
     # Generate new secret
     secret = TwoFactorService.generate_secret()
     provisioning_uri = TwoFactorService.generate_provisioning_uri(
-        secret, 
+        secret,
         user.username,
         issuer="sysPass"
     )
-    
+
     # In production, store secret temporarily in session/Redis
     # For now, return it (client should store temporarily)
     return {
@@ -82,24 +82,24 @@ async def enable_two_factor(
     """
     service = UserService(db)
     user = service.get_user(current_user["id"])
-    
+
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    
+
     # In production, get secret from session/Redis
     # For demo, we expect the client to pass the secret
     # This is a simplified version - production should use session storage
     secret = request.code  # Placeholder - real impl needs session storage
-    
+
     # Generate backup codes
     backup_codes = TwoFactorService.generate_backup_codes(8)
     user.twoFactorAuth = True
     user.twoFactorSecret = base64.b64encode(secret.encode()).decode() if secret else None
     user.twoFactorBackupCodes = '\n'.join(backup_codes)
-    
+
     db.commit()
     db.refresh(user)
-    
+
     return {
         "message": "2FA enabled successfully",
         "backup_codes": backup_codes,
@@ -115,25 +115,25 @@ async def disable_two_factor(
     """Disable 2FA for the user"""
     service = UserService(db)
     user = service.get_user(current_user["id"])
-    
+
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    
+
     if not user.twoFactorAuth:
         raise HTTPException(status_code=400, detail="2FA is not enabled")
-    
+
     # Verify password
     if not service.verify_user_password(user, request.password):
         raise HTTPException(status_code=401, detail="Invalid password")
-    
+
     # Disable 2FA
     user.twoFactorAuth = False
     user.twoFactorSecret = None
     user.twoFactorBackupCodes = None
-    
+
     db.commit()
     db.refresh(user)
-    
+
     return {"message": "2FA disabled successfully"}
 
 @router.post("/2fa/verify")
@@ -147,20 +147,20 @@ async def verify_two_factor_code(
     """
     service = UserService(db)
     user = service.get_user(current_user["id"])
-    
+
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    
+
     if not user.twoFactorAuth:
         raise HTTPException(status_code=400, detail="2FA is not enabled for this user")
-    
+
     # Decode the secret
     secret = base64.b64decode(user.twoFactorSecret).decode()
-    
+
     # Verify the code
     if not TwoFactorService.verify_token(secret, request.code):
         raise HTTPException(status_code=401, detail="Invalid 2FA code")
-    
+
     return {"message": "2FA verification successful"}
 
 @router.post("/2fa/backup-code")
@@ -174,26 +174,26 @@ async def use_backup_code(
     """
     service = UserService(db)
     user = service.get_user(current_user["id"])
-    
+
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    
+
     if not user.twoFactorAuth:
         raise HTTPException(status_code=400, detail="2FA is not enabled")
-    
+
     if not user.twoFactorBackupCodes:
         raise HTTPException(status_code=400, detail="No backup codes available")
-    
+
     codes = user.twoFactorBackupCodes.strip().split('\n')
     success, remaining_codes = TwoFactorService.verify_backup_code(codes, request.code)
-    
+
     if not success:
         raise HTTPException(status_code=401, detail="Invalid backup code")
-    
+
     # Update backup codes
     user.twoFactorBackupCodes = '\n'.join(remaining_codes)
     db.commit()
-    
+
     return {
         "message": "Backup code used successfully",
         "remaining_codes": len(remaining_codes)

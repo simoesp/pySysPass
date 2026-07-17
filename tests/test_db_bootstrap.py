@@ -52,8 +52,10 @@ def test_normalize_bootstrap_statement_rewrites_schema_statements():
 
 def test_order_bootstrap_statements_sorts_foreign_key_dependencies():
     statements = [
-        "CREATE TABLE IF NOT EXISTS `CustomFieldData` (`definitionId` int, CONSTRAINT `fk_1` FOREIGN KEY (`definitionId`) REFERENCES `CustomFieldDefinition` (`id`))",
-        "CREATE TABLE IF NOT EXISTS `CustomFieldDefinition` (`typeId` int, CONSTRAINT `fk_2` FOREIGN KEY (`typeId`) REFERENCES `CustomFieldType` (`id`))",
+        "CREATE TABLE IF NOT EXISTS `CustomFieldData` (`definitionId` int, CONSTRAINT `fk_1` "
+        "FOREIGN KEY (`definitionId`) REFERENCES `CustomFieldDefinition` (`id`))",
+        "CREATE TABLE IF NOT EXISTS `CustomFieldDefinition` (`typeId` int, CONSTRAINT `fk_2` "
+        "FOREIGN KEY (`typeId`) REFERENCES `CustomFieldType` (`id`))",
         "CREATE TABLE IF NOT EXISTS `CustomFieldType` (`id` int NOT NULL)",
         "INSERT IGNORE INTO CustomFieldType (id) VALUES (1)",
     ]
@@ -62,8 +64,10 @@ def test_order_bootstrap_statements_sorts_foreign_key_dependencies():
 
     assert ordered == [
         "CREATE TABLE IF NOT EXISTS `CustomFieldType` (`id` int NOT NULL)",
-        "CREATE TABLE IF NOT EXISTS `CustomFieldDefinition` (`typeId` int, CONSTRAINT `fk_2` FOREIGN KEY (`typeId`) REFERENCES `CustomFieldType` (`id`))",
-        "CREATE TABLE IF NOT EXISTS `CustomFieldData` (`definitionId` int, CONSTRAINT `fk_1` FOREIGN KEY (`definitionId`) REFERENCES `CustomFieldDefinition` (`id`))",
+        "CREATE TABLE IF NOT EXISTS `CustomFieldDefinition` (`typeId` int, CONSTRAINT `fk_2` "
+        "FOREIGN KEY (`typeId`) REFERENCES `CustomFieldType` (`id`))",
+        "CREATE TABLE IF NOT EXISTS `CustomFieldData` (`definitionId` int, CONSTRAINT `fk_1` "
+        "FOREIGN KEY (`definitionId`) REFERENCES `CustomFieldDefinition` (`id`))",
         "INSERT IGNORE INTO CustomFieldType (id) VALUES (1)",
     ]
 

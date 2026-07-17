@@ -36,7 +36,8 @@ class Plugin(Plugin):
         out = Path(self.config["output_file"])
         out.parent.mkdir(parents=True, exist_ok=True)
         with out.open("a", encoding="utf-8") as f:
-            f.write(json.dumps({"hook": "on_account_created", "actor_user_id": actor_user_id, "payload": payload}) + "\\n")
+            record = {"hook": "on_account_created", "actor_user_id": actor_user_id, "payload": payload}
+            f.write(json.dumps(record) + "\\n")
         return {"ok": True}
 """.strip(),
         encoding="utf-8",

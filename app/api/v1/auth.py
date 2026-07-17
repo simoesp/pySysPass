@@ -130,7 +130,10 @@ async def install(body: InstallRequest, db: Session = Depends(get_db)):
 async def register(user: UserCreate, db: Session = Depends(get_db)):
     raise HTTPException(
         status_code=410,
-        detail="Public registration has been replaced by /api/v1/auth/install for first-time setup and administrator-managed user creation afterwards.",
+        detail=(
+            "Public registration has been replaced by /api/v1/auth/install for first-time "
+            "setup and administrator-managed user creation afterwards."
+        ),
     )
 
 @router.post("/login", response_model=Token)

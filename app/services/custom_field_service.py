@@ -27,21 +27,21 @@ ACCOUNT_MODULE_ID = MODULE_ACCOUNT
 
 class CustomFieldTypeService:
     """Service for custom field type definitions"""
-    
+
     def __init__(self, db: Session, encryption_service: EncryptionService):
         self.db = db
         self.encryption = encryption_service
-    
+
     def get_all(self) -> List[CustomFieldType]:
         """Get all custom field types"""
         return self.db.execute(
             select(CustomFieldType).order_by(CustomFieldType.name)
         ).scalars().all()
-    
+
     def get_by_id(self, type_id: int) -> Optional[CustomFieldType]:
         """Get custom field type by ID"""
         return self.db.get(CustomFieldType, type_id)
-    
+
     def create(self, name: str, field_type: str = None, icon: str = 'text',
                is_encrypted: bool = False, is_active: bool = True) -> CustomFieldType:
         """Create a new custom field type"""
@@ -53,23 +53,23 @@ class CustomFieldTypeService:
         self.db.commit()
         self.db.refresh(field_type_obj)
         return field_type_obj
-    
+
     def update(self, type_id: int, name: str = None, field_type: str = None,
                icon: str = None, is_encrypted: bool = None, is_active: bool = None) -> CustomFieldType:
         """Update custom field type"""
         field_type_obj = self.get_by_id(type_id)
         if not field_type_obj:
             raise ValueError(f"Custom field type {type_id} not found")
-        
+
         if name is not None:
             field_type_obj.name = name
         if field_type is not None:
             field_type_obj.text = field_type
-        
+
         self.db.commit()
         self.db.refresh(field_type_obj)
         return field_type_obj
-    
+
     def delete(self, type_id: int) -> bool:
         """Delete custom field type"""
         field_type_obj = self.get_by_id(type_id)
@@ -82,11 +82,11 @@ class CustomFieldTypeService:
 
 class CustomFieldDefService:
     """Service for custom field definitions"""
-    
+
     def __init__(self, db: Session, encryption_service: EncryptionService):
         self.db = db
         self.encryption = encryption_service
-    
+
     def get_by_type(self, type_id: int) -> List[CustomFieldDef]:
         """Get all definitions for a field type"""
         return self.db.execute(
@@ -94,11 +94,11 @@ class CustomFieldDefService:
             .where(CustomFieldDef.typeId == type_id)
             .order_by(CustomFieldDef.id)
         ).scalars().all()
-    
+
     def get_by_id(self, def_id: int) -> Optional[CustomFieldDef]:
         """Get definition by ID"""
         return self.db.get(CustomFieldDef, def_id)
-    
+
     def create(self, type_id: int, name: str, description: str = None,
                size: int = 50, is_required: bool = False, is_show: bool = True,
                order_num: int = 0, default_val: str = None, module_id: int = ACCOUNT_MODULE_ID,
@@ -117,7 +117,7 @@ class CustomFieldDefService:
         self.db.commit()
         self.db.refresh(definition)
         return definition
-    
+
     def update(self, def_id: int, name: str = None, description: str = None,
                size: int = None, is_required: bool = None, is_show: bool = None,
                order_num: int = None, default_val: str = None) -> CustomFieldDef:
@@ -125,7 +125,7 @@ class CustomFieldDefService:
         definition = self.get_by_id(def_id)
         if not definition:
             raise ValueError(f"Custom field definition {def_id} not found")
-        
+
         if name is not None:
             definition.name = name
         if description is not None:
@@ -134,11 +134,11 @@ class CustomFieldDefService:
             definition.required = is_required
         if is_show is not None:
             definition.showInList = is_show
-        
+
         self.db.commit()
         self.db.refresh(definition)
         return definition
-    
+
     def delete(self, def_id: int) -> bool:
         """Delete custom field definition"""
         definition = self.get_by_id(def_id)

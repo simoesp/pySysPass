@@ -84,7 +84,9 @@ class CustomFieldValue(Base):
     id           = Column(mysql_integer(), primary_key=True, autoincrement=True)
     moduleId     = Column(mysql_smallint(), nullable=False)
     itemId       = Column(mysql_integer(), nullable=False)
-    definitionId = Column(mysql_integer(), ForeignKey("CustomFieldDefinition.id", name='fk_CustomFieldData_definitionId'), nullable=False)
+    definitionId = Column(mysql_integer(),
+                          ForeignKey("CustomFieldDefinition.id", name='fk_CustomFieldData_definitionId'),
+                          nullable=False)
     data         = Column(FlexibleBinary(mysql_type=mysql.LONGBLOB()), nullable=True)
     key          = Column(FlexibleBinary(2000, mysql_type=mysql.VARBINARY(2000)), nullable=True)
 

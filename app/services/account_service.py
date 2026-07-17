@@ -82,14 +82,14 @@ class AccountService:
         return and_(
             or_(
                 Account.isPrivate.is_(None),
-                Account.isPrivate == False,
-                and_(Account.isPrivate == True, Account.userId == user_id),
+                Account.isPrivate.is_(False),
+                and_(Account.isPrivate.is_(True), Account.userId == user_id),
             ),
             or_(
                 Account.isPrivateGroup.is_(None),
-                Account.isPrivateGroup == False,
+                Account.isPrivateGroup.is_(False),
                 and_(
-                    Account.isPrivateGroup == True,
+                    Account.isPrivateGroup.is_(True),
                     Account.userGroupId == primary_group_id,
                 ) if primary_group_id is not None else False,
             ),
@@ -421,7 +421,9 @@ class AccountService:
         self._emit_hook("on_account_created", payload=result, actor_user_id=user_id)
         return result
 
-    def update_account(self, account_id: int, data: AccountUpdate, user_id: int, master_pass: Optional[str] = None) -> Optional[dict]:
+    def update_account(
+        self, account_id: int, data: AccountUpdate, user_id: int, master_pass: Optional[str] = None
+    ) -> Optional[dict]:
         group_ids = self._get_user_group_ids(user_id)
         account = self.db.query(Account).filter(Account.id == account_id).first()
         if not account:

@@ -26,6 +26,13 @@
           <q-badge :color="props.row.is_active ? 'positive' : 'grey-5'" :label="props.row.is_active ? 'Active' : 'Disabled'" />
         </q-td>
       </template>
+      <template v-slot:body-cell-is_ldap="props">
+        <q-td :props="props">
+          <q-badge :color="props.row.is_ldap ? 'indigo-6' : 'grey-5'" :label="props.row.is_ldap ? 'LDAP' : 'Local'">
+            <q-icon v-if="props.row.is_ldap" name="account_tree" size="12px" class="q-ml-xs" />
+          </q-badge>
+        </q-td>
+      </template>
       <template v-slot:body-cell-user_profile_id="props">
         <q-td :props="props">
           {{ profileName(props.row.user_profile_id) }}
@@ -104,6 +111,7 @@ const columns = [
   { name: 'user_profile_id', label: 'Profile', field: 'user_profile_id', align: 'left' },
   { name: 'is_admin', label: 'Role', field: 'is_admin', align: 'center' },
   { name: 'is_active', label: 'Status', field: 'is_active', align: 'center' },
+  { name: 'is_ldap', label: 'Source', field: 'is_ldap', align: 'center' },
   { name: 'actions', label: 'Actions', field: 'actions', align: 'right' }
 ]
 

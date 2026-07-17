@@ -25,20 +25,21 @@ async def list_public_links(
 ):
     """List all public links for an account"""
     from app.models.account import Account
-    
+
     # Verify user has access
     account = db.query(Account).filter(
         Account.id == account_id,
         Account.userId == current_user["id"]
     ).first()
-    
+
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
-    
+
     service = PublicLinkService(db)
     return service.get_public_links_for_account(account_id, current_user["id"])
 
-@router.post("/accounts/{account_id}/public-links", response_model=PublicLinkResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/accounts/{account_id}/public-links", response_model=PublicLinkResponse,
+             status_code=status.HTTP_201_CREATED)
 async def create_public_link(
     account_id: int,
     link_data: PublicLinkCreate,
@@ -47,18 +48,18 @@ async def create_public_link(
 ):
     """Create a new public link for an account"""
     from app.models.account import Account
-    
+
     # Verify user has access
     account = db.query(Account).filter(
         Account.id == account_id,
         Account.userId == current_user["id"]
     ).first()
-    
+
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
-    
+
     service = PublicLinkService(db)
-    
+
     try:
         link = service.create_public_link(
             account_id=account_id,
@@ -78,18 +79,18 @@ async def access_public_link(
 ):
     """Access an account via a public link"""
     service = PublicLinkService(db)
-    
+
     result = service.get_public_link(link_hash, password)
-    
+
     if not result:
         raise HTTPException(status_code=404, detail="Invalid or expired link")
-    
+
     link, account = result
-    
+
     # Check if expired
     if service.is_link_expired(link):
         raise HTTPException(status_code=410, detail="Link has expired")
-    
+
     # Return account data (without sensitive fields)
     return PublicLinkAccess(
         account_id=account.id,
@@ -110,21 +111,21 @@ async def delete_public_link(
 ):
     """Delete a public link"""
     from app.models.account import Account
-    
+
     # Verify user has access
     account = db.query(Account).filter(
         Account.id == account_id,
         Account.userId == current_user["id"]
     ).first()
-    
+
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
-    
+
     service = PublicLinkService(db)
-    
+
     if not service.delete_public_link(link_id, current_user["id"]):
         raise HTTPException(status_code=404, detail="Public link not found")
-    
+
     return None
 
 @router.get("/accounts/{account_id}/public-links/{link_id}")
@@ -136,20 +137,20 @@ async def get_public_link(
 ):
     """Get a specific public link"""
     from app.models.account import Account
-    
+
     # Verify user has access
     account = db.query(Account).filter(
         Account.id == account_id,
         Account.userId == current_user["id"]
     ).first()
-    
+
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
-    
+
     service = PublicLinkService(db)
     link = service.get_public_link_by_id(link_id, current_user["id"])
-    
+
     if not link:
         raise HTTPException(status_code=404, detail="Public link not found")
-    
+
     return link

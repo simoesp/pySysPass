@@ -167,6 +167,8 @@ class User(Base):
     def created_at(self):       return None
     @property
     def is_active(self):        return not self.isDisabled
+    @property
+    def is_ldap(self):          return bool(self.isLdap)
 
     # -- Relationships -------------------------------------------------------
     userGroup        = relationship('UserGroup', back_populates='users')

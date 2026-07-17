@@ -32,6 +32,7 @@ class UserResponse(BaseModel):
     name: Optional[str] = None
     is_admin: bool
     is_active: bool
+    is_ldap: bool = False
     user_profile_id: Optional[int] = None
     two_factor_enabled: bool
     created_at: Optional[datetime] = None
