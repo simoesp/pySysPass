@@ -4,7 +4,7 @@
     <div class="sp-page-header">
       <div>
         <div class="text-h5 text-weight-bold text-grey-9">Accounts</div>
-        <div class="text-caption text-grey-6">{{ filteredAccounts.length }} of {{ accounts.length }} entries</div>
+        <div class="text-caption text-grey-6">{{ rangeLabel }}</div>
       </div>
       <div class="row q-gutter-sm items-center">
         <q-input v-model="search" outlined dense placeholder="Search…" bg-color="white"
@@ -77,7 +77,7 @@
     </div>
 
     <!-- ── Empty ── -->
-    <div v-else-if="filteredAccounts.length === 0" class="sp-empty-state">
+    <div v-else-if="accounts.length === 0" class="sp-empty-state">
       <q-icon name="lock_open" size="64px" color="grey-3" />
       <div class="text-h6 text-grey-5 q-mt-md">No accounts found</div>
       <div class="text-body2 text-grey-4 q-mb-lg">
@@ -89,7 +89,7 @@
 
     <!-- ── Grid ── -->
     <div v-else class="sp-grid">
-      <div v-for="acc in filteredAccounts" :key="acc.id" class="sp-card"
+      <div v-for="acc in accounts" :key="acc.id" class="sp-card"
         @click="$router.push(`/accounts/${acc.id}`)">
 
         <!-- Favicon -->
@@ -185,6 +185,25 @@
           </q-btn>
         </div>
       </div>
+    </div>
+
+    <!-- ── Pagination ── -->
+    <div v-if="!loading && total > pageSize" class="sp-pagination row items-center justify-center q-gutter-md q-py-md">
+      <q-pagination
+        v-model="page"
+        :max="pagesCount"
+        :max-pages="7"
+        boundary-numbers
+        direction-links
+        color="primary"
+        active-design="unelevated" />
+      <q-select
+        v-model="pageSize"
+        :options="[12, 24, 48, 96]"
+        dense outlined
+        bg-color="white"
+        style="width: 90px"
+        label="Per page" />
     </div>
 
     <!-- ── Add dialog ── -->
@@ -291,7 +310,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { Notify, Dialog } from 'quasar'
 import api from '@/api/axios'
@@ -316,6 +335,9 @@ const selectedCategory = ref(null)
 const selectedClient = ref(null)
 const selectedTag = ref(null)
 const loading = ref(false)
+const total = ref(0)
+const page = ref(1)
+const pageSize = ref(24)
 const saving = ref(false)
 const showAdd = ref(false)
 const showNewPwd = ref(false)
@@ -350,26 +372,13 @@ function clearFilters() {
   selectedTag.value = null
 }
 
-const filteredAccounts = computed(() => {
-  let list = accounts.value
-  if (selectedCategory.value !== null)
-    list = list.filter(a => a.category_id === selectedCategory.value)
-  if (selectedClient.value !== null)
-    list = list.filter(a => a.client_id === selectedClient.value)
-  if (selectedTag.value !== null)
-    list = list.filter(a => a.tags?.some(t => t.id === selectedTag.value))
-  if (search.value) {
-    const q = search.value.toLowerCase()
-    list = list.filter(a =>
-      a.title?.toLowerCase().includes(q) ||
-      a.login?.toLowerCase().includes(q) ||
-      a.url?.toLowerCase().includes(q) ||
-      a.notes?.toLowerCase().includes(q) ||
-      clientName(a.client_id)?.toLowerCase().includes(q) ||
-      categoryName(a.category_id)?.toLowerCase().includes(q)
-    )
-  }
-  return list
+const pagesCount = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
+
+const rangeLabel = computed(() => {
+  if (total.value === 0) return '0 entries'
+  const first = (page.value - 1) * pageSize.value + 1
+  const last = Math.min(page.value * pageSize.value, total.value)
+  return `${first}–${last} of ${total.value} entries`
 })
 
 // ── Filter functions ──────────────────────────────────────────────────────
@@ -558,22 +567,55 @@ function confirmDelete(acc) {
 }
 
 // ── Data loading ──────────────────────────────────────────────────────────
+function listParams() {
+  return {
+    ...(search.value ? { q: search.value } : {}),
+    ...(selectedCategory.value !== null ? { category_id: selectedCategory.value } : {}),
+    ...(selectedClient.value !== null ? { client_id: selectedClient.value } : {}),
+    ...(selectedTag.value !== null ? { tag_id: selectedTag.value } : {}),
+  }
+}
+
 async function loadAccounts() {
   loading.value = true
   try {
-    accounts.value = (await api.get('/accounts')).data
-    // Collect unique tags from loaded accounts
-    const tagMap = {}
-    for (const acc of accounts.value)
-      for (const tag of acc.tags || [])
-        tagMap[tag.id] = tag
-    allTags.value = Object.values(tagMap)
+    const filters = listParams()
+    const params = {
+      skip: (page.value - 1) * pageSize.value,
+      limit: pageSize.value,
+      ...filters,
+    }
+    const [listRes, countRes] = await Promise.all([
+      api.get('/accounts', { params }),
+      api.get('/accounts/count', { params: filters }),
+    ])
+    accounts.value = listRes.data
+    total.value = countRes.data?.count ?? 0
+    // If deletes/filters shrank the result set below the current page, snap back
+    if (page.value > 1 && accounts.value.length === 0 && total.value > 0) {
+      page.value = pagesCount.value
+    }
   } catch {
     Notify.create({ message: 'Failed to load accounts', color: 'negative' })
   } finally {
     loading.value = false
   }
 }
+
+// Filters and page-size changes restart from page 1; search is debounced.
+// Resetting the page triggers the page watcher, which reloads.
+function reloadFromFirstPage() {
+  if (page.value !== 1) page.value = 1
+  else loadAccounts()
+}
+
+let searchTimer = null
+watch(search, () => {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(reloadFromFirstPage, 300)
+})
+watch([selectedCategory, selectedClient, selectedTag, pageSize], reloadFromFirstPage)
+watch(page, loadAccounts)
 
 onMounted(async () => {
   loadAccounts()
@@ -595,7 +637,8 @@ onMounted(async () => {
   } catch {}
   try {
     const r = await api.get('/tags')
-    tagOpts.value = r.data
+    allTags.value = r.data
+    tagOpts.value = [...r.data]
   } catch {}
 })
 </script>

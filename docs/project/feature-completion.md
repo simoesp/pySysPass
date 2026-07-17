@@ -94,11 +94,22 @@ upstream schema, behavior, and legacy data fixtures.
 
 **Features:**
 - LDAP connection and authentication
+- Login integration: when LDAP is enabled, `/api/v1/auth/login` tries LDAP
+  before database auth (PHP AuthProvider order) via
+  `authenticate_ldap_login()`; on success the local user is created or
+  synced (`isLdap`, name/email, password hash for offline fallback,
+  configured default group/profile), mirroring PHP `LoginService`
+- User lookup matches `uid`, `sAMAccountName` and `cn`, so one filter
+  covers both OpenLDAP/posix and Active Directory (PHP LdapStd/LdapMsAds)
+- Group filter enforcement on login (full DN or CN match on `memberOf`)
+- Disabled local users are refused even with valid LDAP credentials
 - User search and information retrieval
 - LDAP user import into sysPass
 - Support for Active Directory
 - Configurable user filters
 - Group membership tracking
+- Connection test endpoint (`POST /api/v1/ldap/test-connection`) with a
+  "Test connection" button in Settings → LDAP
 
 **Usage:**
 ```python

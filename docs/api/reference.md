@@ -286,10 +286,27 @@ Example response shape:
 
 `GET /api/v1/accounts?skip=0&limit=100`
 
+Optional filters: `q` (matches name, login, notes, url), `category_id`,
+`client_id`, `tag_id`.
+
 Notes:
 
 - list is scoped to the authenticated user context
+- `skip >= 0`, `1 <= limit <= 500`
 - response is an array of `AccountResponse`
+
+#### Count accounts
+
+`GET /api/v1/accounts/count`
+
+Accepts the same optional filters as the list endpoint and returns the
+total matching the authenticated user's accessible set:
+
+```json
+{ "count": 42 }
+```
+
+Used by the frontend for server-side pagination.
 
 #### Search accounts
 

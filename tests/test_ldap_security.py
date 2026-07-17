@@ -15,7 +15,8 @@ def test_username_is_escaped_before_ldap_filter_interpolation(monkeypatch):
     monkeypatch.setattr(service, "search", fake_search)
 
     assert service.authenticate("alice*)(|(uid=*))", "irrelevant") is None
-    assert captured["filter"] == r"(uid=alice\2a\29\28|\28uid=\2a\29\29)"
+    escaped = r"alice\2a\29\28|\28uid=\2a\29\29"
+    assert captured["filter"] == f"(|(uid={escaped})(sAMAccountName={escaped})(cn={escaped}))"
 
 
 def test_user_info_escapes_ldap_filter_metacharacters(monkeypatch):
@@ -30,4 +31,5 @@ def test_user_info_escapes_ldap_filter_metacharacters(monkeypatch):
     monkeypatch.setattr(service, "search", fake_search)
 
     assert service.get_user_info("name\\with\x00null") is None
-    assert captured["filter"] == r"(uid=name\5cwith\00null)"
+    escaped = r"name\5cwith\00null"
+    assert captured["filter"] == f"(|(uid={escaped})(sAMAccountName={escaped})(cn={escaped}))"

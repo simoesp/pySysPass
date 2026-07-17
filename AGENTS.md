@@ -11,6 +11,20 @@ Rules:
 - Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
 - After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
 
+## Code style
+
+All Python code must follow PEP 8 conventions.
+
+Rules:
+- Use 4 spaces per indentation level; never tabs.
+- Keep lines within 79 characters (72 for docstrings/comments), unless the surrounding code consistently uses a longer project limit.
+- Naming: `snake_case` for functions, methods, and variables; `PascalCase` for classes; `UPPER_SNAKE_CASE` for constants; a leading underscore for internal names.
+- Imports at the top of the file, one per line, grouped in order: standard library, third-party, local — with a blank line between groups.
+- Two blank lines around top-level functions and classes; one blank line between methods.
+- Use spaces around operators and after commas; no whitespace immediately inside parentheses/brackets.
+- Compare to `None` with `is` / `is not`; use `isinstance()` instead of type comparisons.
+- When editing existing files, match the established style of the surrounding code rather than reformatting unrelated lines.
+
 ## sysPass PHP compatibility
 
 This project must remain fully compatible with the original sysPass PHP version.

@@ -254,17 +254,76 @@ class AccountService:
 
     # ── Queries ───────────────────────────────────────────────────────────
 
-    def get_accounts(self, user_id: int, skip: int = 0, limit: int = 100) -> List[dict]:
+    def _list_filters(
+        self,
+        user_id: int,
+        group_ids: Set[int],
+        q: Optional[str] = None,
+        category_id: Optional[int] = None,
+        client_id: Optional[int] = None,
+        tag_id: Optional[int] = None,
+    ) -> list:
+        """Access filter plus the optional list/search filters, PHP-style.
+
+        Mirrors PHP AccountSearchFilter: free text matches name, login,
+        notes and url; category/client/tag narrow by id.
+        """
+        filters = [self._access_filter(user_id, group_ids)]
+        if q:
+            term = f'%{q}%'
+            filters.append(
+                (Account.name.like(term))
+                | (Account.login.like(term))
+                | (Account.notes.like(term))
+                | (Account.url.like(term))
+            )
+        if category_id is not None:
+            filters.append(Account.categoryId == category_id)
+        if client_id is not None:
+            filters.append(Account.clientId == client_id)
+        if tag_id is not None:
+            filters.append(
+                Account.id.in_(
+                    self.db.query(AccountToTag.accountId).filter(AccountToTag.tagId == tag_id)
+                )
+            )
+        return filters
+
+    def get_accounts(
+        self,
+        user_id: int,
+        skip: int = 0,
+        limit: int = 100,
+        q: Optional[str] = None,
+        category_id: Optional[int] = None,
+        client_id: Optional[int] = None,
+        tag_id: Optional[int] = None,
+    ) -> List[dict]:
         group_ids = self._get_user_group_ids(user_id)
         accounts = (
             self.db.query(Account)
-            .filter(self._access_filter(user_id, group_ids))
+            .filter(*self._list_filters(user_id, group_ids, q, category_id, client_id, tag_id))
             .order_by(Account.dateAdd.desc())
             .offset(skip)
             .limit(limit)
             .all()
         )
         return [self._to_response(a, user_id, group_ids) for a in accounts]
+
+    def count_accounts(
+        self,
+        user_id: int,
+        q: Optional[str] = None,
+        category_id: Optional[int] = None,
+        client_id: Optional[int] = None,
+        tag_id: Optional[int] = None,
+    ) -> int:
+        group_ids = self._get_user_group_ids(user_id)
+        return (
+            self.db.query(Account.id)
+            .filter(*self._list_filters(user_id, group_ids, q, category_id, client_id, tag_id))
+            .count()
+        )
 
     def can_access_account(self, account_id: int, user_id: int) -> bool:
         """Non-mutating object ACL check for account-owned child resources."""
@@ -307,16 +366,9 @@ class AccountService:
 
     def search_accounts(self, user_id: int, query: str) -> List[dict]:
         group_ids = self._get_user_group_ids(user_id)
-        term = f'%{query}%'
         accounts = (
             self.db.query(Account)
-            .filter(
-                self._access_filter(user_id, group_ids),
-                (Account.name.like(term))
-                | (Account.login.like(term))
-                | (Account.notes.like(term))
-                | (Account.url.like(term)),
-            )
+            .filter(*self._list_filters(user_id, group_ids, q=query))
             .all()
         )
         return [self._to_response(a, user_id, group_ids) for a in accounts]

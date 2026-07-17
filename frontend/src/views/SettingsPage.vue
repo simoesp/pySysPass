@@ -151,7 +151,9 @@
             <q-toggle v-model="ldap.ldap_tls_enabled" label="Enable TLS (StartTLS)" />
           </template>
 
-          <div class="row justify-end q-mt-md">
+          <div class="row justify-end q-gutter-sm q-mt-md">
+            <q-btn v-if="ldap.ldap_enabled" outline color="primary" label="Test connection"
+              :loading="testingLdap" :disable="!ldap.ldap_server" @click="testLdap" />
             <q-btn color="primary" label="Save LDAP Settings" :loading="saving.ldap" @click="saveLdap" />
           </div>
         </div>
@@ -590,6 +592,7 @@ const wiki = ref(null)
 const encStatus = ref(null)
 const sysInfo = ref(null)
 const saving = ref({ general: false, mail: false, ldap: false, accounts: false, wiki: false })
+const testingLdap = ref(false)
 const rekey = ref({ current_key: '', new_key: '', new_key_confirm: '' })
 const rekeyLoading = ref(false)
 const rekeyResult = ref(null)
@@ -772,6 +775,27 @@ async function saveMail() {
     Notify.create({ message: e.response?.data?.detail || 'Failed to save', color: 'negative' })
   } finally {
     saving.value.mail = false
+  }
+}
+
+async function testLdap() {
+  testingLdap.value = true
+  try {
+    const r = await api.post('/ldap/test-connection', {
+      ldap_uri: ldap.value.ldap_server,
+      base_dn: ldap.value.ldap_base || '',
+      bind_dn: ldap.value.ldap_binduser || null,
+      bind_password: ldap.value.ldap_bindpass || null,
+      use_tls: !!ldap.value.ldap_tls_enabled,
+    })
+    if (r.data?.success)
+      Notify.create({ message: r.data.detail || 'Connection successful', color: 'positive' })
+    else
+      Notify.create({ message: r.data?.detail || 'LDAP connection failed', color: 'negative' })
+  } catch (e) {
+    Notify.create({ message: e.response?.data?.detail || 'LDAP connection failed', color: 'negative' })
+  } finally {
+    testingLdap.value = false
   }
 }
 

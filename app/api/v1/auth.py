@@ -15,6 +15,7 @@ from app.services.auth_service import (
 from app.services.user_profile_service import UserProfileService
 from app.services.user_service import UserService
 from app.services.security_log_service import TrackService, EventLogService
+from app.services.ldap_service import authenticate_ldap_login
 from app.models.account import Config, User, UserGroup
 from app.core.security import get_encryption_service
 from app.core.rsa_service import maybe_decrypt
@@ -145,7 +146,12 @@ async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends
 
     user = db.query(User).filter(User.username == form_data.username).first()
     plain_password = _decode_secret(form_data.password, "password")
-    if not user or not verify_password(plain_password, user.password):
+    # PHP AuthProvider tries LDAP before database auth when it is enabled;
+    # on LDAP success the local row is provisioned/synced (isLdap).
+    ldap_user = authenticate_ldap_login(db, form_data.username, plain_password)
+    if ldap_user is not None:
+        user = ldap_user
+    if ldap_user is None and (not user or not verify_password(plain_password, user.password)):
         track.record_attempt(ip, source="login", user_id=user.id if user else None)
         locked = track.maybe_lock(ip)
         elog.log_event(

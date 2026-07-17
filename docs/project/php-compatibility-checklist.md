@@ -154,6 +154,11 @@ Compatibility should be treated as successful only when:
   configuration without data fixes.
 - Add upgrade-path tests for partially initialized or migrated databases.
 - Confirm reverse-proxy, LDAP, notifications, and backup flows do not require Python-only database changes.
+- ✅ LDAP login follows PHP AuthProvider semantics: LDAP is tried before
+  database auth when enabled, successful logins provision/sync the local
+  user (`isLdap`, default group/profile, password hash for fallback), the
+  user lookup covers posix and Active Directory attributes, and no
+  Python-only schema changes were needed (validated against a live AD).
 
 ### 8. Compatibility CI
 

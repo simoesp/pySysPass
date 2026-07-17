@@ -203,6 +203,11 @@ master-password material; without the matching salt, existing users cannot log
 in. Because the database already has an administrator and master password, skip
 first-run setup and log in with the existing PHP credentials.
 
+Runtime settings saved from the UI (LDAP, mail, general…) are written to a
+JSON file, not the database. The external stack keeps that file on the
+`pysyspass_runtime_data` named volume mounted at `/app/data`, so container
+rebuilds do not reset saved settings; removing the volume does.
+
 Stop the stack with:
 
 ```bash

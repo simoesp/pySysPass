@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Body
+from fastapi import APIRouter, Depends, HTTPException, status, Body, Query
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 from app.db.base import get_db
 from app.schemas.account import (
     AccountCreate, AccountResponse, AccountUpdate, PasswordResponse,
@@ -27,12 +27,35 @@ account_permission = require_any_permission("acc_permission", account_admin=True
 
 @router.get("/accounts", response_model=List[AccountResponse])
 async def list_accounts(
-    skip: int = 0,
-    limit: int = 100,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+    q: Optional[str] = Query(None),
+    category_id: Optional[int] = Query(None),
+    client_id: Optional[int] = Query(None),
+    tag_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
     current_user=Depends(account_view),
 ):
-    return AccountService(db, get_encryption_service()).get_accounts(current_user["id"], skip, limit)
+    return AccountService(db, get_encryption_service()).get_accounts(
+        current_user["id"], skip, limit,
+        q=q, category_id=category_id, client_id=client_id, tag_id=tag_id,
+    )
+
+
+@router.get("/accounts/count")
+async def count_accounts(
+    q: Optional[str] = Query(None),
+    category_id: Optional[int] = Query(None),
+    client_id: Optional[int] = Query(None),
+    tag_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    current_user=Depends(account_view),
+):
+    count = AccountService(db, get_encryption_service()).count_accounts(
+        current_user["id"],
+        q=q, category_id=category_id, client_id=client_id, tag_id=tag_id,
+    )
+    return {"count": count}
 
 
 @router.get("/accounts/search", response_model=List[AccountResponse])

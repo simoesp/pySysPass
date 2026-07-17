@@ -17,6 +17,11 @@ services:
       SQLALCHEMY_SCHEMA_GUARD: "true"
       AUTO_INIT_DB_ON_STARTUP: "false"
       DEBUG: ${PYSYSPASS_DEBUG:-false}
+      # Runtime config (LDAP/mail/general settings) lives in a JSON file, not
+      # the database; keep it on a volume so rebuilds don't reset it.
+      SYSPASS_RUNTIME_CONFIG_JSON_PATH: /app/data/runtime-config.json
+    volumes:
+      - pysyspass_runtime_data:/app/data
     ports:
       - "${PYSYSPASS_BACKEND_PORT:-8001}:8000"
     healthcheck:
@@ -51,3 +56,6 @@ services:
 networks:
   pysyspass-external:
     driver: bridge
+
+volumes:
+  pysyspass_runtime_data:

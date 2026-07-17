@@ -114,8 +114,9 @@ class LdapService:
         """Authenticate user; returns the user's DN on success, None on failure."""
         if not self._conn or not self._conn.bound:
             self.connect()
-        search_filter = f"(uid={escape_filter_chars(username)})"
-        entries = self.search(filter_str=search_filter, attributes=["dn"])
+        # "dn" is not a real attribute and makes ldap3 raise LDAPAttributeError;
+        # request cn and take the DN from the entry itself.
+        entries = self.search(filter_str=_user_search_filter(username), attributes=["cn"])
         if not entries:
             return None
         user_dn = entries[0]["dn"]
@@ -137,10 +138,9 @@ class LdapService:
 
     def get_user_info(self, username: str) -> Optional[Dict]:
         """Fetch a single user's attributes from LDAP."""
-        search_filter = f"(uid={escape_filter_chars(username)})"
         results = self.search(
-            filter_str=search_filter,
-            attributes=["cn", "sn", "givenName", "mail", "uid", "memberOf"],
+            filter_str=_user_search_filter(username),
+            attributes=["cn", "sn", "givenName", "mail", "uid", "sAMAccountName", "memberOf"],
         )
         return results[0] if results else None
 
@@ -168,6 +168,16 @@ class LdapService:
         return users
 
 
+def _user_search_filter(username: str) -> str:
+    """User lookup filter matching posix and Active Directory naming.
+
+    Mirrors sysPass PHP LdapStd/LdapMsAds, which match samaccountname, cn
+    and uid so one filter works for both directory flavours.
+    """
+    u = escape_filter_chars(username)
+    return f"(|(uid={u})(sAMAccountName={u})(cn={u}))"
+
+
 def _first(val):
     """Return scalar or first element of list; None if empty."""
     if val is None:
@@ -175,6 +185,116 @@ def _first(val):
     if isinstance(val, list):
         return val[0] if val else None
     return val
+
+
+def authenticate_ldap_login(db, username: str, password: str):
+    """Authenticate a login against LDAP and sync the local user row.
+
+    Mirrors sysPass PHP LoginService + LdapAuth: when LDAP is enabled it is
+    tried before database auth; on success the local user is created (with
+    isLdap set and the configured default group/profile) or updated, so the
+    password hash stays usable as a database fallback, exactly like PHP's
+    updateOnLogin. Returns the User row on success, None otherwise (the
+    caller then falls back to database auth).
+    """
+    from app.services.config_service import ConfigService
+
+    if not password:
+        return None
+    cfg = ConfigService(db).get_ldap_settings()
+    if not cfg.ldap_enabled or not cfg.ldap_server:
+        return None
+    if not _LDAP_AVAILABLE:
+        logger.warning("LDAP login skipped: ldap3 not installed")
+        return None
+
+    svc = LdapService(
+        ldap_uri=cfg.ldap_server,
+        base_dn=cfg.ldap_base or "",
+        bind_dn=cfg.ldap_binduser or None,
+        bind_password=cfg.ldap_bindpass or None,
+        use_tls=cfg.ldap_tls_enabled or False,
+    )
+    try:
+        svc.connect()
+        user_dn = svc.authenticate(username, password)
+        if not user_dn:
+            return None
+        info = svc.get_user_info(username) or {}
+    except Exception:
+        logger.exception("LDAP authentication unavailable")
+        return None
+    finally:
+        try:
+            svc.disconnect()
+        except Exception:
+            pass
+
+    attrs = info.get("attributes", {})
+
+    if cfg.ldap_group:
+        # PHP LdapAuth denies logins outside the configured group. memberOf
+        # values are DNs; accept a match on the full DN or its CN.
+        groups = attrs.get("memberOf") or []
+        if isinstance(groups, str):
+            groups = [groups]
+        needle = cfg.ldap_group.strip().lower()
+        if not any(
+            needle == g.lower() or needle == _group_cn(g)
+            for g in groups
+        ):
+            logger.warning("LDAP login denied: %s not in group %s", username, cfg.ldap_group)
+            return None
+
+    from app.models.account import User
+    from app.services.auth_service import get_password_hash
+    import secrets
+
+    name = _first(attrs.get("cn")) or username
+    email = _first(attrs.get("mail"))
+    hashed = get_password_hash(password)
+    if isinstance(hashed, str):
+        hashed = hashed.encode("utf-8")
+
+    user = db.query(User).filter(User.username == username).first()
+    if user:
+        if not user.isUserEnabled:
+            logger.warning("LDAP login denied: user %s is disabled", username)
+            return None
+        user.password = hashed
+        user.name = name
+        if email:
+            user.email = email
+        user.isLdap = True
+    else:
+        from app.services.user_profile_service import UserProfileService
+
+        profile_id = cfg.ldap_defaultprofile or UserProfileService(db).ensure_default_profile().id
+        user = User(
+            userGroupId=cfg.ldap_defaultgroup or 1,
+            userProfileId=profile_id,
+            name=name,
+            username=username,
+            email=email or f"{username}@ldap.local",
+            password=hashed,
+            hashSalt=secrets.token_bytes(32),
+            loginCount=0,
+            lastUpdateMPass=0,
+            isUserEnabled=True,
+            isLdap=True,
+        )
+        db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def _group_cn(group_dn: str) -> str:
+    """Lower-cased CN of a group DN ('cn=admins,dc=x' -> 'admins')."""
+    first_rdn = group_dn.split(",", 1)[0]
+    if "=" in first_rdn:
+        return first_rdn.split("=", 1)[1].strip().lower()
+    return first_rdn.strip().lower()
 
 
 class LdapImportService:
