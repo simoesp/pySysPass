@@ -62,9 +62,14 @@ JSON body:
   "password": "correct horse battery staple",
   "is_admin": false,
   "is_active": true,
-  "user_profile_id": 1
+  "user_profile_id": 1,
+  "user_group_id": 2
 }
 ```
+
+`user_group_id` (the primary group) is required on create — there is no
+implicit default group. Secondary memberships are managed via the
+user-group member routes.
 
 Successful response:
 
@@ -78,6 +83,7 @@ Successful response:
   "is_active": true,
   "is_ldap": false,
   "user_profile_id": 1,
+  "user_group_id": 2,
   "two_factor_enabled": false,
   "created_at": "2026-06-30T12:34:56",
   "permissions": null
@@ -828,9 +834,9 @@ Useful query parameters:
 
 ### Two-factor
 
-The global policy is a tri-state mode, configured in Settings → Security
-(`config_general` permission) and stored on the Authenticator `Plugin`
-row — the same location the sysPass PHP Authenticator plugin uses:
+Two-factor authentication is a built-in feature (not a plugin). The
+global policy is a tri-state mode, configured in Settings → Security
+(`config_general` permission):
 
 - `disabled` — feature off; no enrollment, no login challenge
 - `enabled` — users may enroll; enrolled users must enter a code at login
@@ -841,8 +847,12 @@ Policy routes:
 - `GET /api/v1/settings/two-factor` → `{ "mode": "enabled" }`
 - `PUT /api/v1/settings/two-factor` — body `{ "mode": "enforced" }`
 
-User routes (per-user state lives in `PluginData`, secrets encrypted at
-rest):
+Storage detail: state persists in the upstream `Plugin`/`PluginData`
+tables under the reserved name `Authenticator` (kept from the sysPass PHP
+plugin for data continuity, with secrets encrypted at rest). The plugins
+API hides this reserved row and refuses to manage it.
+
+User routes:
 
 - `GET /api/v1/2fa/status` → `{ "mode", "enrolled", "setup_required" }`
 - `POST /api/v1/2fa/setup` — body `{ "password": "..." }`; verifies the

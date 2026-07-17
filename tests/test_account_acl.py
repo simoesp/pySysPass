@@ -216,3 +216,64 @@ def test_group_access_grant_and_revoke_controls_visibility(db_session, encryptio
 
     assert service.remove_group_access(account["id"], test_user.id, shared_group.id) is True
     assert service.get_account(account["id"], member.id) is None
+
+
+def test_global_search_permission_widens_visibility(db_session, encryption_service, test_user, tmp_path):
+    from app.core import runtime_json_config
+    from app.schemas.user_profile import ProfilePermissions, UserProfileCreate
+    from app.services.user_profile_service import UserProfileService
+
+    service = AccountService(db_session, encryption_service)
+    service.create_account(
+        AccountCreate(title="Owner Only", password="pass", is_public=True), test_user.id,
+    )
+
+    profile = UserProfileService(db_session).create_user_profile(UserProfileCreate(
+        name="Searcher", permissions=ProfilePermissions(acc_global_search=True),
+    ))
+    outsider = create_user(db_session, "searcher", "searcher@example.com", 99)
+    outsider.userProfileId = profile["id"]
+    db_session.commit()
+
+    original = runtime_json_config.settings.SYSPASS_RUNTIME_CONFIG_JSON_PATH
+    runtime_json_config.settings.SYSPASS_RUNTIME_CONFIG_JSON_PATH = str(tmp_path / "rc.json")
+    try:
+        # Config off: the permission alone grants nothing
+        assert AccountService(db_session, encryption_service).count_accounts(outsider.id) == 0
+
+        # Config on + permission: ownership/group filter is dropped (PHP parity)
+        runtime_json_config.set_runtime_config_value("global_search", "true")
+        assert AccountService(db_session, encryption_service).count_accounts(outsider.id) == 1
+
+        # Config on, no permission: still filtered
+        outsider.userProfileId = None
+        db_session.commit()
+        assert AccountService(db_session, encryption_service).count_accounts(outsider.id) == 0
+    finally:
+        runtime_json_config.settings.SYSPASS_RUNTIME_CONFIG_JSON_PATH = original
+
+
+def test_view_only_user_share_short_circuits_group_edit(db_session, encryption_service, test_user):
+    from app.models.account import Account
+
+    service = AccountService(db_session, encryption_service)
+    account = service.create_account(
+        AccountCreate(title="Shared", password="pass", is_public=True), test_user.id,
+    )
+    acc_row = db_session.query(Account).filter(Account.id == account.id).first()
+
+    # Another user whose SECONDARY membership matches the account main group
+    # but who holds a view-only explicit share — PHP denies edit in that case.
+    db_session.add(UserGroup(id=55, name="Elsewhere", description=""))
+    other = create_user(db_session, "viewonly", "viewonly@example.com", 55)
+    db_session.add(UserToUserGroup(userId=other.id, userGroupId=acc_row.userGroupId))
+    db_session.add(AccountToUser(accountId=account.id, userId=other.id, isEdit=False))
+    db_session.commit()
+
+    assert service.can_edit_account(account.id, other.id) is False
+
+    # Without the view-only share, the secondary main-group match grants edit
+    db_session.query(AccountToUser).filter(AccountToUser.accountId == account.id).delete()
+    db_session.commit()
+    db_session.expire_all()
+    assert AccountService(db_session, encryption_service).can_edit_account(account.id, other.id) is True

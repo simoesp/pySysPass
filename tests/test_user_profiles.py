@@ -49,7 +49,7 @@ def test_create_user_assigns_profile(db_session):
             email="profile@example.com",
             password="password123",
             user_profile_id=profile["id"],
-        )
+         user_group_id=1)
     )
 
     assert user.userProfileId == profile["id"]

@@ -43,17 +43,21 @@ class TwoFactorService:
         return False, None
 
 
-AUTHENTICATOR_PLUGIN = "Authenticator"
+# Storage key for built-in 2FA state in the Plugin/PluginData tables.
+# The name matches what the sysPass PHP Authenticator plugin used, so
+# existing rows keep working; 2FA itself is a built-in feature here,
+# not a plugin (the plugins API hides and refuses this reserved row).
+TWO_FACTOR_STORE_NAME = "Authenticator"
 
 
 class TwoFactorStore:
-    """Persist per-user 2FA state in PluginData, like PHP's Authenticator plugin.
+    """Persist per-user state for the built-in 2FA feature.
 
-    Rows use name='Authenticator' and itemId=<user id> — the same location the
-    sysPass PHP plugin uses — so no Python-only schema is introduced. The row
-    data is JSON: a plaintext "enabled" flag for cheap reads plus a "vault"
-    string holding the encrypted secret, pending setup secret, and backup
-    codes.
+    Rows live in PluginData under TWO_FACTOR_STORE_NAME with itemId=<user
+    id>; the upstream tables double as generic key/value storage, so no
+    Python-only schema is introduced. The row data is JSON: a plaintext
+    "enabled" flag for cheap reads plus a "vault" string holding the
+    encrypted secret, pending setup secret, and backup codes.
     """
 
     def __init__(self, db, encryption):
@@ -63,13 +67,13 @@ class TwoFactorStore:
     # -- Internal helpers ---------------------------------------------------
 
     def _ensure_plugin_row(self) -> None:
-        if not self.db.query(Plugin).filter(Plugin.name == AUTHENTICATOR_PLUGIN).first():
-            self.db.add(Plugin(name=AUTHENTICATOR_PLUGIN, enabled=True, available=True))
+        if not self.db.query(Plugin).filter(Plugin.name == TWO_FACTOR_STORE_NAME).first():
+            self.db.add(Plugin(name=TWO_FACTOR_STORE_NAME, enabled=True, available=True))
             self.db.flush()
 
     def _row(self, user_id: int) -> Optional[PluginData]:
         return self.db.query(PluginData).filter(
-            PluginData.name == AUTHENTICATOR_PLUGIN,
+            PluginData.name == TWO_FACTOR_STORE_NAME,
             PluginData.itemId == user_id,
         ).first()
 
@@ -102,7 +106,7 @@ class TwoFactorStore:
         else:
             self._ensure_plugin_row()
             self.db.add(PluginData(
-                name=AUTHENTICATOR_PLUGIN, itemId=user_id, data=payload, key=b"",
+                name=TWO_FACTOR_STORE_NAME, itemId=user_id, data=payload, key=b"",
             ))
         self.db.commit()
 
@@ -151,7 +155,7 @@ TWO_FACTOR_MODES = ("disabled", "enabled", "enforced")
 
 
 class TwoFactorConfig:
-    """Global 2FA policy stored on the Authenticator Plugin row.
+    """Global policy for the built-in 2FA feature.
 
     Mode is a tri-state:
       - disabled: 2FA feature off; no enrollment, no login challenge
@@ -167,7 +171,7 @@ class TwoFactorConfig:
         self.db = db
 
     def _row(self) -> Optional[Plugin]:
-        return self.db.query(Plugin).filter(Plugin.name == AUTHENTICATOR_PLUGIN).first()
+        return self.db.query(Plugin).filter(Plugin.name == TWO_FACTOR_STORE_NAME).first()
 
     def get_mode(self) -> str:
         row = self._row()
@@ -190,7 +194,7 @@ class TwoFactorConfig:
             raise ValueError(f"Invalid 2FA mode: {mode!r}")
         row = self._row()
         if row is None:
-            row = Plugin(name=AUTHENTICATOR_PLUGIN, available=True)
+            row = Plugin(name=TWO_FACTOR_STORE_NAME, available=True)
             self.db.add(row)
         row.enabled = mode != "disabled"
         row.data = json.dumps({"mode": mode}).encode("utf-8")

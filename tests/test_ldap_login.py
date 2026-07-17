@@ -24,6 +24,7 @@ def ldap_enabled(runtime_config):
     runtime_json_config.set_runtime_config_value("ldap_enabled", "true")
     runtime_json_config.set_runtime_config_value("ldap_server", "ldap://ldap.example:389")
     runtime_json_config.set_runtime_config_value("ldap_base", "dc=example,dc=com")
+    runtime_json_config.set_runtime_config_value("ldap_defaultgroup", "2")
 
 
 class FakeLdapService:
@@ -160,3 +161,20 @@ def test_ldap_login_uses_default_group_and_profile(db_session, ldap_enabled, fak
     runtime_json_config.set_runtime_config_value("ldap_defaultgroup", "3")
     user = authenticate_ldap_login(db_session, "unixuser", "QazWsxEdc!!")
     assert user.userGroupId == 3
+
+
+def test_ldap_login_refuses_new_user_without_default_group(db_session, ldap_enabled, fake_ldap):
+    # Provisioning must never fall back to group 1 (Admins)
+    runtime_json_config.set_runtime_config_value("ldap_defaultgroup", None)
+    assert authenticate_ldap_login(db_session, "unixuser", "QazWsxEdc!!") is None
+    assert db_session.query(User).filter(User.username == "unixuser").first() is None
+
+
+def test_ldap_login_existing_user_works_without_default_group(
+    db_session, ldap_enabled, fake_ldap, test_user
+):
+    # Already-provisioned users keep logging in even when the default group is unset
+    runtime_json_config.set_runtime_config_value("ldap_defaultgroup", None)
+    test_user.username = "unixuser"
+    db_session.commit()
+    assert authenticate_ldap_login(db_session, "unixuser", "QazWsxEdc!!") is not None

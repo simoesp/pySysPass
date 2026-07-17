@@ -269,9 +269,19 @@ def authenticate_ldap_login(db, username: str, password: str):
     else:
         from app.services.user_profile_service import UserProfileService
 
+        if not cfg.ldap_defaultgroup:
+            # Without an explicit default the old fallback was group 1
+            # (Admins) — never provision into it implicitly.
+            logger.warning(
+                "LDAP login for new user %s refused: set the LDAP default group "
+                "in Settings before new directory users can be provisioned",
+                username,
+            )
+            return None
+
         profile_id = cfg.ldap_defaultprofile or UserProfileService(db).ensure_default_profile().id
         user = User(
-            userGroupId=cfg.ldap_defaultgroup or 1,
+            userGroupId=cfg.ldap_defaultgroup,
             userProfileId=profile_id,
             name=name,
             username=username,

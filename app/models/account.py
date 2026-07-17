@@ -181,6 +181,8 @@ class User(Base):
     @property
     def user_profile_id(self):  return self.userProfileId
     @property
+    def user_group_id(self):    return self.userGroupId
+    @property
     def two_factor_enabled(self): return self.twoFactorAuth
     @property
     def created_at(self):       return None

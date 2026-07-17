@@ -180,3 +180,24 @@ def test_status_reports_setup_required_when_enforced(db_session, store, test_use
     store.start_setup(test_user.id, TwoFactorService.generate_secret())
     store.enable(test_user.id, [])
     assert store.is_enabled(test_user.id) is True
+
+
+def test_2fa_storage_row_is_hidden_from_plugin_apis(db_session, store, test_user):
+    from app.services.plugin_service import PluginService
+    from app.services.two_factor_service import TwoFactorConfig
+
+    TwoFactorConfig(db_session).set_mode("enabled")
+    store.start_setup(test_user.id, TwoFactorService.generate_secret())
+    store.enable(test_user.id, [])
+
+    svc = PluginService(db_session)
+    assert all(p["name"] != "Authenticator" for p in svc.sync_plugins())
+    assert svc.get_plugin("Authenticator") is None
+    assert svc.enable_plugin("Authenticator") is False
+    assert svc.disable_plugin("Authenticator") is False
+    assert svc.update_plugin_config("Authenticator", {}) is False
+    assert svc.uninstall_plugin("Authenticator", remove_data=True) is False
+
+    # The policy and enrollment survived the refused operations
+    assert TwoFactorConfig(db_session).get_mode() == "enabled"
+    assert store.is_enabled(test_user.id) is True

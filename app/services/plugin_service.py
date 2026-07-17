@@ -14,6 +14,13 @@ from app.models.account import Plugin as PluginRow
 
 PLUGIN_STATE_VERSION = 1
 
+# Plugin-table rows used as storage by built-in features, not real plugins.
+# They are hidden from listings and refused by management operations.
+# "Authenticator" holds the built-in 2FA policy and per-user PluginData
+# state (kept under the name the sysPass PHP plugin used, for data
+# continuity).
+RESERVED_PLUGIN_ROWS = frozenset({"Authenticator"})
+
 PLATFORM_HOOKS: Dict[str, str] = {
     "on_account_created": "Runs after an account is created.",
     "on_account_updated": "Runs after an account is updated.",
@@ -294,6 +301,8 @@ class PluginService:
         result = []
         self.plugin_info = {}
         for row in rows:
+            if row.name in RESERVED_PLUGIN_ROWS:
+                continue
             info = self._row_to_info(row, manifest_by_name.get(row.name))
             self.plugin_info[row.name] = info
             result.append(info.to_dict())
@@ -361,6 +370,8 @@ class PluginService:
 
     def get_plugin(self, plugin_name: str) -> Optional[Dict[str, Any]]:
         """Get one plugin record."""
+        if plugin_name in RESERVED_PLUGIN_ROWS:
+            return None
         self.sync_plugins()
         info = self.plugin_info.get(plugin_name)
         if not info:
@@ -416,6 +427,8 @@ class PluginService:
 
     def uninstall_plugin(self, plugin_name: str, remove_data: bool = False) -> bool:
         """Uninstall a plugin by marking it unavailable or deleting it."""
+        if plugin_name in RESERVED_PLUGIN_ROWS:
+            return False
         plugin = self.loaded_plugins.pop(plugin_name, None)
         if plugin:
             plugin.on_disable()
@@ -444,6 +457,8 @@ class PluginService:
 
     def enable_plugin(self, plugin_name: str) -> bool:
         """Enable a plugin and persist its state."""
+        if plugin_name in RESERVED_PLUGIN_ROWS:
+            return False
         self.sync_plugins()
         if self.db is None:
             plugin = self._instantiate_plugin(plugin_name, fire_enable=True)
@@ -460,6 +475,8 @@ class PluginService:
 
     def disable_plugin(self, plugin_name: str) -> bool:
         """Disable a plugin and persist its state."""
+        if plugin_name in RESERVED_PLUGIN_ROWS:
+            return False
         self.sync_plugins()
         if self.db is None:
             plugin = self.loaded_plugins.pop(plugin_name, None)
@@ -480,6 +497,8 @@ class PluginService:
 
     def update_plugin_config(self, plugin_name: str, config: Dict[str, Any]) -> bool:
         """Persist plugin configuration and refresh the in-memory instance."""
+        if plugin_name in RESERVED_PLUGIN_ROWS:
+            return False
         self.sync_plugins()
         if self.db is None:
             info = self.plugin_info.get(plugin_name)

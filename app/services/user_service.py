@@ -29,7 +29,7 @@ class UserService:
             return None
         return self.db.query(User).filter(User.email == email).first()
 
-    def create_user(self, user_data: UserCreate, user_group_id: int = 1) -> User:
+    def create_user(self, user_data: UserCreate) -> User:
         existing = self.get_user_by_username(user_data.username)
         if existing is not None:
             raise ValueError(f"Username '{user_data.username}' already exists")
@@ -45,7 +45,7 @@ class UserService:
             password=hashed_password,
             isUserAdmin=user_data.is_admin,
             isUserEnabled=user_data.is_active,
-            userGroupId=user_group_id,
+            userGroupId=user_data.user_group_id,
             userProfileId=user_data.user_profile_id or default_profile.id,
             hashSalt=secrets.token_bytes(32),
         )
@@ -74,6 +74,8 @@ class UserService:
                 user.isUserEnabled = value
             elif field == "user_profile_id":
                 user.userProfileId = value
+            elif field == "user_group_id" and value is not None:
+                user.userGroupId = value
             elif field == "two_factor_enabled":
                 user.twoFactorAuth = value
             elif field == "two_factor_secret":
@@ -120,6 +122,7 @@ class UserService:
             "is_active": user.isUserEnabled,
             "is_ldap": bool(user.isLdap),
             "user_profile_id": user.userProfileId,
+            "user_group_id": user.userGroupId,
             "two_factor_enabled": user.twoFactorAuth,
             "created_at": user.dateCreate,
         }

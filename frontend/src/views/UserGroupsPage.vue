@@ -52,6 +52,23 @@
           <q-btn flat round icon="close" v-close-popup />
         </q-card-section>
         <q-card-section>
+          <div class="row q-gutter-sm q-mb-md items-center">
+            <q-select
+              v-model="memberToAdd"
+              :options="addableUsers"
+              option-label="username"
+              option-value="id"
+              emit-value
+              map-options
+              label="Add user to group"
+              outlined
+              dense
+              clearable
+              class="col"
+            />
+            <q-btn color="primary" icon="person_add" label="Add" no-caps
+              :disable="!memberToAdd" @click="addMember" />
+          </div>
           <q-list bordered separator>
             <q-item v-for="m in members" :key="m.user_id">
               <q-item-section avatar>
@@ -79,13 +96,20 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { Notify, Dialog } from 'quasar'
 import api from '@/api/axios'
 import CustomFieldsPanel from '@/components/CustomFieldsPanel.vue'
 
 const groups = ref([])
 const members = ref([])
+const allUsers = ref([])
+const memberToAdd = ref(null)
+
+const addableUsers = computed(() => {
+  const memberIds = new Set(members.value.map(m => m.user_id))
+  return allUsers.value.filter(u => !memberIds.has(u.id))
+})
 const loading = ref(false)
 const saving = ref(false)
 const showDialog = ref(false)
@@ -145,13 +169,33 @@ async function save() {
 
 async function openMembers(group) {
   selectedGroup.value = group
+  memberToAdd.value = null
   try {
     const r = await api.get(`/user-groups/${group.id}/members`)
     members.value = r.data
   } catch {
     members.value = []
   }
+  if (!allUsers.value.length) {
+    try {
+      allUsers.value = (await api.get('/users')).data
+    } catch {
+      allUsers.value = []
+    }
+  }
   showMembers.value = true
+}
+
+async function addMember() {
+  if (!memberToAdd.value) return
+  try {
+    await api.post(`/user-groups/${selectedGroup.value.id}/members/${memberToAdd.value}`)
+    memberToAdd.value = null
+    const r = await api.get(`/user-groups/${selectedGroup.value.id}/members`)
+    members.value = r.data
+  } catch (e) {
+    Notify.create({ message: e.response?.data?.detail || 'Failed to add member', color: 'negative' })
+  }
 }
 
 async function removeMember(userId) {

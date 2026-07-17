@@ -32,6 +32,7 @@ class AccountService:
         self.db = db
         self.encryption = encryption
         self._full_group_access: Optional[bool] = None
+        self._global_search: Optional[bool] = None
 
     # ── Internal helpers ──────────────────────────────────────────────────
 
@@ -99,11 +100,31 @@ class AccountService:
         user = self._get_user(user_id)
         return bool(user and (user.isAdminApp or user.isAdminAcc))
 
+    def _global_search_allowed(self, user_id: int) -> bool:
+        # PHP drops the ownership/group filter (privacy filter stays) when the
+        # global_search config is enabled and the profile grants accGlobalSearch.
+        if self._global_search is None:
+            value = ConfigService(self.db).get("global_search")
+            self._global_search = bool(value and value.lower() in ("true", "1", "yes"))
+        if not self._global_search:
+            return False
+        user = self._get_user(user_id)
+        if not user or not user.userProfileId:
+            return False
+        from app.services.user_profile_service import UserProfileService
+        profile = UserProfileService(self.db).get_user_profile(user.userProfileId)
+        if not profile:
+            return False
+        return bool(profile["permissions"].model_dump().get("acc_global_search", False))
+
     def _access_filter(self, user_id: int, group_ids: Set[int]):
         # PHP AccountFilterUser skips the ownership/group filter entirely for
         # isAdminApp/isAdminAcc users; only the private-account visibility
         # filter still applies to searches.
         if self._is_admin(user_id):
+            return self._visibility_filter(user_id, group_ids)
+
+        if self._global_search_allowed(user_id):
             return self._visibility_filter(user_id, group_ids)
 
         group_share_ids = self._get_group_share_ids(user_id, group_ids)
@@ -144,13 +165,23 @@ class AccountService:
             user = self._get_user(user_id)
             if not user or user.userGroupId != account.userGroupId:
                 return False
-        # PHP AccountAclService grants edit access to members of the account's
-        # main group. Explicit group shares use their own isEdit bit and apply
-        # to secondary memberships only when accountFullGroupAccess is enabled;
-        # legacy otherUser* fields do not override those share decisions.
-        if account.userGroupId in group_ids:
+        # PHP compileAccountAccess order: primary-group match grants edit
+        # outright; an explicit AccountToUser share then short-circuits with
+        # its own isEdit bit (even when a secondary group matches the main
+        # group); secondary-membership main-group match follows; explicit
+        # group shares come last, applying to secondary memberships only when
+        # accountFullGroupAccess is enabled. Legacy otherUser* fields do not
+        # override those share decisions.
+        user = self._get_user(user_id)
+        if user and account.userGroupId == user.userGroupId:
             return True
-        if any(shared.userId == user_id and shared.isEdit for shared in (account.sharedUsers or [])):
+        user_share = next(
+            (shared for shared in (account.sharedUsers or []) if shared.userId == user_id),
+            None,
+        )
+        if user_share is not None:
+            return bool(user_share.isEdit)
+        if account.userGroupId in group_ids:
             return True
         group_share_ids = self._get_group_share_ids(user_id, group_ids)
         if any(shared.userGroupId in group_share_ids and shared.isEdit for shared in (account.sharedUserGroups or [])):

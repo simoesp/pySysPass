@@ -149,6 +149,19 @@
             <q-input v-model="ldap.ldap_binduser" label="Bind DN" outlined dense
               hint="e.g. cn=readonly,dc=example,dc=com" />
             <q-input v-model="ldap.ldap_bindpass" label="Bind Password" type="password" outlined dense />
+            <q-select
+              v-model="ldap.ldap_defaultgroup"
+              :options="allGroups"
+              option-label="name"
+              option-value="id"
+              emit-value map-options clearable
+              label="Default group for new LDAP users *"
+              outlined dense
+              hint="Required — directory users cannot be provisioned without it" />
+            <q-banner v-if="!ldap.ldap_defaultgroup" dense class="bg-orange-1 text-orange-9" rounded>
+              <template v-slot:avatar><q-icon name="warning" color="orange-8" /></template>
+              Without a default group, new LDAP users are refused at login.
+            </q-banner>
             <q-toggle v-model="ldap.ldap_tls_enabled" label="Enable TLS (StartTLS)" />
           </template>
 
@@ -614,6 +627,7 @@ const saving = ref({ general: false, mail: false, ldap: false, accounts: false, 
 const testingLdap = ref(false)
 const twoFactorMode = ref('disabled')
 const savingSecurity = ref(false)
+const allGroups = ref([])
 const rekey = ref({ current_key: '', new_key: '', new_key_confirm: '' })
 const rekeyLoading = ref(false)
 const rekeyResult = ref(null)
@@ -717,6 +731,7 @@ async function load() {
       max_attempts: 50,
       remaining_seconds: 0,
     }
+    allGroups.value = groupsRes.data
     tempMasterGroupOptions.value = [
       { label: 'All users', value: null },
       ...groupsRes.data.map(group => ({ label: group.name, value: group.id })),

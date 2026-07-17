@@ -131,12 +131,17 @@ users = ldap.import_users()
 
 ---
 
-### 4b. Two-Factor Authentication ✅
+### 4b. Two-Factor Authentication (built-in) ✅
 
 **Files:**
 - `app/services/two_factor_service.py` — TOTP service, `TwoFactorStore`
-  (PluginData-backed persistence), `TwoFactorConfig` (global tri-state)
+  (persistence), `TwoFactorConfig` (global tri-state)
 - `app/api/v1/two_factor.py` — status/setup/enable/disable/verify/backup
+
+2FA is a core feature, not a plugin. It persists state in the upstream
+`Plugin`/`PluginData` tables under the reserved name `Authenticator`
+(kept for continuity with PHP-created data); the plugins API hides and
+refuses that reserved row.
 
 **Features:**
 - Global policy in Settings → Security: Disabled / Enabled / Enforced

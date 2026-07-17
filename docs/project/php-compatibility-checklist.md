@@ -154,6 +154,16 @@ Compatibility should be treated as successful only when:
   configuration without data fixes.
 - Add upgrade-path tests for partially initialized or migrated databases.
 - Confirm reverse-proxy, LDAP, notifications, and backup flows do not require Python-only database changes.
+- ⚠️ Known divergence: account-history visibility is guarded by the
+  *current* account's ACL (`can_access_account`), while PHP filters
+  history rows by each snapshot's own `userGroupId`. After an account
+  changes main group, snapshot-era visibility can differ between the two.
+- ✅ Account ACL parity hardened: user creation requires an explicit
+  primary group (no implicit group-1/Admins fallback, also enforced for
+  LDAP provisioning via `ldap_defaultgroup`), the `acc_global_search`
+  profile permission is honored with the `global_search` config, and
+  explicit user shares short-circuit group-derived edit rights in PHP
+  `compileAccountAccess` order.
 - ✅ Two-factor authentication uses only upstream schema: per-user state
   lives in `PluginData` (`name='Authenticator'`, secrets encrypted at
   rest) and the global tri-state policy (disabled/enabled/enforced) on the

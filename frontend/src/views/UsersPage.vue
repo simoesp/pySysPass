@@ -67,6 +67,31 @@
             map-options
             clearable
           />
+          <q-select
+            v-model="form.user_group_id"
+            :options="groups"
+            option-label="name"
+            option-value="id"
+            label="Primary Group *"
+            outlined
+            dense
+            emit-value
+            map-options
+          />
+          <q-select
+            v-model="form.member_group_ids"
+            :options="groups"
+            option-label="name"
+            option-value="id"
+            label="Additional Groups"
+            outlined
+            dense
+            emit-value
+            map-options
+            multiple
+            use-chips
+            clearable
+          />
           <q-input
             v-if="!editItem"
             v-model="form.password"
@@ -96,12 +121,17 @@ import CustomFieldsPanel from '@/components/CustomFieldsPanel.vue'
 
 const users = ref([])
 const profiles = ref([])
+const groups = ref([])
+const originalMemberGroupIds = ref([])
 const loading = ref(false)
 const saving = ref(false)
 const showDialog = ref(false)
 const editItem = ref(null)
 const cfPanel = ref(null)
-const form = ref({ username: '', email: '', name: '', password: '', is_admin: false, is_active: true, user_profile_id: null })
+const form = ref({
+  username: '', email: '', name: '', password: '', is_admin: false, is_active: true,
+  user_profile_id: null, user_group_id: null, member_group_ids: [],
+})
 
 const columns = [
   { name: 'id', label: 'ID', field: 'id', sortable: true, align: 'left' },
@@ -109,6 +139,7 @@ const columns = [
   { name: 'name', label: 'Full Name', field: 'name', align: 'left' },
   { name: 'email', label: 'Email', field: 'email', align: 'left' },
   { name: 'user_profile_id', label: 'Profile', field: 'user_profile_id', align: 'left' },
+  { name: 'user_group_id', label: 'Group', field: 'user_group_id', align: 'left', format: v => groupName(v) },
   { name: 'is_admin', label: 'Role', field: 'is_admin', align: 'center' },
   { name: 'is_active', label: 'Status', field: 'is_active', align: 'center' },
   { name: 'is_ldap', label: 'Source', field: 'is_ldap', align: 'center' },
@@ -131,20 +162,56 @@ function profileName(profileId) {
   return profiles.value.find(profile => profile.id === profileId)?.name || 'Default'
 }
 
-function openDialog(item = null) {
+function groupName(groupId) {
+  return groups.value.find(group => group.id === groupId)?.name || (groupId ?? '—')
+}
+
+async function openDialog(item = null) {
   editItem.value = item
+  originalMemberGroupIds.value = []
   form.value = item
-    ? { username: item.username, email: item.email || '', name: item.name || '', password: '', is_admin: item.is_admin || false, is_active: item.is_active !== false, user_profile_id: item.user_profile_id || null }
-    : { username: '', email: '', name: '', password: '', is_admin: false, is_active: true, user_profile_id: null }
+    ? {
+        username: item.username, email: item.email || '', name: item.name || '', password: '',
+        is_admin: item.is_admin || false, is_active: item.is_active !== false,
+        user_profile_id: item.user_profile_id || null,
+        user_group_id: item.user_group_id || null, member_group_ids: [],
+      }
+    : {
+        username: '', email: '', name: '', password: '', is_admin: false, is_active: true,
+        user_profile_id: null, user_group_id: null, member_group_ids: [],
+      }
   showDialog.value = true
+  if (item) {
+    try {
+      const r = await api.get(`/users/${item.id}/groups`)
+      const ids = (r.data || []).map(g => g.id)
+      form.value.member_group_ids = ids
+      originalMemberGroupIds.value = ids
+    } catch { /* leave empty */ }
+  }
+}
+
+async function syncMemberGroups(userId) {
+  const wanted = form.value.member_group_ids || []
+  const original = originalMemberGroupIds.value || []
+  const toAdd = wanted.filter(id => !original.includes(id))
+  const toRemove = original.filter(id => !wanted.includes(id))
+  for (const gid of toAdd) {
+    await api.post(`/user-groups/${gid}/members/${userId}`).catch(() => {})
+  }
+  for (const gid of toRemove) {
+    await api.delete(`/user-groups/${gid}/members/${userId}`).catch(() => {})
+  }
 }
 
 async function save() {
   if (!form.value.username) return Notify.create({ message: 'Username is required', color: 'warning' })
   if (!editItem.value && !form.value.password) return Notify.create({ message: 'Password is required', color: 'warning' })
+  if (!form.value.user_group_id) return Notify.create({ message: 'Primary group is required', color: 'warning' })
   saving.value = true
   try {
     const payload = { ...form.value }
+    delete payload.member_group_ids
     if (editItem.value && !payload.password) delete payload.password
     let itemId
     if (editItem.value) {
@@ -154,6 +221,7 @@ async function save() {
       const r = await api.post('/users', payload)
       itemId = r.data.id
     }
+    await syncMemberGroups(itemId)
     await cfPanel.value?.save(itemId)
     Notify.create({ message: `User ${editItem.value ? 'updated' : 'created'}`, color: 'positive' })
     showDialog.value = false
@@ -189,6 +257,11 @@ onMounted(async () => {
     profiles.value = response.data
   } catch {
     profiles.value = []
+  }
+  try {
+    groups.value = (await api.get('/user-groups')).data
+  } catch {
+    groups.value = []
   }
 })
 </script>

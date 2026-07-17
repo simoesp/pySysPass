@@ -13,6 +13,9 @@ class UserCreate(UserBase):
     is_admin: bool = False
     is_active: bool = True
     user_profile_id: Optional[int] = None
+    # PHP requires an explicit primary group on user creation; without this
+    # the old fallback silently placed users in group 1 (Admins).
+    user_group_id: int = Field(..., gt=0)
 
 class UserUpdate(BaseModel):
     username: Optional[str] = None
@@ -22,6 +25,7 @@ class UserUpdate(BaseModel):
     is_admin: Optional[bool] = None
     is_active: Optional[bool] = None
     user_profile_id: Optional[int] = None
+    user_group_id: Optional[int] = None
     two_factor_enabled: Optional[bool] = None
     two_factor_secret: Optional[str] = None
 
@@ -34,6 +38,7 @@ class UserResponse(BaseModel):
     is_active: bool
     is_ldap: bool = False
     user_profile_id: Optional[int] = None
+    user_group_id: Optional[int] = None
     two_factor_enabled: bool
     created_at: Optional[datetime] = None
     permissions: Optional[ProfilePermissions] = None

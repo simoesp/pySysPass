@@ -11,7 +11,7 @@ async def test_create_user(db_session):
         email="test@example.com",
         password="securepassword123",
         is_admin=False
-    )
+    , user_group_id=1)
 
     user = service.create_user(user_data)
 
@@ -30,7 +30,7 @@ async def test_get_users(db_session):
             username=f"user{i}",
             email=f"user{i}@example.com",
             password="password123"
-        ))
+        , user_group_id=1))
 
     users = service.get_users()
 
@@ -43,7 +43,7 @@ async def test_get_user(db_session):
         username="singleuser",
         email="single@example.com",
         password="password123"
-    ))
+    , user_group_id=1))
 
     found = service.get_user(user.id)
 
@@ -57,7 +57,7 @@ async def test_get_user_by_username(db_session):
         username="uniqueuser",
         email="unique@example.com",
         password="password123"
-    ))
+    , user_group_id=1))
 
     found = service.get_user_by_username("uniqueuser")
 
@@ -71,7 +71,7 @@ async def test_update_user(db_session):
         username="updateuser",
         email="old@example.com",
         password="password123"
-    ))
+    , user_group_id=1))
 
     updated = service.update_user(user.id, UserUpdate(
         email="new@example.com",
@@ -88,7 +88,7 @@ async def test_delete_user(db_session):
         username="deleteuser",
         email="delete@example.com",
         password="password123"
-    ))
+    , user_group_id=1))
 
     result = service.delete_user(user.id)
 
@@ -102,7 +102,7 @@ async def test_verify_password(db_session):
         username="passworduser",
         email="password@example.com",
         password="correctpassword"
-    ))
+    , user_group_id=1))
 
     assert service.verify_user_password(user, "correctpassword")
     assert not service.verify_user_password(user, "wrongpassword")
@@ -114,7 +114,7 @@ async def test_update_password(db_session):
         username="newpassuser",
         email="newpass@example.com",
         password="oldpassword"
-    ))
+    , user_group_id=1))
 
     updated = service.update_user_password(user.id, "newpassword")
 
@@ -130,11 +130,36 @@ async def test_cannot_create_duplicate_username(db_session):
         username="duplicate",
         email="first@example.com",
         password="password123"
-    ))
+    , user_group_id=1))
 
     with pytest.raises(Exception):
         service.create_user(UserCreate(
             username="duplicate",
             email="second@example.com",
             password="password123"
-        ))
+        , user_group_id=1))
+
+
+@pytest.mark.asyncio
+async def test_user_group_assignment_round_trip(db_session):
+    from app.models.account import UserGroup
+    from app.schemas.user import UserCreate, UserUpdate
+    from app.services.user_service import UserService
+
+    for name in ("Admins", "Ops"):
+        if not db_session.query(UserGroup).filter(UserGroup.name == name).first():
+            db_session.add(UserGroup(name=name, description=""))
+            db_session.commit()
+    admins = db_session.query(UserGroup).filter(UserGroup.name == "Admins").first()
+    ops = db_session.query(UserGroup).filter(UserGroup.name == "Ops").first()
+
+    service = UserService(db_session)
+    user = service.create_user(UserCreate(
+        username="grouped", password="secret123", user_group_id=admins.id,
+    ))
+    assert user.userGroupId == admins.id
+    assert service.to_response(user)["user_group_id"] == admins.id
+
+    updated = service.update_user(user.id, UserUpdate(user_group_id=ops.id))
+    assert updated.userGroupId == ops.id
+    assert service.to_response(updated)["user_group_id"] == ops.id
