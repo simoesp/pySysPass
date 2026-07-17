@@ -112,3 +112,93 @@ def test_login_accepts_temporary_master_password(db_session):
     assert decrypt_user_master_pass(user, "newpass") == "vault-master"
 
     app.dependency_overrides.clear()
+
+
+def _enroll_2fa(db_session, user, mode="enabled"):
+    import pyotp
+    from app.core.security import get_encryption_service
+    from app.services.two_factor_service import (
+        TwoFactorConfig, TwoFactorService, TwoFactorStore,
+    )
+
+    TwoFactorConfig(db_session).set_mode(mode)
+    store = TwoFactorStore(db_session, get_encryption_service())
+    secret = TwoFactorService.generate_secret()
+    store.start_setup(user.id, secret)
+    store.enable(user.id, ["1111122222"])
+    return secret, pyotp
+
+
+def test_login_requires_otp_for_enrolled_user(db_session):
+    user = _make_user(db_session, "alice", "pass1234")
+    store_user_master_pass(user, "pass1234", "vault-master")
+    db_session.add(Config(parameter="masterPwd", value=get_password_hash("vault-master")))
+    db_session.commit()
+    secret, pyotp = _enroll_2fa(db_session, user)
+
+    app, client = _make_client(db_session)
+
+    # No code supplied → challenged
+    response = client.post(
+        "/api/v1/auth/login", data={"username": "alice", "password": "pass1234"},
+    )
+    assert response.status_code == 428
+    assert response.json()["detail"]["code"] == "TWO_FACTOR_REQUIRED"
+
+    # Wrong code → rejected
+    response = client.post(
+        "/api/v1/auth/login",
+        data={"username": "alice", "password": "pass1234", "otp": "000000"},
+    )
+    assert response.status_code == 401
+    assert response.json()["detail"]["code"] == "TWO_FACTOR_INVALID"
+
+    # Valid TOTP → token issued
+    response = client.post(
+        "/api/v1/auth/login",
+        data={"username": "alice", "password": "pass1234", "otp": pyotp.TOTP(secret).now()},
+    )
+    assert response.status_code == 200
+    assert response.json()["access_token"]
+
+
+def test_login_accepts_backup_code_and_consumes_it(db_session):
+    from app.core.security import get_encryption_service
+    from app.services.two_factor_service import TwoFactorStore
+
+    user = _make_user(db_session, "alice", "pass1234")
+    store_user_master_pass(user, "pass1234", "vault-master")
+    db_session.add(Config(parameter="masterPwd", value=get_password_hash("vault-master")))
+    db_session.commit()
+    _enroll_2fa(db_session, user)
+
+    app, client = _make_client(db_session)
+    response = client.post(
+        "/api/v1/auth/login",
+        data={"username": "alice", "password": "pass1234", "otp": "1111122222"},
+    )
+    assert response.status_code == 200
+
+    store = TwoFactorStore(db_session, get_encryption_service())
+    assert store.get_backup_codes(user.id) == []
+
+    # Consumed code cannot be reused
+    response = client.post(
+        "/api/v1/auth/login",
+        data={"username": "alice", "password": "pass1234", "otp": "1111122222"},
+    )
+    assert response.status_code == 401
+
+
+def test_login_skips_otp_when_mode_disabled(db_session):
+    user = _make_user(db_session, "alice", "pass1234")
+    store_user_master_pass(user, "pass1234", "vault-master")
+    db_session.add(Config(parameter="masterPwd", value=get_password_hash("vault-master")))
+    db_session.commit()
+    _enroll_2fa(db_session, user, mode="disabled")
+
+    app, client = _make_client(db_session)
+    response = client.post(
+        "/api/v1/auth/login", data={"username": "alice", "password": "pass1234"},
+    )
+    assert response.status_code == 200

@@ -136,11 +136,33 @@
             </div>
           </div>
 
+          <div v-if="requiresOtp">
+            <div class="sp-field-label">Two-Factor Code</div>
+            <q-input
+              v-model="otpCode"
+              type="text"
+              inputmode="numeric"
+              outlined
+              dense
+              placeholder="6-digit code or backup code"
+              autocomplete="one-time-code"
+              :disable="loading"
+              bg-color="white"
+            >
+              <template v-slot:prepend>
+                <q-icon name="pin" color="grey-5" />
+              </template>
+            </q-input>
+            <div class="text-caption text-warning q-mt-xs">
+              Enter the code from your authenticator app (or a backup code)
+            </div>
+          </div>
+
           <q-btn
             type="submit"
             unelevated
             color="primary"
-            :label="requiresMasterPassword || requiresOldPassword ? 'Unlock vault' : 'Sign in'"
+            :label="requiresMasterPassword || requiresOldPassword || requiresOtp ? 'Unlock vault' : 'Sign in'"
             class="full-width sp-signin-btn"
             :loading="loading"
             no-caps
@@ -172,6 +194,8 @@ const showOldPwd = ref(false)
 const loading = ref(false)
 const requiresMasterPassword = ref(false)
 const requiresOldPassword = ref(false)
+const requiresOtp = ref(false)
+const otpCode = ref('')
 const masterPasswordPrompt = ref('')
 const oldPasswordPrompt = ref('')
 
@@ -184,6 +208,7 @@ const bullets = [
 ]
 
 const loginPrompt = computed(() => {
+  if (requiresOtp.value) return 'Enter your two-factor authentication code'
   if (requiresOldPassword.value) return 'Enter your previous password to migrate your vault encryption key'
   if (requiresMasterPassword.value) return 'Enter your master password to unlock the vault'
   return 'Sign in to your password vault'
@@ -228,6 +253,10 @@ async function onSubmit() {
     Notify.create({ message: 'Please enter your previous password', color: 'warning' })
     return
   }
+  if (requiresOtp.value && !otpCode.value) {
+    Notify.create({ message: 'Please enter your two-factor code', color: 'warning' })
+    return
+  }
   loading.value = true
   try {
     const encPwd = await encryptPassword(password.value)
@@ -240,20 +269,34 @@ async function onSubmit() {
     if (requiresOldPassword.value && oldPassword.value) {
       form.append('oldpass', await encryptPassword(oldPassword.value))
     }
+    if (otpCode.value) {
+      form.append('otp', otpCode.value.trim())
+    }
     const r = await api.post('/auth/login', form, {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     })
     store.setToken(r.data.access_token)
     requiresMasterPassword.value = false
     requiresOldPassword.value = false
+    requiresOtp.value = false
     masterPassword.value = ''
     oldPassword.value = ''
+    otpCode.value = ''
     masterPasswordPrompt.value = ''
     oldPasswordPrompt.value = ''
     router.push('/accounts')
   } catch (e) {
     if (e.response?.status === 428) {
       const code = getErrorCode(e)
+      if (code === 'TWO_FACTOR_REQUIRED') {
+        requiresOtp.value = true
+        Notify.create({
+          message: getErrorMessage(e, 'Two-factor authentication code required'),
+          color: 'warning',
+          icon: 'pin',
+        })
+        return
+      }
       if (code === 'OLD_PASSWORD_REQUIRED') {
         requiresOldPassword.value = true
         requiresMasterPassword.value = false

@@ -131,6 +131,23 @@ users = ldap.import_users()
 
 ---
 
+### 4b. Two-Factor Authentication ✅
+
+**Files:**
+- `app/services/two_factor_service.py` — TOTP service, `TwoFactorStore`
+  (PluginData-backed persistence), `TwoFactorConfig` (global tri-state)
+- `app/api/v1/two_factor.py` — status/setup/enable/disable/verify/backup
+
+**Features:**
+- Global policy in Settings → Security: Disabled / Enabled / Enforced
+- Guided enrollment in My Profile: password check, QR code (rendered
+  locally), TOTP confirmation, one-time backup codes
+- Login enforcement: enrolled users answer a 428 `TWO_FACTOR_REQUIRED`
+  challenge with a TOTP or backup code; failures feed brute-force tracking
+- State stored PHP-compatibly (PluginData/Plugin rows, secrets encrypted)
+
+---
+
 ### 5. Email Notification System ✅
 
 **Files Created:**

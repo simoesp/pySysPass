@@ -142,3 +142,41 @@ def test_store_backup_code_consumption(db_session, store, test_user):
     store.set_backup_codes(test_user.id, remaining)
     assert len(store.get_backup_codes(test_user.id)) == 2
     assert codes[0] not in store.get_backup_codes(test_user.id)
+
+
+# ── Global tri-state mode (Enforced / Enabled / Disabled) ──────────────────
+
+def test_two_factor_mode_defaults_to_disabled(db_session):
+    from app.services.two_factor_service import TwoFactorConfig
+    assert TwoFactorConfig(db_session).get_mode() == "disabled"
+
+
+def test_two_factor_mode_round_trip(db_session):
+    from app.models.account import Plugin
+    from app.services.two_factor_service import TwoFactorConfig
+
+    cfg = TwoFactorConfig(db_session)
+    for mode in ("enabled", "enforced", "disabled"):
+        assert cfg.set_mode(mode) == mode
+        assert cfg.get_mode() == mode
+
+    with pytest.raises(ValueError):
+        cfg.set_mode("bogus")
+
+    # Stored on the upstream Plugin row, not new schema
+    row = db_session.query(Plugin).filter(Plugin.name == "Authenticator").first()
+    assert row is not None
+
+
+def test_status_reports_setup_required_when_enforced(db_session, store, test_user):
+    from app.services.two_factor_service import TwoFactorConfig
+
+    cfg = TwoFactorConfig(db_session)
+    cfg.set_mode("enforced")
+    assert store.is_enabled(test_user.id) is False
+    # setup_required semantics: enforced mode + not enrolled
+    assert cfg.get_mode() == "enforced"
+
+    store.start_setup(test_user.id, TwoFactorService.generate_secret())
+    store.enable(test_user.id, [])
+    assert store.is_enabled(test_user.id) is True

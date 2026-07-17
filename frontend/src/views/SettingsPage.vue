@@ -15,6 +15,7 @@
       <q-tab v-if="can('config_general')" name="wiki" icon="menu_book" label="Wiki" />
       <q-tab v-if="can('config_general')" name="ldap" icon="account_tree" label="LDAP" />
       <q-tab v-if="can('config_general')" name="mail" icon="email" label="Mail / SMTP" />
+      <q-tab v-if="can('config_general')" name="security" icon="verified_user" label="Security" />
       <q-tab v-if="can('config_encryption')" name="encryption" icon="lock" label="Encryption" />
       <q-tab v-if="can('config_backup')" name="backup" icon="backup" label="Backup" />
       <q-tab v-if="can('config_import')" name="import" icon="upload_file" label="Import Accounts" />
@@ -159,6 +160,24 @@
         </div>
         <div v-else class="text-center q-pa-xl">
           <q-spinner-dots size="2rem" color="primary" />
+        </div>
+      </q-tab-panel>
+      <!-- ====== SECURITY ====== -->
+      <q-tab-panel name="security">
+        <div class="q-gutter-md" style="max-width: 640px">
+          <div class="text-subtitle1 text-weight-medium">Two-factor authentication</div>
+          <q-option-group
+            v-model="twoFactorMode"
+            :options="[
+              { label: 'Disabled — 2FA is off; nobody can enroll or be challenged', value: 'disabled' },
+              { label: 'Enabled — users may enroll; enrolled users must enter a code at login', value: 'enabled' },
+              { label: 'Enforced — like Enabled, and users without 2FA are prompted to enroll', value: 'enforced' },
+            ]"
+            type="radio"
+          />
+          <div class="row justify-end q-mt-md">
+            <q-btn color="primary" label="Save Security Settings" :loading="savingSecurity" @click="saveSecurity" />
+          </div>
         </div>
       </q-tab-panel>
       <!-- ====== ENCRYPTION ====== -->
@@ -593,6 +612,8 @@ const encStatus = ref(null)
 const sysInfo = ref(null)
 const saving = ref({ general: false, mail: false, ldap: false, accounts: false, wiki: false })
 const testingLdap = ref(false)
+const twoFactorMode = ref('disabled')
+const savingSecurity = ref(false)
 const rekey = ref({ current_key: '', new_key: '', new_key_confirm: '' })
 const rekeyLoading = ref(false)
 const rekeyResult = ref(null)
@@ -678,6 +699,9 @@ async function load() {
       api.get('/settings/encryption/temp-master').catch(() => ({ data: null })),
       api.get('/user-groups').catch(() => ({ data: [] })),
     ])
+    api.get('/settings/two-factor')
+      .then(r => { twoFactorMode.value = r.data?.mode || 'disabled' })
+      .catch(() => {})
     general.value = settingsRes.data.general
     mail.value = settingsRes.data.mail
     ldap.value = settingsRes.data.ldap
@@ -775,6 +799,19 @@ async function saveMail() {
     Notify.create({ message: e.response?.data?.detail || 'Failed to save', color: 'negative' })
   } finally {
     saving.value.mail = false
+  }
+}
+
+async function saveSecurity() {
+  savingSecurity.value = true
+  try {
+    const r = await api.put('/settings/two-factor', { mode: twoFactorMode.value })
+    twoFactorMode.value = r.data?.mode || twoFactorMode.value
+    Notify.create({ message: 'Security settings saved', color: 'positive' })
+  } catch (e) {
+    Notify.create({ message: e.response?.data?.detail || 'Failed to save', color: 'negative' })
+  } finally {
+    savingSecurity.value = false
   }
 }
 

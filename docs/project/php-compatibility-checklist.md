@@ -154,6 +154,11 @@ Compatibility should be treated as successful only when:
   configuration without data fixes.
 - Add upgrade-path tests for partially initialized or migrated databases.
 - Confirm reverse-proxy, LDAP, notifications, and backup flows do not require Python-only database changes.
+- ✅ Two-factor authentication uses only upstream schema: per-user state
+  lives in `PluginData` (`name='Authenticator'`, secrets encrypted at
+  rest) and the global tri-state policy (disabled/enabled/enforced) on the
+  Authenticator `Plugin` row — the same locations the PHP Authenticator
+  plugin uses; the PHP `User` table gains no columns.
 - ✅ LDAP login follows PHP AuthProvider semantics: LDAP is tried before
   database auth when enabled, successful logins provision/sync the local
   user (`isLdap`, default group/profile, password hash for fallback), the

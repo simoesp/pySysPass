@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from app.db.base import get_db
 from app.core.security import get_encryption_service
 from app.services.user_service import UserService
-from app.services.two_factor_service import TwoFactorService, TwoFactorStore
+from app.services.two_factor_service import TwoFactorConfig, TwoFactorService, TwoFactorStore
 from app.services.auth_service import decode_token
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
@@ -44,6 +44,22 @@ def _get_user_or_404(db: Session, user_id: int):
     return user
 
 
+@router.get("/2fa/status")
+async def two_factor_status(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Global 2FA mode plus the calling user's enrollment state."""
+    user = _get_user_or_404(db, current_user["id"])
+    mode = TwoFactorConfig(db).get_mode()
+    enrolled = _store(db).is_enabled(user.id)
+    return {
+        "mode": mode,
+        "enrolled": enrolled,
+        "setup_required": mode == "enforced" and not enrolled,
+    }
+
+
 @router.post("/2fa/setup", response_model=TwoFactorEnableResponse)
 async def setup_two_factor(
     request: TwoFactorRequest,
@@ -53,6 +69,8 @@ async def setup_two_factor(
     """Step 1: verify the password, generate and persist a pending secret,
     and return the provisioning URI for the QR code. 2FA is not active
     until the code is confirmed via /2fa/enable."""
+    if TwoFactorConfig(db).get_mode() == "disabled":
+        raise HTTPException(status_code=400, detail="Two-factor authentication is disabled by the administrator")
     user = _get_user_or_404(db, current_user["id"])
     if not UserService(db).verify_user_password(user, request.password):
         raise HTTPException(status_code=401, detail="Invalid password")

@@ -145,3 +145,54 @@ class TwoFactorStore:
         vault = self._vault(doc)
         vault["backup_codes"] = codes
         self._save(user_id, bool(doc.get("enabled")), vault)
+
+
+TWO_FACTOR_MODES = ("disabled", "enabled", "enforced")
+
+
+class TwoFactorConfig:
+    """Global 2FA policy stored on the Authenticator Plugin row.
+
+    Mode is a tri-state:
+      - disabled: 2FA feature off; no enrollment, no login challenge
+      - enabled:  users may enroll; enrolled users must pass a code at login
+      - enforced: like enabled, plus non-enrolled users are told to enroll
+
+    Plugin.enabled maps disabled/non-disabled and the mode detail lives in
+    Plugin.data JSON, so only upstream schema is used. Plugin sync never
+    touches either field for rows without a disk manifest.
+    """
+
+    def __init__(self, db):
+        self.db = db
+
+    def _row(self) -> Optional[Plugin]:
+        return self.db.query(Plugin).filter(Plugin.name == AUTHENTICATOR_PLUGIN).first()
+
+    def get_mode(self) -> str:
+        row = self._row()
+        if row is None or not row.enabled:
+            return "disabled"
+        if row.data:
+            raw = row.data
+            if isinstance(raw, (bytes, bytearray)):
+                raw = raw.decode("utf-8", errors="ignore")
+            try:
+                mode = json.loads(raw).get("mode")
+                if mode in TWO_FACTOR_MODES:
+                    return mode
+            except ValueError:
+                pass
+        return "enabled"
+
+    def set_mode(self, mode: str) -> str:
+        if mode not in TWO_FACTOR_MODES:
+            raise ValueError(f"Invalid 2FA mode: {mode!r}")
+        row = self._row()
+        if row is None:
+            row = Plugin(name=AUTHENTICATOR_PLUGIN, available=True)
+            self.db.add(row)
+        row.enabled = mode != "disabled"
+        row.data = json.dumps({"mode": mode}).encode("utf-8")
+        self.db.commit()
+        return self.get_mode()

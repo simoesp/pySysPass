@@ -16,6 +16,7 @@ from app.services.user_profile_service import UserProfileService
 from app.services.user_service import UserService
 from app.services.security_log_service import TrackService, EventLogService
 from app.services.ldap_service import authenticate_ldap_login
+from app.services.two_factor_service import TwoFactorConfig, TwoFactorService, TwoFactorStore
 from app.models.account import Config, User, UserGroup
 from app.core.security import get_encryption_service
 from app.core.rsa_service import maybe_decrypt
@@ -166,6 +167,46 @@ async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends
         raise HTTPException(status_code=401, detail="Incorrect username or password")
 
     login_form = await request.form()
+
+    # PHP Authenticator parity: when the global 2FA mode is not disabled,
+    # enrolled users must supply a TOTP (or backup) code to log in.
+    if TwoFactorConfig(db).get_mode() != "disabled":
+        tf_store = TwoFactorStore(db, get_encryption_service())
+        if tf_store.is_enabled(user.id):
+            otp = (login_form.get("otp") or "").strip()
+            if not otp:
+                raise HTTPException(
+                    status_code=428,
+                    detail={
+                        "code": "TWO_FACTOR_REQUIRED",
+                        "message": "Two-factor authentication code required",
+                    },
+                )
+            secret = tf_store.get_secret(user.id)
+            valid = bool(secret) and TwoFactorService.verify_token(secret, otp)
+            if not valid:
+                ok, remaining = TwoFactorService.verify_backup_code(
+                    tf_store.get_backup_codes(user.id), otp
+                )
+                if ok:
+                    tf_store.set_backup_codes(user.id, remaining)
+                    valid = True
+            if not valid:
+                track.record_attempt(ip, source="login", user_id=user.id)
+                locked = track.maybe_lock(ip)
+                elog.log_event(
+                    "auth.login.2fa_fail",
+                    f"Invalid 2FA code for '{user.username}' from {ip}" + (" — IP now locked" if locked else ""),
+                    user_id=user.id, login=user.username, ip=ip, level="WARN",
+                )
+                raise HTTPException(
+                    status_code=401,
+                    detail={
+                        "code": "TWO_FACTOR_INVALID",
+                        "message": "Invalid two-factor code",
+                    },
+                )
+
     supplied_master_pass = _decode_secret(login_form.get("mpass"), "master password")
     old_password = _decode_secret(login_form.get("oldpass"), "previous password")
     master_pass = decrypt_user_master_pass(user, plain_password)

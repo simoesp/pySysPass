@@ -828,10 +828,23 @@ Useful query parameters:
 
 ### Two-factor
 
-Enrollment is a two-step flow; state is stored in `PluginData`
-(`name='Authenticator'`), the same location the sysPass PHP Authenticator
-plugin uses, with secrets encrypted at rest.
+The global policy is a tri-state mode, configured in Settings → Security
+(`config_general` permission) and stored on the Authenticator `Plugin`
+row — the same location the sysPass PHP Authenticator plugin uses:
 
+- `disabled` — feature off; no enrollment, no login challenge
+- `enabled` — users may enroll; enrolled users must enter a code at login
+- `enforced` — like enabled, and non-enrolled users are prompted to enroll
+
+Policy routes:
+
+- `GET /api/v1/settings/two-factor` → `{ "mode": "enabled" }`
+- `PUT /api/v1/settings/two-factor` — body `{ "mode": "enforced" }`
+
+User routes (per-user state lives in `PluginData`, secrets encrypted at
+rest):
+
+- `GET /api/v1/2fa/status` → `{ "mode", "enrolled", "setup_required" }`
 - `POST /api/v1/2fa/setup` — body `{ "password": "..." }`; verifies the
   password, stores a pending secret, returns `secret` and
   `provisioning_uri` for the QR code (2FA not active yet)
@@ -842,8 +855,13 @@ plugin uses, with secrets encrypted at rest.
 - `POST /api/v1/2fa/backup-code` — body `{ "code": "..." }`; consumes one
   backup code
 
-`two_factor_enabled` in user responses reflects this state. Note: login
-does not yet enforce 2FA; enforcement is a planned follow-up.
+Login enforcement: when the mode is not `disabled` and the user is
+enrolled, `POST /auth/login` answers `428` with code
+`TWO_FACTOR_REQUIRED` until the form is resubmitted with an `otp` field
+(TOTP or backup code); invalid codes return `401` `TWO_FACTOR_INVALID`
+and count toward brute-force tracking. Enrollment and disabling live in
+the My Profile page; `two_factor_enabled` in user responses reflects the
+stored state.
 
 ### Accounts
 

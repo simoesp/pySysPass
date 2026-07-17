@@ -141,6 +141,29 @@ async def save_wiki_settings(
     return svc.get_wiki_settings()
 
 
+@router.get("/settings/two-factor")
+async def get_two_factor_settings(
+    db: Session = Depends(get_db),
+    current_user=Depends(require_permission('config_general')),
+):
+    from app.services.two_factor_service import TwoFactorConfig
+    return {"mode": TwoFactorConfig(db).get_mode()}
+
+
+@router.put("/settings/two-factor")
+async def save_two_factor_settings(
+    body: dict,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_permission('config_general')),
+):
+    from app.services.two_factor_service import TwoFactorConfig
+    try:
+        mode = TwoFactorConfig(db).set_mode(str(body.get("mode", "")))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return {"mode": mode}
+
+
 @router.get("/settings/info", response_model=SystemInfo)
 async def get_system_info(
     db: Session = Depends(get_db),
