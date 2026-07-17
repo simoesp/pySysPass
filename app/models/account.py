@@ -148,7 +148,26 @@ class User(Base):
     def isUserEnabled(self, value): self.isDisabled = not value
 
     @property
-    def twoFactorAuth(self): return False
+    def twoFactorAuth(self):
+        # 2FA state lives in PluginData (name='Authenticator'), like the PHP
+        # Authenticator plugin; only the plaintext enabled flag is read here.
+        from sqlalchemy.orm import object_session
+        import json
+        session = object_session(self)
+        if session is None or self.id is None:
+            return False
+        row = session.query(PluginData).filter(
+            PluginData.name == 'Authenticator', PluginData.itemId == self.id,
+        ).first()
+        if not row or not row.data:
+            return False
+        raw = row.data
+        if isinstance(raw, (bytes, bytearray)):
+            raw = raw.decode('utf-8', errors='ignore')
+        try:
+            return bool(json.loads(raw).get('enabled'))
+        except ValueError:
+            return False
     @twoFactorAuth.setter
     def twoFactorAuth(self, value): pass
 
@@ -162,7 +181,7 @@ class User(Base):
     @property
     def user_profile_id(self):  return self.userProfileId
     @property
-    def two_factor_enabled(self): return False
+    def two_factor_enabled(self): return self.twoFactorAuth
     @property
     def created_at(self):       return None
     @property

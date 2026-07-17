@@ -50,3 +50,95 @@ def test_verify_backup_code():
     # Verify invalid code
     success, remaining = TwoFactorService.verify_backup_code(codes, "invalid123")
     assert not success
+
+
+# ── PluginData-backed persistence (PHP Authenticator plugin parity) ────────
+
+@pytest.fixture
+def store(db_session, encryption_service):
+    from app.services.two_factor_service import TwoFactorStore
+    return TwoFactorStore(db_session, encryption_service)
+
+
+def test_store_setup_then_enable_persists(db_session, store, test_user):
+    import pyotp
+    from app.models.account import PluginData
+
+    secret = TwoFactorService.generate_secret()
+    store.start_setup(test_user.id, secret)
+
+    # Pending setup does not enable 2FA yet
+    assert store.is_enabled(test_user.id) is False
+    assert store.get_pending_secret(test_user.id) == secret
+
+    codes = TwoFactorService.generate_backup_codes(8)
+    store.enable(test_user.id, codes)
+
+    assert store.is_enabled(test_user.id) is True
+    assert store.get_secret(test_user.id) == secret
+    assert store.get_backup_codes(test_user.id) == codes
+    assert pyotp.TOTP(store.get_secret(test_user.id)).now()
+
+    # Stored in the PHP Authenticator plugin's location
+    row = db_session.query(PluginData).filter(
+        PluginData.name == "Authenticator", PluginData.itemId == test_user.id,
+    ).first()
+    assert row is not None
+
+
+def test_store_secret_is_encrypted_at_rest(db_session, store, test_user):
+    import json
+    from app.models.account import PluginData
+
+    secret = TwoFactorService.generate_secret()
+    store.start_setup(test_user.id, secret)
+    store.enable(test_user.id, ["1234567890"])
+
+    row = db_session.query(PluginData).filter(
+        PluginData.name == "Authenticator", PluginData.itemId == test_user.id,
+    ).first()
+    raw = row.data.decode("utf-8") if isinstance(row.data, (bytes, bytearray)) else row.data
+    assert secret not in raw
+    assert "1234567890" not in raw
+    assert json.loads(raw)["enabled"] is True
+
+
+def test_store_disable_removes_row(db_session, store, test_user):
+    from app.models.account import PluginData
+
+    store.start_setup(test_user.id, TwoFactorService.generate_secret())
+    store.enable(test_user.id, [])
+    store.disable(test_user.id)
+
+    assert store.is_enabled(test_user.id) is False
+    assert db_session.query(PluginData).filter(
+        PluginData.name == "Authenticator", PluginData.itemId == test_user.id,
+    ).first() is None
+
+
+def test_user_model_reflects_2fa_state(db_session, store, test_user):
+    from app.services.user_service import UserService
+
+    assert test_user.twoFactorAuth is False
+    assert UserService(db_session).to_response(test_user)["two_factor_enabled"] is False
+
+    store.start_setup(test_user.id, TwoFactorService.generate_secret())
+    store.enable(test_user.id, [])
+
+    assert test_user.twoFactorAuth is True
+    assert test_user.two_factor_enabled is True
+    assert UserService(db_session).to_response(test_user)["two_factor_enabled"] is True
+
+
+def test_store_backup_code_consumption(db_session, store, test_user):
+    store.start_setup(test_user.id, TwoFactorService.generate_secret())
+    codes = TwoFactorService.generate_backup_codes(3)
+    store.enable(test_user.id, codes)
+
+    ok, remaining = TwoFactorService.verify_backup_code(
+        store.get_backup_codes(test_user.id), codes[0]
+    )
+    assert ok
+    store.set_backup_codes(test_user.id, remaining)
+    assert len(store.get_backup_codes(test_user.id)) == 2
+    assert codes[0] not in store.get_backup_codes(test_user.id)

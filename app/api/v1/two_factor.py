@@ -1,28 +1,29 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from app.db.base import get_db
+from app.core.security import get_encryption_service
 from app.services.user_service import UserService
-from app.services.two_factor_service import TwoFactorService
+from app.services.two_factor_service import TwoFactorService, TwoFactorStore
 from app.services.auth_service import decode_token
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-import base64
 
 router = APIRouter()
 security = HTTPBearer()
 
+
 class TwoFactorRequest(BaseModel):
     password: str
+
 
 class TwoFactorEnableResponse(BaseModel):
     secret: str
     provisioning_uri: str
 
+
 class TwoFactorVerifyRequest(BaseModel):
     code: str
 
-class TwoFactorSetupRequest(BaseModel):
-    code: str
 
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
     token = credentials.credentials
@@ -31,170 +32,128 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
         raise HTTPException(status_code=401, detail="Invalid token")
     return {"id": payload.get("user_id"), "username": payload.get("username")}
 
-@router.get("/2fa/setup", response_model=TwoFactorEnableResponse)
+
+def _store(db: Session) -> TwoFactorStore:
+    return TwoFactorStore(db, get_encryption_service())
+
+
+def _get_user_or_404(db: Session, user_id: int):
+    user = UserService(db).get_user(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user
+
+
+@router.post("/2fa/setup", response_model=TwoFactorEnableResponse)
 async def setup_two_factor(
     request: TwoFactorRequest,
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
+    current_user=Depends(get_current_user),
 ):
-    """
-    Step 1: Initialize 2FA setup
-    - Verify current password
-    - Generate new secret
-    - Return provisioning URI for QR code
-    """
-    service = UserService(db)
-    user = service.get_user(current_user["id"])
-
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    # Verify password
-    if not service.verify_user_password(user, request.password):
+    """Step 1: verify the password, generate and persist a pending secret,
+    and return the provisioning URI for the QR code. 2FA is not active
+    until the code is confirmed via /2fa/enable."""
+    user = _get_user_or_404(db, current_user["id"])
+    if not UserService(db).verify_user_password(user, request.password):
         raise HTTPException(status_code=401, detail="Invalid password")
 
-    # Generate new secret
     secret = TwoFactorService.generate_secret()
-    provisioning_uri = TwoFactorService.generate_provisioning_uri(
-        secret,
-        user.username,
-        issuer="sysPass"
-    )
-
-    # In production, store secret temporarily in session/Redis
-    # For now, return it (client should store temporarily)
+    _store(db).start_setup(user.id, secret)
     return {
         "secret": secret,
-        "provisioning_uri": provisioning_uri
+        "provisioning_uri": TwoFactorService.generate_provisioning_uri(
+            secret, user.username, issuer="sysPass"
+        ),
     }
+
 
 @router.post("/2fa/enable")
 async def enable_two_factor(
-    request: TwoFactorSetupRequest,
+    request: TwoFactorVerifyRequest,
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
+    current_user=Depends(get_current_user),
 ):
-    """
-    Step 2: Enable 2FA after user scans QR code
-    - Verify the TOTP code
-    - Enable 2FA for the user
-    - Generate backup codes
-    """
-    service = UserService(db)
-    user = service.get_user(current_user["id"])
+    """Step 2: confirm the TOTP code generated from the pending secret;
+    on success 2FA is enabled and backup codes are issued."""
+    user = _get_user_or_404(db, current_user["id"])
+    store = _store(db)
 
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    pending = store.get_pending_secret(user.id)
+    if not pending:
+        raise HTTPException(status_code=400, detail="No 2FA setup in progress. Call /2fa/setup first.")
+    if not TwoFactorService.verify_token(pending, request.code):
+        raise HTTPException(status_code=401, detail="Invalid 2FA code")
 
-    # In production, get secret from session/Redis
-    # For demo, we expect the client to pass the secret
-    # This is a simplified version - production should use session storage
-    secret = request.code  # Placeholder - real impl needs session storage
-
-    # Generate backup codes
     backup_codes = TwoFactorService.generate_backup_codes(8)
-    user.twoFactorAuth = True
-    user.twoFactorSecret = base64.b64encode(secret.encode()).decode() if secret else None
-    user.twoFactorBackupCodes = '\n'.join(backup_codes)
-
-    db.commit()
-    db.refresh(user)
-
+    store.enable(user.id, backup_codes)
     return {
         "message": "2FA enabled successfully",
         "backup_codes": backup_codes,
-        "warning": "Save these backup codes in a safe place. They cannot be shown again."
+        "warning": "Save these backup codes in a safe place. They cannot be shown again.",
     }
+
 
 @router.post("/2fa/disable")
 async def disable_two_factor(
     request: TwoFactorRequest,
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
+    current_user=Depends(get_current_user),
 ):
     """Disable 2FA for the user"""
-    service = UserService(db)
-    user = service.get_user(current_user["id"])
+    user = _get_user_or_404(db, current_user["id"])
+    store = _store(db)
 
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    if not user.twoFactorAuth:
+    if not store.is_enabled(user.id):
         raise HTTPException(status_code=400, detail="2FA is not enabled")
-
-    # Verify password
-    if not service.verify_user_password(user, request.password):
+    if not UserService(db).verify_user_password(user, request.password):
         raise HTTPException(status_code=401, detail="Invalid password")
 
-    # Disable 2FA
-    user.twoFactorAuth = False
-    user.twoFactorSecret = None
-    user.twoFactorBackupCodes = None
-
-    db.commit()
-    db.refresh(user)
-
+    store.disable(user.id)
     return {"message": "2FA disabled successfully"}
+
 
 @router.post("/2fa/verify")
 async def verify_two_factor_code(
     request: TwoFactorVerifyRequest,
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
+    current_user=Depends(get_current_user),
 ):
-    """
-    Verify a 2FA code (used during login)
-    """
-    service = UserService(db)
-    user = service.get_user(current_user["id"])
+    """Verify a 2FA code"""
+    user = _get_user_or_404(db, current_user["id"])
+    store = _store(db)
 
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    if not user.twoFactorAuth:
+    if not store.is_enabled(user.id):
         raise HTTPException(status_code=400, detail="2FA is not enabled for this user")
 
-    # Decode the secret
-    secret = base64.b64decode(user.twoFactorSecret).decode()
-
-    # Verify the code
-    if not TwoFactorService.verify_token(secret, request.code):
+    secret = store.get_secret(user.id)
+    if not secret or not TwoFactorService.verify_token(secret, request.code):
         raise HTTPException(status_code=401, detail="Invalid 2FA code")
-
     return {"message": "2FA verification successful"}
+
 
 @router.post("/2fa/backup-code")
 async def use_backup_code(
     request: TwoFactorVerifyRequest,
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
+    current_user=Depends(get_current_user),
 ):
-    """
-    Use a backup code when 2FA device is unavailable
-    """
-    service = UserService(db)
-    user = service.get_user(current_user["id"])
+    """Use a backup code when the 2FA device is unavailable"""
+    user = _get_user_or_404(db, current_user["id"])
+    store = _store(db)
 
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    if not user.twoFactorAuth:
+    if not store.is_enabled(user.id):
         raise HTTPException(status_code=400, detail="2FA is not enabled")
 
-    if not user.twoFactorBackupCodes:
+    codes = store.get_backup_codes(user.id)
+    if not codes:
         raise HTTPException(status_code=400, detail="No backup codes available")
 
-    codes = user.twoFactorBackupCodes.strip().split('\n')
-    success, remaining_codes = TwoFactorService.verify_backup_code(codes, request.code)
-
+    success, remaining = TwoFactorService.verify_backup_code(codes, request.code)
     if not success:
         raise HTTPException(status_code=401, detail="Invalid backup code")
 
-    # Update backup codes
-    user.twoFactorBackupCodes = '\n'.join(remaining_codes)
-    db.commit()
-
+    store.set_backup_codes(user.id, remaining)
     return {
         "message": "Backup code used successfully",
-        "remaining_codes": len(remaining_codes)
+        "remaining_codes": len(remaining),
     }

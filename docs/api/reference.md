@@ -448,6 +448,9 @@ Notes:
 
 ## Public Links API
 
+Account-scoped management routes also exist alongside the ones below:
+`GET`/`DELETE /api/v1/accounts/{account_id}/public-links/{link_id}`.
+
 ### Create a public link
 
 `POST /api/v1/accounts/{account_id}/public-links`
@@ -585,6 +588,10 @@ Representative routes:
 | `GET` | `/api/v1/settings` | JWT + `config_general` |
 | `GET` | `/api/v1/settings/general` | JWT + `config_general` |
 | `PUT` | `/api/v1/settings/general` | JWT + `config_general` |
+| `GET`/`PUT` | `/api/v1/settings/mail` | JWT + `config_general` |
+| `GET`/`PUT` | `/api/v1/settings/ldap` | JWT + `config_general` |
+| `GET`/`PUT` | `/api/v1/settings/accounts` | JWT + `config_general` |
+| `GET`/`PUT` | `/api/v1/settings/wiki` | JWT + `config_general` |
 | `GET` | `/api/v1/settings/info` | JWT + `config_general` |
 | `GET` | `/api/v1/settings/encryption` | JWT + `config_encryption` |
 | `GET` | `/api/v1/settings/encryption/temp-master` | JWT + `config_encryption` |
@@ -680,7 +687,8 @@ Typical response shape:
 - `GET /api/v1/import-export/export/csv`
 - `GET /api/v1/import-export/export/xml`
 - `POST /api/v1/import-export/export/xml/protected`
-- `GET /api/v1/import-export/export/keepass`
+- `GET /api/v1/import-export/export/keepass` — KeePass 2 XML
+- `POST /api/v1/import-export/export/keepass/kdbx` — binary `.kdbx` database
 
 Optional query parameter:
 
@@ -820,11 +828,22 @@ Useful query parameters:
 
 ### Two-factor
 
-- `GET /api/v1/2fa/setup`
-- `POST /api/v1/2fa/enable`
-- `POST /api/v1/2fa/disable`
-- `POST /api/v1/2fa/verify`
-- `POST /api/v1/2fa/backup-code`
+Enrollment is a two-step flow; state is stored in `PluginData`
+(`name='Authenticator'`), the same location the sysPass PHP Authenticator
+plugin uses, with secrets encrypted at rest.
+
+- `POST /api/v1/2fa/setup` — body `{ "password": "..." }`; verifies the
+  password, stores a pending secret, returns `secret` and
+  `provisioning_uri` for the QR code (2FA not active yet)
+- `POST /api/v1/2fa/enable` — body `{ "code": "<totp>" }`; confirms the
+  pending secret and returns one-time backup codes
+- `POST /api/v1/2fa/disable` — body `{ "password": "..." }`
+- `POST /api/v1/2fa/verify` — body `{ "code": "<totp>" }`
+- `POST /api/v1/2fa/backup-code` — body `{ "code": "..." }`; consumes one
+  backup code
+
+`two_factor_enabled` in user responses reflects this state. Note: login
+does not yet enforce 2FA; enforcement is a planned follow-up.
 
 ### Accounts
 
@@ -869,20 +888,84 @@ Useful query parameters:
 - `DELETE /api/v1/user-groups/{group_id}/members/{user_id}`
 - `GET /api/v1/users/{user_id}/groups`
 
-### Miscellaneous product modules
+## Notifications API
 
-- notifications
-- custom fields
-- item presets
-- files
-- public links
-- history
-- auth tokens
-- import/export
-- backup
-- LDAP
-- plugins
-- audit/tracks
+All routes require a JWT; users see their own notifications.
+
+- `GET /api/v1/notifications` — list for the current user
+- `GET /api/v1/notifications/unread-count` — `{ "count": n }`, polled by the UI
+- `GET /api/v1/notifications/{notification_id}`
+- `GET /api/v1/notifications/type/{notification_type}`
+- `POST /api/v1/notifications` — body: `{ "type": "...", "message": "...", "user_id": 1 }`
+- `POST /api/v1/notifications/{notification_id}/read`
+- `POST /api/v1/notifications/read-all`
+- `DELETE /api/v1/notifications/{notification_id}`
+- `DELETE /api/v1/notifications` — clear all for the current user
+
+Response fields: `id`, `user_id`, `type`, `message`, `is_read`, `date_add`
+(unix timestamp).
+
+## Custom Fields API
+
+Reading is JWT-only; managing types/definitions requires
+`mgm_custom_fields`.
+
+Types and definitions:
+
+- `GET|POST /api/v1/custom-fields/types`
+- `PUT|DELETE /api/v1/custom-fields/types/{type_id}`
+- `GET|POST /api/v1/custom-fields/definitions`
+- `PUT|DELETE /api/v1/custom-fields/definitions/{def_id}`
+- `GET /api/v1/custom-fields/modules` — module ids values can attach to
+
+Values:
+
+- `GET /api/v1/custom-fields/values/account/{account_id}`
+- `GET /api/v1/custom-fields/values/{module_id}/{item_id}`
+- `POST /api/v1/custom-fields/values`
+- `DELETE /api/v1/custom-fields/values/account/{def_id}/{account_id}`
+- `DELETE /api/v1/custom-fields/values/{def_id}/{module_id}/{item_id}`
+
+Encrypted definitions store their values encrypted at rest, matching the
+PHP behaviour.
+
+## Item Presets API
+
+JWT required; mutations are admin-only. Presets provide per-user/group
+defaults (permissions, private flags, session timeouts) resolved by
+specificity, as in sysPass PHP.
+
+- `GET /api/v1/item-presets` — optional `?preset_type=` filter
+- `GET /api/v1/item-presets/types`
+- `GET /api/v1/item-presets/{preset_id}`
+- `GET /api/v1/item-presets/context/{preset_type}` — the preset that
+  applies to the calling user (most specific match wins)
+- `POST /api/v1/item-presets`
+- `PUT /api/v1/item-presets/{preset_id}`
+- `DELETE /api/v1/item-presets/{preset_id}`
+
+## Auth Tokens API
+
+JWT required. Manages sysPass API tokens (the PHP `AuthToken` table).
+
+- `GET /api/v1/auth-tokens`
+- `GET /api/v1/auth-tokens/actions` — valid action ids
+- `POST /api/v1/auth-tokens` — body: `{ "user_id": 1, "action_id": 1 }`;
+  the plain token is only returned on create/regenerate
+- `POST /api/v1/auth-tokens/{token_id}/regenerate`
+- `DELETE /api/v1/auth-tokens/{token_id}`
+
+## History Endpoints
+
+- `GET /api/v1/accounts/{account_id}/history` — account snapshots
+- `GET /api/v1/accounts/{account_id}/history/view-count`
+- `GET /api/v1/accounts/{account_id}/history/decrypt-count`
+- `GET /api/v1/users/{user_id}/history` — user-scoped action history
+
+## Health
+
+`GET /health` (no `/api/v1` prefix, unauthenticated) returns
+`{ "status": "healthy" }`; used by the compose healthchecks.
 
 ## Recommended Usage
 

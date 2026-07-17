@@ -228,6 +228,10 @@ Settings are read from environment variables (and optionally an `.env` file) via
 | `SYSPASS_PASSWORD_SALT` | empty | sysPass password-salt compatibility value (from PHP `config.xml`) |
 | `SYSPASS_RUNTIME_CONFIG_JSON_PATH` | `config/runtime-config.json` | Structured JSON runtime config file |
 | `SQLALCHEMY_SCHEMA_GUARD` | `true` | Prevents unintended schema mutation |
+| `SQLALCHEMY_READ_ONLY` | unset | Legacy alias for `SQLALCHEMY_SCHEMA_GUARD`; overrides it when set |
+| `SYSPASS_CONFIG_XML_PATH` | empty | Legacy PHP `config.xml` to read runtime values from (compatibility fallback) |
+| `SYSPASS_CONFIG_CACHE_PATH` | empty | Legacy PHP `config.cache` fallback file |
+| `ALLOWED_HOSTS` | `["*"]` | Host header allowlist for the backend |
 | `AUTO_INIT_DB_ON_STARTUP` | `true` | Bootstrap schema when the database is empty |
 | `DEBUG` | `true` | Debug-friendly runtime behaviour |
 | `CORS_ORIGINS` | empty | Allowed browser origins; falls back to `config/cors-origins.json` when unset |
