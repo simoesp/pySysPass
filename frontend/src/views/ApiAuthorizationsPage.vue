@@ -22,12 +22,9 @@
       >
         <template v-slot:body-cell-token="props">
           <q-td :props="props">
-            <div class="row items-center no-wrap q-gutter-xs">
-              <code class="sp-token-code">{{ revealed === props.row.id ? props.row.token : mask(props.row.token) }}</code>
-              <q-btn flat round dense size="xs"
-                :icon="revealed === props.row.id ? 'visibility_off' : 'visibility'"
-                @click="toggleReveal(props.row.id)" />
-              <q-btn flat round dense size="xs" icon="content_copy" @click="copy(props.row.token)" />
+            <div class="row items-center no-wrap q-gutter-xs text-grey-6">
+              <code class="sp-token-code">••••••••</code>
+              <q-tooltip>The secret is shown only when a token is created or regenerated</q-tooltip>
             </div>
           </q-td>
         </template>
@@ -120,7 +117,6 @@ import api from '@/api/axios'
 
 const tokens = ref([])
 const loading = ref(false)
-const revealed = ref(null)
 
 const showCreate = ref(false)
 const creating = ref(false)
@@ -142,17 +138,9 @@ const columns = [
   { name: 'actions', label: '', field: 'actions', align: 'right' },
 ]
 
-function mask(token) {
-  return token.slice(0, 8) + '••••••••••••••••••••••••' + token.slice(-8)
-}
-
 function fmtDate(ts) {
   if (!ts) return '—'
   return new Date(ts * 1000).toLocaleString()
-}
-
-function toggleReveal(id) {
-  revealed.value = revealed.value === id ? null : id
 }
 
 async function copy(token) {
@@ -217,12 +205,10 @@ async function copyAndClose() {
 async function regenerate(row) {
   try {
     const r = await api.post(`/auth-tokens/${row.id}/regenerate`)
-    const idx = tokens.value.findIndex(t => t.id === row.id)
-    if (idx !== -1) tokens.value[idx] = r.data
-    revealed.value = null
-    Notify.create({ message: 'Token regenerated', color: 'positive' })
     newToken.value = r.data.token
     showNewToken.value = true
+    Notify.create({ message: 'Token regenerated', color: 'positive' })
+    await load()
   } catch (e) {
     Notify.create({ message: e.response?.data?.detail || 'Failed to regenerate', color: 'negative' })
   }

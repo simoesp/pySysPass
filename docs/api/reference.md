@@ -71,6 +71,13 @@ JSON body:
 implicit default group. Secondary memberships are managed via the
 user-group member routes.
 
+Listing: `GET /api/v1/users` accepts optional `skip`, `limit`
+(1–500; omitted = all), `q` (matches username, name, email), and
+`sort_by` (`id`, `username`, `email`, `user_profile_id`,
+`user_group_id`) with `descending`; unknown sort keys fall back to `id`.
+`GET /api/v1/users/count` returns `{ "count": n }` for the same filter.
+Both require `mgm_users`.
+
 Successful response:
 
 ```json
@@ -980,14 +987,37 @@ specificity, as in sysPass PHP.
 
 ## Auth Tokens API
 
-JWT required. Manages sysPass API tokens (the PHP `AuthToken` table).
+JWT required for management. Manages sysPass API tokens (the PHP
+`AuthToken` table).
 
-- `GET /api/v1/auth-tokens`
+- `GET /api/v1/auth-tokens` — listings return `token: null`; the secret is
+  never included in a list response
 - `GET /api/v1/auth-tokens/actions` — valid action ids
 - `POST /api/v1/auth-tokens` — body: `{ "user_id": 1, "action_id": 1 }`;
   the plain token is only returned on create/regenerate
 - `POST /api/v1/auth-tokens/{token_id}/regenerate`
 - `DELETE /api/v1/auth-tokens/{token_id}`
+
+### Using API tokens
+
+Tokens authenticate REST calls directly, in place of a JWT:
+
+```
+Authorization: Bearer <64-char token>
+```
+
+Each token is scoped by its `action_id` to the matching routes — e.g.
+Account Search (3) may call the account list/search/count endpoints,
+Account Add (5) may `POST /accounts`, Category Search (102) may read
+categories, and so on. Calls outside the token's scope return 403. The
+token acts as its owning user: profile permissions and account ACLs
+still apply, and tokens of disabled users are rejected. Tokens carry no
+master-password vault, so PHP-encrypted account passwords cannot be
+decrypted through them.
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" https://host/api/v1/accounts
+```
 
 ## History Endpoints
 

@@ -63,6 +63,19 @@ class FakeLdapService:
             return None
         return {"dn": entry["dn"], "attributes": entry["attributes"]}
 
+    def user_in_group(self, username, user_dn, group):
+        entry = self.directory.get(username)
+        if not entry:
+            return False
+        groups = entry["attributes"].get("memberOf") or []
+
+        def cn(value):
+            first = value.split(",", 1)[0]
+            return first.split("=", 1)[1].lower() if "=" in first else first.lower()
+
+        needle = group.strip().lower()
+        return any(needle == g.lower() or cn(needle) == cn(g) for g in groups)
+
 
 class UnreachableLdapService(FakeLdapService):
     def connect(self):

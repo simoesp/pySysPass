@@ -3,7 +3,8 @@ from datetime import datetime
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 from app.models.account import (
-    Account, AccountToTag, AccountToFavorite, AccountToUser, AccountToUserGroup, User, UserGroup, UserToUserGroup
+    Account, AccountHistory, AccountToTag, AccountToFavorite, AccountToUser, AccountToUserGroup,
+    User, UserGroup, UserToUserGroup
 )
 from app.schemas.account import (
     AccountCreate, AccountUpdate, AccountResponse,
@@ -151,6 +152,53 @@ class AccountService:
             )
 
         return and_(or_(*filters), self._visibility_filter(user_id, group_ids))
+
+    def history_access_filter(self, user_id: int):
+        """Per-snapshot visibility, mirroring PHP getFilterHistory.
+
+        Ownership, main group, and the privacy flags are evaluated against
+        each AccountHistory row's own columns; explicit shares are matched
+        by accountId against the current share tables, as PHP does.
+        """
+        group_ids = self._get_user_group_ids(user_id)
+        user = self._get_user(user_id)
+        primary_group_id = user.userGroupId if user else None
+        privacy = and_(
+            or_(
+                AccountHistory.isPrivate.is_(None),
+                AccountHistory.isPrivate.is_(False),
+                and_(AccountHistory.isPrivate.is_(True), AccountHistory.userId == user_id),
+            ),
+            or_(
+                AccountHistory.isPrivateGroup.is_(None),
+                AccountHistory.isPrivateGroup.is_(False),
+                and_(
+                    AccountHistory.isPrivateGroup.is_(True),
+                    AccountHistory.userGroupId == primary_group_id,
+                ) if primary_group_id is not None else False,
+            ),
+        )
+        if self._is_admin(user_id) or self._global_search_allowed(user_id):
+            return privacy
+
+        group_share_ids = self._get_group_share_ids(user_id, group_ids)
+        filters = [
+            AccountHistory.userId == user_id,
+            AccountHistory.accountId.in_(
+                self.db.query(AccountToUser.accountId).filter(AccountToUser.userId == user_id)
+            ),
+        ]
+        if group_ids:
+            filters.append(AccountHistory.userGroupId.in_(group_ids))
+        if group_share_ids:
+            filters.append(
+                AccountHistory.accountId.in_(
+                    self.db.query(AccountToUserGroup.accountId).filter(
+                        AccountToUserGroup.userGroupId.in_(group_share_ids)
+                    )
+                )
+            )
+        return and_(or_(*filters), privacy)
 
     def _can_edit_account(self, account: Account, user_id: int, group_ids: Set[int]) -> bool:
         # PHP compileAccountAccess grants admins view+edit before any other

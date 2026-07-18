@@ -5,7 +5,13 @@
         <h4 class="text-h4 text-weight-bold q-ma-none">Users</h4>
         <p class="text-body2 text-grey-6">Manage user accounts</p>
       </div>
-      <q-btn color="primary" icon="add" label="New User" @click="openDialog()" />
+      <div class="row q-gutter-sm items-center">
+        <q-input v-model="search" outlined dense placeholder="Search users…" clearable
+          style="width: 220px">
+          <template v-slot:prepend><q-icon name="search" color="grey-5" /></template>
+        </q-input>
+        <q-btn color="primary" icon="add" label="New User" @click="openDialog()" />
+      </div>
     </div>
 
     <q-table
@@ -13,6 +19,9 @@
       :columns="columns"
       row-key="id"
       :loading="loading"
+      v-model:pagination="pagination"
+      @request="onRequest"
+      :rows-per-page-options="[10, 25, 50, 100]"
       flat
       bordered
     >
@@ -114,7 +123,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 import { Notify, Dialog } from 'quasar'
 import api from '@/api/axios'
 import CustomFieldsPanel from '@/components/CustomFieldsPanel.vue'
@@ -123,6 +132,8 @@ const users = ref([])
 const profiles = ref([])
 const groups = ref([])
 const originalMemberGroupIds = ref([])
+const search = ref('')
+const pagination = ref({ page: 1, rowsPerPage: 25, rowsNumber: 0, sortBy: 'id', descending: false })
 const loading = ref(false)
 const saving = ref(false)
 const showDialog = ref(false)
@@ -149,14 +160,35 @@ const columns = [
 async function load() {
   loading.value = true
   try {
-    const r = await api.get('/users')
-    users.value = r.data
+    const params = {
+      skip: (pagination.value.page - 1) * pagination.value.rowsPerPage,
+      limit: pagination.value.rowsPerPage,
+      ...(search.value ? { q: search.value } : {}),
+      ...(pagination.value.sortBy ? { sort_by: pagination.value.sortBy, descending: pagination.value.descending } : {}),
+    }
+    const [listRes, countRes] = await Promise.all([
+      api.get('/users', { params }),
+      api.get('/users/count', { params: search.value ? { q: search.value } : {} }),
+    ])
+    users.value = listRes.data
+    pagination.value.rowsNumber = countRes.data?.count ?? 0
   } catch {
     Notify.create({ message: 'Failed to load users', color: 'negative' })
   } finally {
     loading.value = false
   }
 }
+
+function onRequest(props) {
+  pagination.value = props.pagination
+  load()
+}
+
+let searchTimer = null
+watch(search, () => {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => { pagination.value.page = 1; load() }, 300)
+})
 
 function profileName(profileId) {
   return profiles.value.find(profile => profile.id === profileId)?.name || 'Default'

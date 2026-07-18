@@ -36,7 +36,8 @@ class AuthTokenResponse(BaseModel):
     username: Optional[str] = None
     action_id: int
     action_label: Optional[str] = None
-    token: str
+    # Only populated on create/regenerate; list responses omit the secret.
+    token: Optional[str] = None
     start_date: Optional[int] = None
     has_vault: bool = False
 

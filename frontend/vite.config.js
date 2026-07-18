@@ -18,5 +18,10 @@ export default defineConfig({
         additionalData: '@import "@/css/quasar-variables.sass";'
       }
     }
+  },
+  test: {
+    environment: 'jsdom',
+    globals: true,
+    include: ['tests/**/*.test.js']
   }
 })

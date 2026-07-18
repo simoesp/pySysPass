@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from typing import Optional
 from pydantic import BaseModel
@@ -32,11 +32,26 @@ def _has_perm(db: Session, user_id: int, key: str) -> bool:
 
 @router.get("/users", response_model=list[UserResponse])
 async def list_users(
+    skip: int = Query(0, ge=0),
+    limit: Optional[int] = Query(None, ge=1, le=500),
+    q: Optional[str] = Query(None),
+    sort_by: Optional[str] = Query(None),
+    descending: bool = Query(False),
     current_user=Depends(require_permission('mgm_users')),
     db: Session = Depends(get_db),
 ):
     service = UserService(db)
-    return [service.to_response(user) for user in service.get_users()]
+    users = service.get_users(skip, limit, q, sort_by, descending)
+    return [service.to_response(user) for user in users]
+
+
+@router.get("/users/count")
+async def count_users(
+    q: Optional[str] = Query(None),
+    current_user=Depends(require_permission('mgm_users')),
+    db: Session = Depends(get_db),
+):
+    return {"count": UserService(db).count_users(q)}
 
 
 @router.post("/users", response_model=UserResponse, status_code=status.HTTP_201_CREATED)

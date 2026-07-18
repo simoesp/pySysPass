@@ -136,6 +136,80 @@ class LdapService:
         except LDAPException:
             return None
 
+    def user_in_group(self, username: str, user_dn: str, group: str) -> bool:
+        """Check group membership like PHP LdapStd/LdapMsAds.
+
+        Accepts the configured group as a CN or full DN. Tries, in order:
+        the AD in-chain matching rule (covers nested groups), the group
+        entry's member/uniqueMember/memberUid lists, and finally the
+        user's own memberOf values.
+        """
+        group = (group or "").strip()
+        if not group:
+            return True
+
+        if "=" in group:
+            group_dn = group
+        else:
+            entries = self.search(
+                filter_str=f"(&(cn={escape_filter_chars(group)})"
+                           f"(|(objectClass=group)(objectClass=groupOfNames)"
+                           f"(objectClass=groupOfUniqueNames)(objectClass=posixGroup)))",
+                attributes=["cn"],
+            )
+            if not entries:
+                logger.warning("LDAP group %r not found in directory", group)
+                return False
+            group_dn = entries[0]["dn"]
+
+        # Active Directory nested-group chain (LDAP_MATCHING_RULE_IN_CHAIN)
+        try:
+            chain = self.search(
+                filter_str=f"(&(distinguishedName={escape_filter_chars(user_dn)})"
+                           f"(memberOf:1.2.840.113556.1.4.1941:={escape_filter_chars(group_dn)}))",
+                attributes=["cn"],
+            )
+            if chain:
+                return True
+        except Exception:  # non-AD servers reject the matching rule
+            logger.debug("in-chain group match unsupported", exc_info=True)
+
+        # Standard LDAP: membership is stored on the group entry
+        group_entries = self.search(
+            filter_str=f"(distinguishedName={escape_filter_chars(group_dn)})",
+            attributes=["member", "uniqueMember", "memberUid"],
+        ) or self.search(
+            filter_str=f"(&(cn={escape_filter_chars(_group_cn(group_dn))})"
+                       f"(|(objectClass=group)(objectClass=groupOfNames)"
+                       f"(objectClass=groupOfUniqueNames)(objectClass=posixGroup)))",
+            attributes=["member", "uniqueMember", "memberUid"],
+        )
+        for entry in group_entries:
+            attrs = entry.get("attributes", {})
+            for key in ("member", "uniqueMember"):
+                values = attrs.get(key) or []
+                if isinstance(values, str):
+                    values = [values]
+                if any(v.lower() == user_dn.lower() for v in values):
+                    return True
+            member_uids = attrs.get("memberUid") or []
+            if isinstance(member_uids, str):
+                member_uids = [member_uids]
+            if any(v.lower() == username.lower() for v in member_uids):
+                return True
+
+        # Fallback: the user's own memberOf attribute (DN or CN match)
+        info = self.get_user_info(username) or {}
+        member_of = info.get("attributes", {}).get("memberOf") or []
+        if isinstance(member_of, str):
+            member_of = [member_of]
+        needle = group_dn.lower()
+        needle_cn = _group_cn(group_dn)
+        return any(
+            needle == g.lower() or needle_cn == _group_cn(g)
+            for g in member_of
+        )
+
     def get_user_info(self, username: str) -> Optional[Dict]:
         """Fetch a single user's attributes from LDAP."""
         results = self.search(
@@ -221,6 +295,10 @@ def authenticate_ldap_login(db, username: str, password: str):
         if not user_dn:
             return None
         info = svc.get_user_info(username) or {}
+        if cfg.ldap_group and not svc.user_in_group(username, user_dn, cfg.ldap_group):
+            # PHP LdapAuth denies logins outside the configured group.
+            logger.warning("LDAP login denied: %s not in group %s", username, cfg.ldap_group)
+            return None
     except Exception:
         logger.exception("LDAP authentication unavailable")
         return None
@@ -231,20 +309,6 @@ def authenticate_ldap_login(db, username: str, password: str):
             pass
 
     attrs = info.get("attributes", {})
-
-    if cfg.ldap_group:
-        # PHP LdapAuth denies logins outside the configured group. memberOf
-        # values are DNs; accept a match on the full DN or its CN.
-        groups = attrs.get("memberOf") or []
-        if isinstance(groups, str):
-            groups = [groups]
-        needle = cfg.ldap_group.strip().lower()
-        if not any(
-            needle == g.lower() or needle == _group_cn(g)
-            for g in groups
-        ):
-            logger.warning("LDAP login denied: %s not in group %s", username, cfg.ldap_group)
-            return None
 
     from app.models.account import User
     from app.services.auth_service import get_password_hash

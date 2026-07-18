@@ -175,3 +175,57 @@ def test_history_routes_are_registered():
     assert "/api/v1/accounts/{account_id}/history/decrypt-count" in route_paths
     assert "/api/v1/accounts/{account_id}/history/view-count" in route_paths
     assert "/api/v1/users/{user_id}/history" in route_paths
+
+
+@pytest.mark.asyncio
+async def test_history_visibility_follows_snapshot_group(
+    db_session, encryption_service, test_user
+):
+    """PHP getFilterHistory parity: snapshots are visible per their own
+    userGroupId, not the account's current group."""
+    from app.models.account import Account, User, UserGroup
+    from app.services.account_service import AccountService
+    from app.services.auth_service import get_password_hash
+
+    db_session.add(Config(parameter="masterPwd", value="$2y$10$php-master-hash"))
+    for gid, name in ((20, "Era A"), (21, "Era B")):
+        db_session.add(UserGroup(id=gid, name=name, description=""))
+    db_session.commit()
+
+    account = _create_account(db_session, encryption_service, test_user)
+    acc_row = db_session.query(Account).filter(Account.id == account.id).first()
+    acc_row.isPrivate = False
+    acc_row.userGroupId = 20
+    db_session.commit()
+
+    history = HistoryService(db_session)
+    history.create_snapshot(acc_row, is_modify=True)  # snapshot from group-20 era
+
+    acc_row.userGroupId = 21
+    db_session.commit()
+    history.create_snapshot(acc_row, is_modify=True)  # snapshot from group-21 era
+
+    viewer = User(
+        username="era-b-viewer", email="erab@example.com",
+        password=get_password_hash("x"), userGroupId=21,
+    )
+    db_session.add(viewer)
+    db_session.commit()
+    db_session.refresh(viewer)
+
+    service = AccountService(db_session, encryption_service)
+    # Viewer's group matches the account's CURRENT main group → account visible
+    assert service.can_access_account(account.id, viewer.id)
+
+    rows = history.get_account_history(
+        account.id, access_filter=service.history_access_filter(viewer.id)
+    )
+    assert [r.userGroupId for r in rows] == [21]
+
+    # The owner sees both eras (snapshot userId matches)
+    owner_rows = history.get_account_history(
+        account.id,
+        access_filter=AccountService(db_session, encryption_service)
+        .history_access_filter(test_user.id),
+    )
+    assert {r.userGroupId for r in owner_rows} == {20, 21}

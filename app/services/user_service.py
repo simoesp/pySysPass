@@ -15,8 +15,37 @@ class UserService:
         current = self.db.query(func.max(User.id)).scalar()
         return (current or 0) + 1
 
-    def get_users(self) -> List[User]:
-        return self.db.query(User).all()
+    _SORT_COLUMNS = {
+        "id": User.id,
+        "username": User.username,
+        "email": User.email,
+        "user_profile_id": User.userProfileId,
+        "user_group_id": User.userGroupId,
+    }
+
+    def _list_query(self, q: Optional[str] = None):
+        query = self.db.query(User)
+        if q:
+            term = f'%{q}%'
+            query = query.filter(
+                (User.username.like(term))
+                | (User.name.like(term))
+                | (User.email.like(term))
+            )
+        return query
+
+    def get_users(self, skip: int = 0, limit: Optional[int] = None,
+                  q: Optional[str] = None, sort_by: Optional[str] = None,
+                  descending: bool = False) -> List[User]:
+        column = self._SORT_COLUMNS.get(sort_by, User.id)
+        order = column.desc() if descending else column.asc()
+        query = self._list_query(q).order_by(order).offset(skip)
+        if limit is not None:
+            query = query.limit(limit)
+        return query.all()
+
+    def count_users(self, q: Optional[str] = None) -> int:
+        return self._list_query(q).count()
 
     def get_user(self, user_id: int) -> Optional[User]:
         return self.db.query(User).filter(User.id == user_id).first()

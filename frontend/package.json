@@ -8,6 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "lint": "eslint --ext .js,.ts,.vue ./src",
+    "test": "vitest run",
     "format": "prettier --write \"**/*.{js,ts,vue,css,scss,html,json}\""
   },
   "dependencies": {
@@ -22,12 +23,15 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
+    "@pinia/testing": "^2.0.1",
     "@vitejs/plugin-vue": "^6.0.0",
     "eslint": "^9.39.5",
     "eslint-plugin-vue": "^10.9.2",
     "globals": "^16.5.0",
+    "jsdom": "^29.1.1",
     "sass": "^1.83.0",
     "typescript": "^5.7.2",
-    "vite": "^6.3.3"
+    "vite": "^6.3.3",
+    "vitest": "^4.1.10"
   }
 }

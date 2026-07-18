@@ -154,10 +154,11 @@ Compatibility should be treated as successful only when:
   configuration without data fixes.
 - Add upgrade-path tests for partially initialized or migrated databases.
 - Confirm reverse-proxy, LDAP, notifications, and backup flows do not require Python-only database changes.
-- ⚠️ Known divergence: account-history visibility is guarded by the
-  *current* account's ACL (`can_access_account`), while PHP filters
-  history rows by each snapshot's own `userGroupId`. After an account
-  changes main group, snapshot-era visibility can differ between the two.
+- ✅ Account-history visibility follows PHP `getFilterHistory`: each
+  snapshot is filtered by its own `userId`/`userGroupId`/privacy columns
+  (explicit shares matched by accountId), in addition to the route-level
+  account ACL. Snapshot-era visibility now matches PHP after an account
+  changes main group.
 - ✅ Account ACL parity hardened: user creation requires an explicit
   primary group (no implicit group-1/Admins fallback, also enforced for
   LDAP provisioning via `ldap_defaultgroup`), the `acc_global_search`

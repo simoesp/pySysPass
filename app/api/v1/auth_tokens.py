@@ -4,19 +4,10 @@ from typing import List
 from app.db.base import get_db
 from app.schemas.auth_token import AuthTokenResponse, AuthTokenCreate, ACTION_LABELS
 from app.services.auth_token_service import AuthTokenService
-from app.services.auth_service import decode_token
+from app.api.deps import get_current_user
 from app.models.account import User
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 router = APIRouter()
-security = HTTPBearer()
-
-
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    payload = decode_token(credentials.credentials)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid token")
-    return {"id": payload.get("user_id"), "username": payload.get("username")}
 
 
 def _is_admin(db: Session, user_id: int) -> bool:

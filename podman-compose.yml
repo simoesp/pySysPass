@@ -38,12 +38,15 @@ services:
       AUTO_INIT_DB_ON_STARTUP: "true"
       DEBUG: "true"
       CORS_ORIGINS_FILE: /app/config/cors-origins.json
-      SYSPASS_RUNTIME_CONFIG_JSON_PATH: /app/config/runtime-config.json
+      # Runtime config (LDAP/mail/general settings) lives in a JSON file, not
+      # the database; keep it on a volume so rebuilds don't reset it.
+      SYSPASS_RUNTIME_CONFIG_JSON_PATH: /app/data/runtime-config.json
     ports:
       - "8000:8000"
     volumes:
       - ./app:/app/app:ro
       - ./tests:/app/tests:ro
+      - runtime_data:/app/data
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 15s
@@ -113,3 +116,4 @@ networks:
 
 volumes:
   mysql_data:
+  runtime_data:

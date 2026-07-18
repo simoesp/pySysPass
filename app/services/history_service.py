@@ -136,7 +136,8 @@ class HistoryService:
     def get_account_history(self, account_id: int,
                              user_id: Optional[int] = None,
                              limit: int = 100,
-                             skip: int = 0) -> List[AccountHistory]:
+                             skip: int = 0,
+                             access_filter=None) -> List[AccountHistory]:
         if user_id is not None:
             access = self.db.query(Account).filter(
                 Account.id == account_id,
@@ -145,9 +146,13 @@ class HistoryService:
             if not access:
                 return []
 
+        query = self.db.query(AccountHistory).filter(AccountHistory.accountId == account_id)
+        if access_filter is not None:
+            # PHP getFilterHistory parity: snapshots are visible per their
+            # own userId/userGroupId/privacy columns, not the current account's.
+            query = query.filter(access_filter)
         return (
-            self.db.query(AccountHistory)
-            .filter(AccountHistory.accountId == account_id)
+            query
             .order_by(AccountHistory.id.desc())
             .offset(skip)
             .limit(limit)

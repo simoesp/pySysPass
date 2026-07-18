@@ -20,12 +20,14 @@ async def get_account_history(
     current_user = Depends(account_history_view)
 ):
     """Get the history of changes for an account"""
-    if not AccountService(db, get_encryption_service()).can_access_account(
-        account_id, current_user["id"]
-    ):
+    account_service = AccountService(db, get_encryption_service())
+    if not account_service.can_access_account(account_id, current_user["id"]):
         raise HTTPException(status_code=404, detail="Account not found")
 
-    return HistoryService(db).get_account_history(account_id, None, limit, skip)
+    return HistoryService(db).get_account_history(
+        account_id, None, limit, skip,
+        access_filter=account_service.history_access_filter(current_user["id"]),
+    )
 
 @router.get("/users/{user_id}/history", response_model=List[AccountHistoryResponse])
 async def get_user_history(

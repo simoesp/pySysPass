@@ -163,3 +163,51 @@ async def test_user_group_assignment_round_trip(db_session):
     updated = service.update_user(user.id, UserUpdate(user_group_id=ops.id))
     assert updated.userGroupId == ops.id
     assert service.to_response(updated)["user_group_id"] == ops.id
+
+
+@pytest.mark.asyncio
+async def test_users_pagination_and_search(db_session):
+    service = UserService(db_session)
+    for i in range(5):
+        service.create_user(UserCreate(
+            username=f"page-user-{i}", email=f"p{i}@example.com",
+            password="password123", user_group_id=1,
+        ))
+
+    assert service.count_users() == 5
+    assert len(service.get_users()) == 5  # no limit → all (backward compatible)
+
+    first = service.get_users(skip=0, limit=2)
+    second = service.get_users(skip=2, limit=2)
+    assert len(first) == 2 and len(second) == 2
+    assert {u.id for u in first}.isdisjoint({u.id for u in second})
+
+    assert service.count_users(q="page-user-3") == 1
+    assert [u.username for u in service.get_users(q="page-user-3")] == ["page-user-3"]
+
+
+def test_users_count_route_is_registered_before_user_id_route():
+    from app.main import app
+    from tests.conftest import api_route_paths
+
+    route_paths = api_route_paths(app)
+    assert route_paths.index("/api/v1/users/count") < route_paths.index("/api/v1/users/{user_id}")
+
+
+@pytest.mark.asyncio
+async def test_users_server_side_sort(db_session):
+    service = UserService(db_session)
+    for name in ("charlie", "alice", "bob"):
+        service.create_user(UserCreate(
+            username=name, email=f"{name}@example.com",
+            password="password123", user_group_id=1,
+        ))
+
+    asc = [u.username for u in service.get_users(sort_by="username", descending=False)]
+    desc = [u.username for u in service.get_users(sort_by="username", descending=True)]
+    assert asc == sorted(asc)
+    assert desc == sorted(asc, reverse=True)
+
+    # Unknown sort key falls back to id order (no crash)
+    assert [u.id for u in service.get_users(sort_by="bogus")] == \
+        sorted(u.id for u in service.get_users())

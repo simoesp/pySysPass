@@ -10,8 +10,13 @@ class AuthTokenService:
     def __init__(self, db: Session):
         self.db = db
 
-    def _to_response(self, token: AuthToken) -> AuthTokenResponse:
-        raw = token.token.decode('ascii') if isinstance(token.token, bytes) else token.token
+    def _to_response(self, token: AuthToken, reveal: bool = False) -> AuthTokenResponse:
+        # The plaintext secret is only exposed on create/regenerate; listings
+        # never return it (a scoped 'API Token Search' token could otherwise
+        # read every other token the user owns).
+        raw = None
+        if reveal:
+            raw = token.token.decode('ascii') if isinstance(token.token, bytes) else token.token
         username = token.user.username if token.user else None
         return AuthTokenResponse(
             id=token.id,
@@ -42,7 +47,7 @@ class AuthTokenService:
         self.db.add(token)
         self.db.commit()
         self.db.refresh(token)
-        return self._to_response(token)
+        return self._to_response(token, reveal=True)
 
     def regenerate_token(self, token_id: int, user_id: Optional[int] = None) -> Optional[AuthTokenResponse]:
         q = self.db.query(AuthToken).filter(AuthToken.id == token_id)
@@ -55,7 +60,7 @@ class AuthTokenService:
         token.startDate = int(time.time())
         self.db.commit()
         self.db.refresh(token)
-        return self._to_response(token)
+        return self._to_response(token, reveal=True)
 
     def delete_token(self, token_id: int, user_id: Optional[int] = None) -> bool:
         q = self.db.query(AuthToken).filter(AuthToken.id == token_id)
