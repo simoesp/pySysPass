@@ -78,21 +78,25 @@ class AccountService:
             return group_ids
         return {user.userGroupId}
 
-    def _visibility_filter(self, user_id: int, group_ids: Set[int]):
+    def _visibility_filter(self, user_id: int, group_ids: Set[int], model=Account):
+        """Private/private-group visibility, evaluated against `model`'s own
+        columns. `model` is Account for live rows or AccountHistory for
+        snapshots, so both share one privacy rule (PHP applies the same
+        clause to Account and AccountHistory)."""
         user = self._get_user(user_id)
         primary_group_id = user.userGroupId if user else None
         return and_(
             or_(
-                Account.isPrivate.is_(None),
-                Account.isPrivate.is_(False),
-                and_(Account.isPrivate.is_(True), Account.userId == user_id),
+                model.isPrivate.is_(None),
+                model.isPrivate.is_(False),
+                and_(model.isPrivate.is_(True), model.userId == user_id),
             ),
             or_(
-                Account.isPrivateGroup.is_(None),
-                Account.isPrivateGroup.is_(False),
+                model.isPrivateGroup.is_(None),
+                model.isPrivateGroup.is_(False),
                 and_(
-                    Account.isPrivateGroup.is_(True),
-                    Account.userGroupId == primary_group_id,
+                    model.isPrivateGroup.is_(True),
+                    model.userGroupId == primary_group_id,
                 ) if primary_group_id is not None else False,
             ),
         )
@@ -161,23 +165,7 @@ class AccountService:
         by accountId against the current share tables, as PHP does.
         """
         group_ids = self._get_user_group_ids(user_id)
-        user = self._get_user(user_id)
-        primary_group_id = user.userGroupId if user else None
-        privacy = and_(
-            or_(
-                AccountHistory.isPrivate.is_(None),
-                AccountHistory.isPrivate.is_(False),
-                and_(AccountHistory.isPrivate.is_(True), AccountHistory.userId == user_id),
-            ),
-            or_(
-                AccountHistory.isPrivateGroup.is_(None),
-                AccountHistory.isPrivateGroup.is_(False),
-                and_(
-                    AccountHistory.isPrivateGroup.is_(True),
-                    AccountHistory.userGroupId == primary_group_id,
-                ) if primary_group_id is not None else False,
-            ),
-        )
+        privacy = self._visibility_filter(user_id, group_ids, model=AccountHistory)
         if self._is_admin(user_id) or self._global_search_allowed(user_id):
             return privacy
 
