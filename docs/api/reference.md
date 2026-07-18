@@ -1019,6 +1019,23 @@ decrypted through them.
 curl -H "Authorization: Bearer $TOKEN" https://host/api/v1/accounts
 ```
 
+## Account Audit
+
+`GET /api/v1/accounts/{account_id}/audit` — who opened the account, viewed
+its password, edited, or deleted it (newest first; `skip`/`limit`
+supported). Restricted to the account owner, its main group, and admins
+(`can_edit_account`).
+
+The trail is read from the `EventLog` table: account access is recorded
+there with the account referenced in the description via an `[acc:<id>]`
+marker (no schema change — EventLog keeps its upstream PHP columns, which
+have no `accountId`). Only events logged after this feature shipped
+appear; the `account.view.pass` action answers "who saw the password".
+
+Response entries: `id`, `action` (`account.view` / `account.view.pass` /
+`account.edit` / `account.delete`), `action_label`, `user_id`,
+`username`, `ip`, `date` (unix seconds).
+
 ## History Endpoints
 
 - `GET /api/v1/accounts/{account_id}/history` — account snapshots

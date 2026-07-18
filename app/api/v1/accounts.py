@@ -1,12 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Body, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Body, Query, Request
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from app.db.base import get_db
 from app.schemas.account import (
     AccountCreate, AccountResponse, AccountUpdate, PasswordResponse,
-    SharedUserInfo, SharedGroupInfo,
+    SharedUserInfo, SharedGroupInfo, AccountAuditEntry,
 )
 from app.services.account_service import AccountService
+from app.services.account_audit_service import AccountAuditService
 from app.core.security import get_encryption_service
 from app.api.deps import (
     enforce_permissions,
@@ -15,6 +16,16 @@ from app.api.deps import (
 )
 
 router = APIRouter()
+
+
+def _client_ip(request: Request) -> str:
+    real_ip = request.headers.get("X-Real-IP")
+    if real_ip:
+        return real_ip.strip()
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "0.0.0.0"
 
 account_view = require_any_permission("acc_view", "acc_edit", account_admin=True)
 account_create = require_any_permission("acc_add", account_admin=True)
@@ -93,15 +104,39 @@ async def create_account(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/accounts/{account_id}/audit", response_model=List[AccountAuditEntry])
+async def get_account_audit(
+    account_id: int,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+    db: Session = Depends(get_db),
+    current_user=Depends(account_view),
+):
+    """Who opened this account / viewed its password / edited it. Restricted
+    to the owner, the account's main group, and admins (can_edit_account)."""
+    svc = AccountService(db, get_encryption_service())
+    if not svc.can_edit_account(account_id, current_user["id"]):
+        raise HTTPException(
+            status_code=403,
+            detail="Only the account owner or its main group can audit this account",
+        )
+    return AccountAuditService(db).list_for_account(account_id, skip, limit)
+
+
 @router.get("/accounts/{account_id}", response_model=AccountResponse)
 async def get_account(
     account_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_user=Depends(account_view),
 ):
     result = AccountService(db, get_encryption_service()).get_account(account_id, current_user["id"])
     if not result:
         raise HTTPException(status_code=404, detail="Account not found")
+    AccountAuditService(db).log(
+        account_id, "account.view", current_user["id"],
+        current_user.get("username"), _client_ip(request),
+    )
     return result
 
 
@@ -109,6 +144,7 @@ async def get_account(
 async def update_account(
     account_id: int,
     account: AccountUpdate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user=Depends(account_edit),
 ):
@@ -133,22 +169,34 @@ async def update_account(
     )
     if not result:
         raise HTTPException(status_code=404, detail="Account not found")
+    AccountAuditService(db).log(
+        account_id, "account.edit", current_user["id"],
+        current_user.get("username"), _client_ip(request),
+    )
     return result
 
 
 @router.delete("/accounts/{account_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_account(
     account_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_user=Depends(account_delete),
 ):
+    audit = AccountAuditService(db)
+    name = audit.account_name(account_id)
     if not AccountService(db, get_encryption_service()).delete_account(account_id, current_user["id"]):
         raise HTTPException(status_code=404, detail="Account not found")
+    audit.log(
+        account_id, "account.delete", current_user["id"],
+        current_user.get("username"), _client_ip(request), account_name=name,
+    )
 
 
 @router.get("/accounts/{account_id}/password")
 async def get_account_password(
     account_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_user=Depends(account_view_pass),
 ):
@@ -157,6 +205,10 @@ async def get_account_password(
     )
     if password is None:
         raise HTTPException(status_code=404, detail="Account not found or no password")
+    AccountAuditService(db).log(
+        account_id, "account.view.pass", current_user["id"],
+        current_user.get("username"), _client_ip(request),
+    )
     return PasswordResponse(password=password)
 
 

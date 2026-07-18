@@ -154,6 +154,11 @@ Compatibility should be treated as successful only when:
   configuration without data fixes.
 - Add upgrade-path tests for partially initialized or migrated databases.
 - Confirm reverse-proxy, LDAP, notifications, and backup flows do not require Python-only database changes.
+- ✅ Per-account audit trail writes to and reads from the existing
+  `EventLog` table only. Since upstream EventLog has no `accountId`
+  column, the account is referenced in the description via an
+  `[acc:<id>]` marker (PHP also references accounts in EventLog
+  descriptions), so no Python-only schema is introduced.
 - ✅ Account-history visibility follows PHP `getFilterHistory`: each
   snapshot is filtered by its own `userId`/`userGroupId`/privacy columns
   (explicit shares matched by accountId), in addition to the route-level

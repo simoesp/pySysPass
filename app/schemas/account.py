@@ -97,3 +97,13 @@ class AccountResponse(BaseModel):
 
 class PasswordResponse(BaseModel):
     password: str
+
+
+class AccountAuditEntry(BaseModel):
+    id: int
+    action: str
+    action_label: str
+    user_id: Optional[int] = None
+    username: Optional[str] = None
+    ip: Optional[str] = None
+    date: int

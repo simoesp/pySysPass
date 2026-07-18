@@ -72,6 +72,8 @@
         <q-tab name="details" icon="info_outline" label="Details" no-caps />
         <q-tab v-if="store.hasPermission('acc_view_history')"
           name="history" icon="history" label="History" no-caps />
+        <q-tab v-if="account.can_edit"
+          name="audit" icon="policy" label="Audit" no-caps />
       </q-tabs>
 
       <q-tab-panels v-model="tab" animated keep-alive>
@@ -283,6 +285,40 @@
             </div>
           </div>
         </q-tab-panel>
+
+        <!-- ── Audit panel ── -->
+        <q-tab-panel v-if="account.can_edit" name="audit" class="q-pa-none">
+          <div class="text-caption text-grey-6 q-mb-sm">
+            Who opened this account, viewed its password, or changed it.
+          </div>
+          <div v-if="auditLoading" class="sp-center-state">
+            <q-spinner-dots size="36px" color="primary" />
+          </div>
+          <div v-else-if="auditError" class="sp-center-state text-negative">
+            <q-icon name="error_outline" size="48px" />
+            <div class="text-body2 q-mt-md">{{ auditError }}</div>
+          </div>
+          <div v-else-if="!audit.length" class="sp-center-state">
+            <q-icon name="policy" size="48px" color="grey-3" />
+            <div class="text-body2 text-grey-5 q-mt-md">No access recorded yet</div>
+          </div>
+          <div v-else class="sp-history-list">
+            <div v-for="entry in audit" :key="entry.id" class="sp-history-item">
+              <q-icon :name="auditIcon(entry.action)" size="18px"
+                :color="auditColor(entry.action)" class="sp-history-icon" />
+              <div class="sp-history-body">
+                <div class="sp-history-action">
+                  <strong>{{ entry.username || 'unknown' }}</strong>
+                  <span class="text-grey-7 q-ml-xs">{{ entry.action_label }}</span>
+                  <span v-if="entry.ip" class="text-grey-5 text-caption q-ml-sm">from {{ entry.ip }}</span>
+                </div>
+                <div class="sp-history-time text-grey-5 text-caption">
+                  {{ formatDate(entry.date * 1000) }}
+                </div>
+              </div>
+            </div>
+          </div>
+        </q-tab-panel>
       </q-tab-panels>
     </div>
 
@@ -437,6 +473,9 @@ const history = ref([])
 const historyError = ref('')
 const loading = ref(true)
 const historyLoading = ref(false)
+const audit = ref([])
+const auditError = ref('')
+const auditLoading = ref(false)
 const tab = ref('details')
 
 const showPwd = ref(false)
@@ -783,8 +822,38 @@ async function loadHistory() {
   }
 }
 
+async function loadAudit() {
+  if (auditLoading.value || !account.value) return
+  auditLoading.value = true
+  auditError.value = ''
+  try {
+    const r = await api.get(`/accounts/${account.value.id}/audit`)
+    audit.value = r.data
+  } catch (e) {
+    audit.value = []
+    auditError.value = e.response?.data?.detail || 'Failed to load account audit'
+  } finally {
+    auditLoading.value = false
+  }
+}
+
+const auditIcon = (action) => ({
+  'account.view.pass': 'visibility',
+  'account.view': 'login',
+  'account.edit': 'edit',
+  'account.delete': 'delete',
+}[action] || 'policy')
+
+const auditColor = (action) => ({
+  'account.view.pass': 'negative',
+  'account.view': 'primary',
+  'account.edit': 'orange',
+  'account.delete': 'red',
+}[action] || 'grey')
+
 watch(tab, val => {
   if (val === 'history' && !history.value.length) loadHistory()
+  if (val === 'audit') loadAudit()   // always refresh: reflects reveals just made
 })
 
 // ── Load ──────────────────────────────────────────────────────────────────
