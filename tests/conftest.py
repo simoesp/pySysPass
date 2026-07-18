@@ -87,3 +87,25 @@ def test_user(db_session):
 @pytest.fixture(scope="function")
 def demo_workspace(db_session, encryption_service, test_user):
     return seed_demo_workspace(db_session, encryption_service, test_user)
+
+
+def api_route_paths(app):
+    """Flattened route paths in registration order.
+
+    FastAPI >= 0.139 wraps included routers in _IncludedRouter objects
+    without a .path attribute; walk through them via include_context.
+    """
+    paths = []
+
+    def walk(routes, prefix=""):
+        for route in routes:
+            ctx = getattr(route, "include_context", None)
+            if ctx is not None:
+                walk(ctx.included_router.routes, prefix + (ctx.prefix or ""))
+                continue
+            path = getattr(route, "path", None)
+            if path is not None:
+                paths.append(prefix + path)
+
+    walk(app.routes)
+    return paths

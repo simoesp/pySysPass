@@ -141,6 +141,32 @@ async def save_wiki_settings(
     return svc.get_wiki_settings()
 
 
+@router.post("/settings/mail/test")
+async def send_test_email(
+    body: dict,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_permission('config_general')),
+):
+    """Send a test message using the saved mail settings."""
+    from app.services.email_service import email_service_from_config
+
+    svc = email_service_from_config(db)
+    if svc is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Mail is disabled or the SMTP server is not configured. Save the mail settings first.",
+        )
+    recipient = (body.get("recipient") or "").strip() or svc.from_email
+    ok = svc.send_email(
+        recipient,
+        "sysPass test email",
+        "This is a test message from pySysPass. Your mail settings work.",
+    )
+    if not ok:
+        raise HTTPException(status_code=502, detail="SMTP delivery failed — check the server log for details.")
+    return {"success": True, "recipient": recipient}
+
+
 @router.get("/settings/two-factor")
 async def get_two_factor_settings(
     db: Session = Depends(get_db),

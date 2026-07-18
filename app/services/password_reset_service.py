@@ -29,13 +29,12 @@ class PasswordResetService:
         cfg = ConfigService(self.db).get_mail_settings()
         if not cfg.mail_enabled or not cfg.mail_server:
             return None
-        use_tls = (cfg.mail_security or "tls").lower() in ("tls", "starttls")
         return EmailService(
             smtp_host=cfg.mail_server,
             smtp_port=cfg.mail_port or 25,
             username=cfg.mail_user if cfg.mail_auth_enabled else None,
             password=cfg.mail_pass if cfg.mail_auth_enabled else None,
-            use_tls=use_tls,
+            security=(cfg.mail_security or "tls").lower(),
             from_email=cfg.mail_from or "syspass@localhost",
         )
 

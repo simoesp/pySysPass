@@ -195,7 +195,8 @@ def test_notification_routes_are_registered():
     """Test that notification routes are registered"""
     from app.main import app
 
-    route_paths = [route.path for route in app.routes]
+    from tests.conftest import api_route_paths
+    route_paths = api_route_paths(app)
 
     assert "/api/v1/notifications" in route_paths
     assert "/api/v1/notifications/unread-count" in route_paths

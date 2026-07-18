@@ -169,7 +169,8 @@ def test_history_api_returns_snapshots_to_shared_users(
 def test_history_routes_are_registered():
     from app.main import app
 
-    route_paths = [route.path for route in app.routes]
+    from tests.conftest import api_route_paths
+    route_paths = api_route_paths(app)
     assert "/api/v1/accounts/{account_id}/history" in route_paths
     assert "/api/v1/accounts/{account_id}/history/decrypt-count" in route_paths
     assert "/api/v1/accounts/{account_id}/history/view-count" in route_paths

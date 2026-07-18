@@ -40,6 +40,7 @@ class LdapTestBody(BaseModel):
 
 class LdapImportBody(BaseModel):
     default_group_id: Optional[int] = None
+    usernames: Optional[List[str]] = None
 
 
 @router.post("/ldap/test-connection")
@@ -94,7 +95,13 @@ async def import_ldap_users(
     """Import users from LDAP into sysPass."""
     ldap_svc = _ldap_from_config(db)
     cfg = ConfigService(db).get_ldap_settings()
-    group_id = body.default_group_id or cfg.ldap_defaultgroup or 1
+    group_id = body.default_group_id or cfg.ldap_defaultgroup
+    if not group_id:
+        # Never fall back to group 1 (Admins) implicitly.
+        raise HTTPException(
+            status_code=400,
+            detail="Set a default group for LDAP users (or pass default_group_id) before importing.",
+        )
     try:
         ldap_svc.connect()
         ldap_users = ldap_svc.import_users()
@@ -102,4 +109,9 @@ async def import_ldap_users(
     except Exception as exc:
         logger.exception("LDAP user import query failed")
         raise HTTPException(status_code=502, detail="LDAP query failed") from exc
-    return LdapImportService(db, user_group_id=group_id).import_ldap_users(ldap_users)
+    if body.usernames is not None:
+        wanted = set(body.usernames)
+        ldap_users = [u for u in ldap_users if u.get("username") in wanted]
+    return LdapImportService(
+        db, user_group_id=group_id, user_profile_id=cfg.ldap_defaultprofile
+    ).import_ldap_users(ldap_users)

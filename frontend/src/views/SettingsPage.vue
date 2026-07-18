@@ -119,7 +119,11 @@
             <q-toggle v-model="mail.mail_requests_enabled" label="Allow users to request accounts via email" />
           </template>
 
-          <div class="row justify-end q-mt-md">
+          <div class="row justify-end q-gutter-sm q-mt-md">
+            <q-btn v-if="mail.mail_enabled" outline color="primary" label="Send test email"
+              :loading="testingMail" :disable="!mail.mail_server" @click="testMail">
+              <q-tooltip>Uses the saved settings — save first if you changed them</q-tooltip>
+            </q-btn>
             <q-btn color="primary" label="Save Mail Settings" :loading="saving.mail" @click="saveMail" />
           </div>
         </div>
@@ -162,10 +166,25 @@
               <template v-slot:avatar><q-icon name="warning" color="orange-8" /></template>
               Without a default group, new LDAP users are refused at login.
             </q-banner>
+            <q-select
+              v-model="ldap.ldap_defaultprofile"
+              :options="allProfiles"
+              option-label="name"
+              option-value="id"
+              emit-value map-options clearable
+              label="Default profile for new LDAP users"
+              outlined dense
+              hint="Optional — falls back to the built-in default profile" />
             <q-toggle v-model="ldap.ldap_tls_enabled" label="Enable TLS (StartTLS)" />
           </template>
 
           <div class="row justify-end q-gutter-sm q-mt-md">
+            <q-btn v-if="ldap.ldap_enabled" outline color="secondary" label="Import users…"
+              icon="group_add" no-caps
+              :disable="!ldap.ldap_server || !ldap.ldap_defaultgroup"
+              @click="openLdapImport">
+              <q-tooltip v-if="!ldap.ldap_defaultgroup">Set and save a default group first</q-tooltip>
+            </q-btn>
             <q-btn v-if="ldap.ldap_enabled" outline color="primary" label="Test connection"
               :loading="testingLdap" :disable="!ldap.ldap_server" @click="testLdap" />
             <q-btn color="primary" label="Save LDAP Settings" :loading="saving.ldap" @click="saveLdap" />
@@ -588,12 +607,70 @@
         <div v-else class="text-center q-pa-xl"><q-spinner-dots size="2rem" color="primary" /></div>
       </q-tab-panel>
     </q-tab-panels>
+
+    <!-- ── LDAP import dialog ── -->
+    <q-dialog v-model="ldapImportDialog">
+      <q-card style="min-width: 560px; max-width: 95vw">
+        <q-card-section class="row items-center q-pb-none">
+          <div class="text-h6">Import directory users</div>
+          <q-space /><q-btn flat round dense icon="close" v-close-popup />
+        </q-card-section>
+
+        <q-card-section v-if="ldapImportLoading" class="text-center q-pa-lg">
+          <q-spinner-dots size="40px" color="primary" />
+          <div class="text-grey-6 q-mt-sm">Querying directory…</div>
+        </q-card-section>
+
+        <q-card-section v-else-if="ldapImportStats" class="q-gutter-sm">
+          <q-banner dense class="bg-green-1 text-green-9" rounded>
+            <template v-slot:avatar><q-icon name="check_circle" color="positive" /></template>
+            Imported {{ ldapImportStats.success }} users
+            ({{ ldapImportStats.skipped }} already existed, {{ ldapImportStats.failed }} failed).
+          </q-banner>
+          <div class="row justify-end">
+            <q-btn color="primary" label="Done" no-caps v-close-popup />
+          </div>
+        </q-card-section>
+
+        <q-card-section v-else>
+          <div class="text-body2 text-grey-7 q-mb-sm">
+            {{ ldapImportNewCount }} of {{ ldapImportUsers.length }} directory users are new.
+            Imported users get the configured default group/profile, are marked as LDAP,
+            and must log in with their directory password.
+          </div>
+          <q-list bordered separator style="max-height: 320px; overflow-y: auto">
+            <q-item v-for="u in ldapImportUsers" :key="u.dn" :class="u._exists ? 'bg-grey-1' : ''">
+              <q-item-section avatar>
+                <q-checkbox v-model="u._selected" :disable="u._exists" dense />
+              </q-item-section>
+              <q-item-section>
+                <q-item-label>{{ u.username }} <span class="text-grey-6">— {{ u.full_name }}</span></q-item-label>
+                <q-item-label caption>{{ u.email || 'no email' }}</q-item-label>
+              </q-item-section>
+              <q-item-section side>
+                <q-badge :color="u._exists ? 'grey-5' : 'positive'" :label="u._exists ? 'Exists' : 'New'" />
+              </q-item-section>
+            </q-item>
+            <q-item v-if="ldapImportUsers.length === 0">
+              <q-item-section class="text-grey-6">No users found in the directory</q-item-section>
+            </q-item>
+          </q-list>
+          <div class="row items-center justify-between q-mt-md">
+            <q-btn flat dense no-caps color="primary"
+              :label="ldapImportSelectedCount === ldapImportNewCount ? 'Deselect all' : 'Select all new'"
+              :disable="ldapImportNewCount === 0" @click="toggleLdapSelection" />
+            <q-btn color="primary" :label="`Import ${ldapImportSelectedCount} selected`" no-caps
+              :loading="ldapImporting" :disable="ldapImportSelectedCount === 0" @click="runLdapImport" />
+          </div>
+        </q-card-section>
+      </q-card>
+    </q-dialog>
   </q-page>
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { Notify } from 'quasar'
+import { Notify, Dialog } from 'quasar'
 import api from '@/api/axios'
 import { themes, applyTheme, getSavedTheme } from '@/composables/useTheme'
 import { useMainStore } from '@/stores'
@@ -625,9 +702,28 @@ const encStatus = ref(null)
 const sysInfo = ref(null)
 const saving = ref({ general: false, mail: false, ldap: false, accounts: false, wiki: false })
 const testingLdap = ref(false)
+const testingMail = ref(false)
 const twoFactorMode = ref('disabled')
 const savingSecurity = ref(false)
 const allGroups = ref([])
+const allProfiles = ref([])
+const ldapImportDialog = ref(false)
+const ldapImportLoading = ref(false)
+const ldapImporting = ref(false)
+const ldapImportUsers = ref([])
+const ldapImportStats = ref(null)
+
+const ldapImportNewCount = computed(() =>
+  ldapImportUsers.value.filter(u => !u._exists).length)
+const ldapImportSelectedCount = computed(() =>
+  ldapImportUsers.value.filter(u => u._selected).length)
+
+function toggleLdapSelection() {
+  const all = ldapImportSelectedCount.value === ldapImportNewCount.value
+  for (const u of ldapImportUsers.value) {
+    if (!u._exists) u._selected = !all
+  }
+}
 const rekey = ref({ current_key: '', new_key: '', new_key_confirm: '' })
 const rekeyLoading = ref(false)
 const rekeyResult = ref(null)
@@ -732,6 +828,9 @@ async function load() {
       remaining_seconds: 0,
     }
     allGroups.value = groupsRes.data
+    api.get('/user-profiles')
+      .then(r => { allProfiles.value = r.data })
+      .catch(() => {})
     tempMasterGroupOptions.value = [
       { label: 'All users', value: null },
       ...groupsRes.data.map(group => ({ label: group.name, value: group.id })),
@@ -815,6 +914,60 @@ async function saveMail() {
   } finally {
     saving.value.mail = false
   }
+}
+
+async function openLdapImport() {
+  ldapImportDialog.value = true
+  ldapImportLoading.value = true
+  ldapImportStats.value = null
+  ldapImportUsers.value = []
+  try {
+    const [dirRes, usersRes] = await Promise.all([
+      api.get('/ldap/users'),
+      api.get('/users').catch(() => ({ data: [] })),
+    ])
+    const existing = new Set(usersRes.data.map(u => u.username))
+    ldapImportUsers.value = (dirRes.data || []).map(u => ({
+      ...u, _exists: existing.has(u.username), _selected: !existing.has(u.username),
+    }))
+  } catch (e) {
+    Notify.create({ message: e.response?.data?.detail || 'Directory query failed', color: 'negative' })
+    ldapImportDialog.value = false
+  } finally {
+    ldapImportLoading.value = false
+  }
+}
+
+async function runLdapImport() {
+  ldapImporting.value = true
+  try {
+    const usernames = ldapImportUsers.value.filter(u => u._selected).map(u => u.username)
+    const r = await api.post('/ldap/import', { usernames })
+    ldapImportStats.value = r.data
+  } catch (e) {
+    Notify.create({ message: e.response?.data?.detail || 'Import failed', color: 'negative' })
+  } finally {
+    ldapImporting.value = false
+  }
+}
+
+function testMail() {
+  Dialog.create({
+    title: 'Send test email',
+    message: 'Recipient address (defaults to the From address when empty):',
+    prompt: { model: mail.value?.mail_from || '', type: 'email', label: 'Recipient' },
+    cancel: true,
+  }).onOk(async (recipient) => {
+    testingMail.value = true
+    try {
+      const r = await api.post('/settings/mail/test', { recipient })
+      Notify.create({ message: `Test email sent to ${r.data.recipient}`, color: 'positive' })
+    } catch (e) {
+      Notify.create({ message: e.response?.data?.detail || 'Test email failed', color: 'negative' })
+    } finally {
+      testingMail.value = false
+    }
+  })
 }
 
 async function saveSecurity() {

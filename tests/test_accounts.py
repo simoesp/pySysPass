@@ -124,14 +124,16 @@ async def test_account_access_is_scoped_to_owner(db_session, encryption_service,
 def test_search_route_is_registered_before_account_id_route():
     from app.main import app
 
-    route_paths = [route.path for route in app.routes]
+    from tests.conftest import api_route_paths
+    route_paths = api_route_paths(app)
     assert route_paths.index("/api/v1/accounts/search") < route_paths.index("/api/v1/accounts/{account_id}")
 
 
 def test_count_route_is_registered_before_account_id_route():
     from app.main import app
 
-    route_paths = [route.path for route in app.routes]
+    from tests.conftest import api_route_paths
+    route_paths = api_route_paths(app)
     assert route_paths.index("/api/v1/accounts/count") < route_paths.index("/api/v1/accounts/{account_id}")
 
 

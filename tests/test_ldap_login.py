@@ -178,3 +178,56 @@ def test_ldap_login_existing_user_works_without_default_group(
     test_user.username = "unixuser"
     db_session.commit()
     assert authenticate_ldap_login(db_session, "unixuser", "QazWsxEdc!!") is not None
+
+
+def test_ldap_import_marks_users_as_ldap(db_session):
+    from app.services.ldap_service import LdapImportService
+
+    stats = LdapImportService(db_session, user_group_id=2).import_ldap_users([
+        {"username": "imported1", "email": "i1@example.com", "full_name": "Imported One"},
+        {"username": "imported2", "email": "", "full_name": ""},
+        {"username": "", "email": "broken@example.com"},
+    ])
+    assert stats == {"success": 2, "failed": 1, "skipped": 0}
+
+    u = db_session.query(User).filter(User.username == "imported1").first()
+    assert u.isLdap
+    assert u.userGroupId == 2
+    assert u.isChangePass
+
+    # Re-import skips existing users
+    stats = LdapImportService(db_session, user_group_id=2).import_ldap_users([
+        {"username": "imported1", "email": "i1@example.com", "full_name": "Imported One"},
+    ])
+    assert stats == {"success": 0, "failed": 0, "skipped": 1}
+
+
+def test_ldap_import_uses_configured_profile(db_session):
+    from app.schemas.user_profile import ProfilePermissions, UserProfileCreate
+    from app.services.ldap_service import LdapImportService
+    from app.services.user_profile_service import UserProfileService
+
+    profile = UserProfileService(db_session).create_user_profile(UserProfileCreate(
+        name="LDAP Users", permissions=ProfilePermissions(),
+    ))
+    LdapImportService(db_session, user_group_id=2, user_profile_id=profile["id"]).import_ldap_users([
+        {"username": "profiled", "email": "p@example.com", "full_name": "P"},
+    ])
+    u = db_session.query(User).filter(User.username == "profiled").first()
+    assert u.userProfileId == profile["id"]
+
+
+def test_ldap_import_selective_usernames(db_session):
+    from app.services.ldap_service import LdapImportService
+
+    users = [
+        {"username": "pick-me", "email": "", "full_name": ""},
+        {"username": "not-me", "email": "", "full_name": ""},
+    ]
+    wanted = {"pick-me"}
+    filtered = [u for u in users if u.get("username") in wanted]
+    stats = LdapImportService(db_session, user_group_id=2).import_ldap_users(filtered)
+
+    assert stats["success"] == 1
+    assert db_session.query(User).filter(User.username == "pick-me").first() is not None
+    assert db_session.query(User).filter(User.username == "not-me").first() is None

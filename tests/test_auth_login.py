@@ -202,3 +202,34 @@ def test_login_skips_otp_when_mode_disabled(db_session):
         "/api/v1/auth/login", data={"username": "alice", "password": "pass1234"},
     )
     assert response.status_code == 200
+
+
+def test_login_rejects_disabled_user(db_session):
+    user = _make_user(db_session, "alice", "pass1234")
+    store_user_master_pass(user, "pass1234", "vault-master")
+    user.isDisabled = True
+    db_session.add(Config(parameter="masterPwd", value=get_password_hash("vault-master")))
+    db_session.commit()
+
+    app, client = _make_client(db_session)
+    response = client.post(
+        "/api/v1/auth/login", data={"username": "alice", "password": "pass1234"},
+    )
+    assert response.status_code == 401
+    assert response.json()["detail"] == "User is disabled"
+
+
+def test_login_rejects_disabled_ldap_user_via_db_fallback(db_session):
+    # A disabled LDAP user's synced hash must not slip through database auth
+    user = _make_user(db_session, "alice", "pass1234")
+    store_user_master_pass(user, "pass1234", "vault-master")
+    user.isLdap = True
+    user.isDisabled = True
+    db_session.add(Config(parameter="masterPwd", value=get_password_hash("vault-master")))
+    db_session.commit()
+
+    app, client = _make_client(db_session)
+    response = client.post(
+        "/api/v1/auth/login", data={"username": "alice", "password": "pass1234"},
+    )
+    assert response.status_code == 401

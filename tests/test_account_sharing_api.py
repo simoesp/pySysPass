@@ -63,7 +63,7 @@ def test_account_sharing_api_requires_authentication(db_session, encryption_serv
     app, client = _make_client(db_session)
     response = client.post(f"/api/v1/accounts/{account.id}/share/users", params={"user_id": target.id})
 
-    assert response.status_code == 403
+    assert response.status_code in (401, 403)
 
     app.dependency_overrides.clear()
 

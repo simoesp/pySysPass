@@ -171,7 +171,8 @@ def test_user_group_routes_are_registered():
     """Test that user group routes are registered"""
     from app.main import app
 
-    route_paths = [route.path for route in app.routes]
+    from tests.conftest import api_route_paths
+    route_paths = api_route_paths(app)
 
     assert "/api/v1/user-groups" in route_paths
     assert "/api/v1/user-groups/{group_id}" in route_paths

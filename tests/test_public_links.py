@@ -255,7 +255,8 @@ def test_public_link_routes_are_registered():
     """Test that public link routes are registered"""
     from app.main import app
 
-    route_paths = [route.path for route in app.routes]
+    from tests.conftest import api_route_paths
+    route_paths = api_route_paths(app)
 
     assert "/api/v1/accounts/{account_id}/public-links" in route_paths
     assert "/api/v1/accounts/{account_id}/public-links/{link_id}" in route_paths

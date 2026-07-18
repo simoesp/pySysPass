@@ -166,6 +166,17 @@ async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends
         )
         raise HTTPException(status_code=401, detail="Incorrect username or password")
 
+    # PHP LoginService rejects disabled users after credential checks. This
+    # also covers disabled LDAP users whose synced password hash would
+    # otherwise still pass database auth.
+    if not user.isUserEnabled:
+        elog.log_event(
+            "auth.login.disabled",
+            f"Login attempt for disabled user '{user.username}' from {ip}",
+            user_id=user.id, login=user.username, ip=ip, level="WARN",
+        )
+        raise HTTPException(status_code=401, detail="User is disabled")
+
     login_form = await request.form()
 
     # PHP Authenticator parity: when the global 2FA mode is not disabled,

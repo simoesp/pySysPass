@@ -20,7 +20,7 @@ def email_service_from_config(db: "Session") -> Optional["EmailService"]:
         smtp_port=cfg.mail_port or 25,
         username=cfg.mail_user if cfg.mail_auth_enabled else None,
         password=cfg.mail_pass if cfg.mail_auth_enabled else None,
-        use_tls=(cfg.mail_security or "tls") == "tls",
+        security=(cfg.mail_security or "tls").lower(),
         from_email=cfg.mail_from,
     )
 
@@ -29,12 +29,17 @@ class EmailService:
     """Email notification service for sysPass"""
 
     def __init__(self, smtp_host: str, smtp_port: int, username: str = None,
-                 password: str = None, use_tls: bool = True, from_email: str = None):
+                 password: str = None, use_tls: bool = True, from_email: str = None,
+                 security: str = None):
         self.smtp_host = smtp_host
         self.smtp_port = smtp_port
         self.username = username
         self.password = password
-        self.use_tls = use_tls
+        # security: "tls" (STARTTLS), "ssl" (implicit TLS), or "none" (plain).
+        # use_tls is kept for backward compatibility with existing callers.
+        if security is None:
+            security = "tls" if use_tls else "ssl"
+        self.security = security
         self.from_email = from_email or "syspass@example.com"
 
     def send_email(self, to_email: str, subject: str, body: str,
@@ -56,11 +61,12 @@ class EmailService:
                 msg['Cc'] = ', '.join(cc)
 
             # Connect to SMTP server
-            if self.use_tls:
-                server = smtplib.SMTP(self.smtp_host, self.smtp_port)
-                server.starttls()
-            else:
+            if self.security == "ssl":
                 server = smtplib.SMTP_SSL(self.smtp_host, self.smtp_port)
+            else:
+                server = smtplib.SMTP(self.smtp_host, self.smtp_port)
+                if self.security in ("tls", "starttls"):
+                    server.starttls()
 
             # Login if credentials provided
             if self.username and self.password:

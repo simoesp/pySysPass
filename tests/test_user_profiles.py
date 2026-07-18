@@ -60,7 +60,8 @@ def test_create_user_assigns_profile(db_session):
 def test_user_profile_routes_are_registered():
     from app.main import app
 
-    route_paths = [route.path for route in app.routes]
+    from tests.conftest import api_route_paths
+    route_paths = api_route_paths(app)
 
     assert "/api/v1/user-profiles" in route_paths
     assert "/api/v1/user-profiles/{profile_id}" in route_paths

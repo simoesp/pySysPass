@@ -595,6 +595,7 @@ Representative routes:
 | `GET` | `/api/v1/settings/general` | JWT + `config_general` |
 | `PUT` | `/api/v1/settings/general` | JWT + `config_general` |
 | `GET`/`PUT` | `/api/v1/settings/mail` | JWT + `config_general` |
+| `POST` | `/api/v1/settings/mail/test` | JWT + `config_general` |
 | `GET`/`PUT` | `/api/v1/settings/ldap` | JWT + `config_general` |
 | `GET`/`PUT` | `/api/v1/settings/accounts` | JWT + `config_general` |
 | `GET`/`PUT` | `/api/v1/settings/wiki` | JWT + `config_general` |
@@ -748,8 +749,13 @@ Required auth:
 Routes:
 
 - `POST /api/v1/ldap/test-connection`
-- `GET /api/v1/ldap/users`
-- `POST /api/v1/ldap/import`
+- `GET /api/v1/ldap/users` — directory preview (used by the Settings →
+  LDAP import dialog)
+- `POST /api/v1/ldap/import` — body may include `default_group_id` and
+  `usernames` (selective import); fails with 400 when no default group is
+  configured or supplied. Imported users are marked `is_ldap`, receive
+  the configured default group/profile, and keep an unusable local
+  password until they log in via the directory.
 
 Current required auth:
 

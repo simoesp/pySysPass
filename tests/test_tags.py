@@ -213,7 +213,8 @@ def test_tag_route_is_registered():
     """Test that tag routes are registered"""
     from app.main import app
 
-    route_paths = [route.path for route in app.routes]
+    from tests.conftest import api_route_paths
+    route_paths = api_route_paths(app)
 
     # Check main tag routes exist
     assert "/api/v1/tags" in route_paths

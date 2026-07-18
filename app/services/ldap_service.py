@@ -310,9 +310,10 @@ def _group_cn(group_dn: str) -> str:
 class LdapImportService:
     """Import LDAP users into the sysPass database."""
 
-    def __init__(self, db, user_group_id: int = 1):
+    def __init__(self, db, user_group_id: int, user_profile_id: Optional[int] = None):
         self.db = db
         self.user_group_id = user_group_id
+        self.user_profile_id = user_profile_id
 
     def import_ldap_users(self, ldap_users: List[Dict],
                           default_password: str = None) -> Dict:
@@ -322,7 +323,7 @@ class LdapImportService:
         import secrets
 
         stats = {"success": 0, "failed": 0, "skipped": 0}
-        default_profile = UserProfileService(self.db).ensure_default_profile()
+        profile_id = self.user_profile_id or UserProfileService(self.db).ensure_default_profile().id
         for ldap_user in ldap_users:
             username = ldap_user.get("username")
             if not username:
@@ -339,7 +340,7 @@ class LdapImportService:
                     hashed = hashed.encode("utf-8")
                 user = User(
                     userGroupId=self.user_group_id,
-                    userProfileId=default_profile.id,
+                    userProfileId=profile_id,
                     name=ldap_user.get("full_name") or username,
                     username=username,
                     email=email,
@@ -349,6 +350,7 @@ class LdapImportService:
                     lastUpdateMPass=0,
                     isUserEnabled=True,
                     isChangePass=True,
+                    isLdap=True,
                 )
                 self.db.add(user)
                 self.db.commit()
