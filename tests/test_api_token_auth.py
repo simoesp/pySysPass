@@ -1,4 +1,5 @@
 """API tokens authenticate REST calls, scoped by their PHP actionId."""
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -100,3 +101,20 @@ def test_token_scopes_map_to_registered_routes():
     for action_id, pairs in API_TOKEN_SCOPES.items():
         for method, path in pairs:
             assert path in registered, f"action {action_id}: {method} {path} not registered"
+
+
+def test_non_ascii_token_is_401_not_500(db_session):
+    """Starlette decodes headers as latin-1, so a raw client can deliver a
+    non-ASCII bearer value; it must 401, not raise on .encode('ascii')."""
+    from types import SimpleNamespace
+    from fastapi import HTTPException
+    from app.api.deps import _resolve_api_token
+
+    request = SimpleNamespace(
+        method="GET",
+        url=SimpleNamespace(path="/api/v1/accounts"),
+        scope={},
+    )
+    with pytest.raises(HTTPException) as exc:
+        _resolve_api_token(db_session, "caf\xe9-t\xf6k\xe9n", request)
+    assert exc.value.status_code == 401

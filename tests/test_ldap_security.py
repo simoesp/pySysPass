@@ -99,3 +99,23 @@ def test_user_in_group_memberof_fallback(monkeypatch):
 def test_user_in_group_empty_filter_allows(monkeypatch):
     service = _service_with_search(monkeypatch, [])
     assert service.user_in_group("unixuser", USER_DN, "") is True
+
+
+def test_authenticate_rejects_empty_password(monkeypatch):
+    """Empty password must never bind (RFC 4513 unauthenticated-bind bypass)."""
+    monkeypatch.setattr(ldap_service, "_LDAP_AVAILABLE", True)
+    service = LdapService("ldap://directory.example", "dc=example,dc=test")
+    service._conn = type("BoundConnection", (), {"bound": True})()
+
+    searched = {"called": False}
+
+    def fake_search(*, filter_str, attributes):
+        searched["called"] = True
+        return [{"dn": "cn=x,dc=example,dc=test", "attributes": {}}]
+
+    monkeypatch.setattr(service, "search", fake_search)
+
+    assert service.authenticate("alice", "") is None
+    assert service.authenticate("alice", None) is None
+    # Must bail before ever contacting the directory
+    assert searched["called"] is False

@@ -54,9 +54,13 @@ def _resolve_api_token(db: Session, token_value: str, request: Request) -> dict:
     """Authenticate a sysPass API token and enforce its action scope."""
     from app.models.account import AuthToken, User
 
-    row = db.query(AuthToken).filter(
-        AuthToken.token.in_([token_value, token_value.encode("ascii")])
-    ).first()
+    # sysPass tokens are 64 hex chars; a non-ASCII bearer value is never a
+    # valid token — reject cleanly instead of raising on .encode("ascii").
+    try:
+        candidates = [token_value, token_value.encode("ascii")]
+    except UnicodeEncodeError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+    row = db.query(AuthToken).filter(AuthToken.token.in_(candidates)).first()
     if row is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 

@@ -112,6 +112,11 @@ class LdapService:
 
     def authenticate(self, username: str, password: str) -> Optional[str]:
         """Authenticate user; returns the user's DN on success, None on failure."""
+        # Reject empty passwords: per RFC 4513 a SIMPLE bind with a valid DN
+        # and empty password is an "unauthenticated bind" that many servers
+        # accept, which would be an authentication bypass.
+        if not password:
+            return None
         if not self._conn or not self._conn.bound:
             self.connect()
         # "dn" is not a real attribute and makes ldap3 raise LDAPAttributeError;
