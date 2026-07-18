@@ -144,7 +144,6 @@ async def get_account(
 async def update_account(
     account_id: int,
     account: AccountUpdate,
-    request: Request,
     db: Session = Depends(get_db),
     current_user=Depends(account_edit),
 ):
@@ -169,28 +168,20 @@ async def update_account(
     )
     if not result:
         raise HTTPException(status_code=404, detail="Account not found")
-    AccountAuditService(db).log(
-        account_id, "account.edit", current_user["id"],
-        current_user.get("username"), _client_ip(request),
-    )
+    # account.edit is recorded by the global audit middleware (with the
+    # [acc:<id>] marker), so no per-route logging is needed here.
     return result
 
 
 @router.delete("/accounts/{account_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_account(
     account_id: int,
-    request: Request,
     db: Session = Depends(get_db),
     current_user=Depends(account_delete),
 ):
-    audit = AccountAuditService(db)
-    name = audit.account_name(account_id)
+    # account.delete is recorded by the global audit middleware.
     if not AccountService(db, get_encryption_service()).delete_account(account_id, current_user["id"]):
         raise HTTPException(status_code=404, detail="Account not found")
-    audit.log(
-        account_id, "account.delete", current_user["id"],
-        current_user.get("username"), _client_ip(request), account_name=name,
-    )
 
 
 @router.get("/accounts/{account_id}/password")

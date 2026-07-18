@@ -48,15 +48,20 @@ def test_marker_does_not_cross_match_similar_ids(db_session, encryption_service,
     assert len(entries) == 1  # only the real one, not the [acc:<a5*10+5>] decoy
 
 
-def test_delete_captures_name_before_removal(db_session, encryption_service, test_user):
-    a = _account(db_session, encryption_service, test_user, "ToDelete")
-    audit = AccountAuditService(db_session)
-    name = audit.account_name(a.id)
-    AccountService(db_session, encryption_service).delete_account(a.id, test_user.id)
-    audit.log(a.id, "account.delete", test_user.id, "tester", "0.0.0.0", account_name=name)
+def test_middleware_marked_mutation_surfaces_in_audit(db_session, encryption_service, test_user):
+    # Mutations are logged by the global audit middleware as
+    # "<METHOD> <path> [acc:<id>]"; the audit list must pick them up.
+    a = _account(db_session, encryption_service, test_user, "Edited")
+    ev = EventLog(date=1, login="tester", userId=test_user.id, ipAddress="0.0.0.0",
+                  action="account.edit",
+                  description=f"PUT /api/v1/accounts/{a.id} {account_marker(a.id)}",
+                  level="INFO")
+    db_session.add(ev)
+    db_session.commit()
 
-    entries = audit.list_for_account(a.id)
-    assert entries[0]["action"] == "account.delete"
+    entries = AccountAuditService(db_session).list_for_account(a.id)
+    assert entries[0]["action"] == "account.edit"
+    assert entries[0]["action_label"] == "Edited account"
 
 
 def test_audit_endpoint_records_and_gates_access(db_session, encryption_service, test_user, monkeypatch):

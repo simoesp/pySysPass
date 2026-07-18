@@ -99,7 +99,7 @@ async def lifespan(application: FastAPI):
 app = FastAPI(
     title="sysPass Python",
     description="Password Manager - Python Edition",
-    version="2.0.0-rc.1",
+    version="2.0.0-rc.2",
     lifespan=lifespan,
 )
 
@@ -128,11 +128,17 @@ async def audit_log_middleware(request: Request, call_next):
             from app.services.security_log_service import EventLogService
             user_id, username = _get_user_from_request(request)
             ip = _get_ip(request)
+            description = f"{request.method} {request.url.path}"
+            # Tag account mutations with the per-account audit marker so the
+            # account Audit tab (AccountAuditService) can find them.
+            acc_match = re.match(r"^/api/v1/accounts/(\d+)", request.url.path)
+            if acc_match:
+                description += f" [acc:{acc_match.group(1)}]"
             db = SessionLocal()
             try:
                 EventLogService(db).log_event(
                     action=action,
-                    description=f"{request.method} {request.url.path}",
+                    description=description,
                     user_id=user_id,
                     login=username or "",
                     ip=ip,

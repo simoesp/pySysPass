@@ -12,12 +12,14 @@ from sqlalchemy.orm import Session
 
 from app.models.account import Account, EventLog, User
 
-# Audited account actions and their human labels.
+# Audited account actions and their human labels. view/view.pass are logged
+# by the account routes; edit/delete/clone by the global audit middleware.
 ACTION_LABELS = {
     "account.view": "Opened account",
     "account.view.pass": "Viewed password",
     "account.edit": "Edited account",
     "account.delete": "Deleted account",
+    "account.clone": "Cloned account",
 }
 
 
@@ -29,15 +31,14 @@ class AccountAuditService:
     def __init__(self, db: Session):
         self.db = db
 
-    def account_name(self, account_id: int) -> Optional[str]:
-        return self.db.query(Account.name).filter(Account.id == account_id).scalar()
-
     def log(self, account_id: int, action: str, user_id: Optional[int],
-            login: Optional[str], ip: Optional[str],
-            account_name: Optional[str] = None) -> None:
-        """Record one account access event in EventLog."""
-        if account_name is None:
-            account_name = self.account_name(account_id)
+            login: Optional[str], ip: Optional[str]) -> None:
+        """Record one account read event (view / view.pass) in EventLog.
+
+        Mutations (edit/delete/clone) are recorded by the global audit
+        middleware; this is only used for the read actions it doesn't cover.
+        """
+        account_name = self.db.query(Account.name).filter(Account.id == account_id).scalar()
         label = ACTION_LABELS.get(action, action)
         display = account_name or f"#{account_id}"
         row = EventLog(

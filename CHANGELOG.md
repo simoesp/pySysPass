@@ -3,6 +3,17 @@
 All notable changes to pySysPass are documented here. Versions follow
 [Semantic Versioning](https://semver.org/). Dates are ISO 8601.
 
+## [2.0.0-rc.2] — 2026-07-18
+
+### Fixed
+- Removed the unused `@quasar/quasar-app-extension-testing-unit-vitest` dev
+  dependency, eliminating a vulnerable transitive `happy-dom` (3 Dependabot
+  alerts including a critical VM-context-escape RCE). `npm audit` is clean.
+- Per-account audit no longer double-logs edits/deletes: mutations are
+  recorded once by the global audit middleware (now tagged with the
+  `[acc:<id>]` marker), and the account routes log only the reads
+  (view / view-password) the middleware doesn't cover.
+
 ## [2.0.0-rc.1] — 2026-07-18
 
 First tagged release. Adds authentication, authorization, and auditing
