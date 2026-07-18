@@ -3,6 +3,12 @@
 All notable changes to pySysPass are documented here. Versions follow
 [Semantic Versioning](https://semver.org/). Dates are ISO 8601.
 
+## [2.0.0] — 2026-07-18
+
+Promotes 2.0.0-rc.2 to final with no code changes — CI, CodeQL, and
+`npm audit` all clean, no open security alerts. See the rc entries below
+for the full feature set.
+
 ## [2.0.0-rc.2] — 2026-07-18
 
 ### Fixed
