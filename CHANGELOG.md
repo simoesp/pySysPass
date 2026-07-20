@@ -3,6 +3,28 @@
 All notable changes to pySysPass are documented here. Versions follow
 [Semantic Versioning](https://semver.org/). Dates are ISO 8601.
 
+## [2.1.0] — 2026-07-20
+
+Security and CI hardening. No API or database changes.
+
+### Added
+- CI **security scan** job: `bandit` (Python SAST), `pip-audit` and
+  `npm audit` (vulnerable-dependency gates), and `gitleaks` (secrets scan
+  with a `.gitleaks.toml` allowlist for known sample/test data).
+- CI **MySQL 8 integration** job that bootstraps the full PHP-compatible
+  schema against a real MySQL service and asserts the tables are created —
+  automating a check that was previously manual.
+- `.github/dependabot.yml` for weekly grouped pip/npm/actions updates.
+
+### Changed
+- Replaced `python-jose` with `PyJWT` for JWTs (HS256 unchanged). This drops
+  the abandoned `python-jose` and its transitive `ecdsa`, resolving
+  PYSEC-2026-1325 (an ECDSA timing side-channel the app never triggered,
+  with no upstream fix) — `pip-audit` is now clean.
+- Legacy `config.xml` parsing uses `defusedxml` (XXE hardening).
+- Annotated the PHP-compatibility SHA-1 item hashes with
+  `usedforsecurity=False` (output unchanged).
+
 ## [2.0.0] — 2026-07-18
 
 Promotes 2.0.0-rc.2 to final with no code changes — CI, CodeQL, and

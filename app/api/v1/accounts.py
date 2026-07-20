@@ -25,7 +25,7 @@ def _client_ip(request: Request) -> str:
     forwarded = request.headers.get("X-Forwarded-For")
     if forwarded:
         return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "0.0.0.0"
+    return request.client.host if request.client else "0.0.0.0"  # nosec B104
 
 account_view = require_any_permission("acc_view", "acc_edit", account_admin=True)
 account_create = require_any_permission("acc_add", account_admin=True)

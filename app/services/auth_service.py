@@ -1,7 +1,7 @@
 from datetime import UTC, datetime, timedelta
 from time import time
 from typing import Optional
-from jose import JWTError, jwt
+import jwt
 import bcrypt as bcrypt_lib
 from app.core.config import settings
 from app.core.syspass_runtime_config import get_password_salt
@@ -149,5 +149,5 @@ def decode_token(token: str) -> Optional[dict]:
         if "mpass" in payload:
             payload["master_pass"] = _decrypt_short(payload["mpass"])
         return payload
-    except JWTError:
+    except jwt.PyJWTError:
         return None

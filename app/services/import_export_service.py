@@ -653,9 +653,9 @@ class ExportService:
         hash_input = "".join(self._php_xml_fragment(node) for node in list(root) if node.tag != "Meta")
         # PHP's native XML format mandates these SHA-1 values. Integrity is
         # separately authenticated by the HMAC-SHA-256 signature below.
-        digest = hashlib.sha1(hash_input.encode("utf-8")).hexdigest()  # lgtm[py/weak-sensitive-data-hashing]
+        digest = hashlib.sha1(hash_input.encode("utf-8"), usedforsecurity=False).hexdigest()
         signing_key = export_password or hashlib.sha1(
-            get_password_salt().encode("utf-8")
+            get_password_salt().encode("utf-8"), usedforsecurity=False
         ).hexdigest()  # lgtm[py/weak-sensitive-data-hashing]
         signature = hmac.new(
             signing_key.encode("utf-8"), digest.encode("ascii"), hashlib.sha256

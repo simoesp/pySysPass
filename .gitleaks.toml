@@ -1,0 +1,26 @@
+title = "pySysPass gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = """
+Known-safe sample data, not real secrets:
+- dev-stack compose files ship demo salts/passwords for local use only
+  (production supplies these via an env file, e.g. .env.external)
+- tests/fixtures hold PHP-created encrypted sample data used to verify
+  sysPass PHP compatibility
+- *.example env templates hold placeholders
+"""
+paths = [
+  '''podman-compose\.yml''',
+  '''podman-compose\.external\.yml''',
+  '''portainer-stack\.yml''',
+  '''\.env\..*\.example''',
+  '''tests/fixtures/.*''',
+  # Historical upstream sysPass PHP files (present only in early commits,
+  # removed from the tree): PHP test fixtures/vendored JS, sample data only.
+  '''tests/SP/.*''',
+  '''tests/res/.*''',
+  '''public/vendor/.*''',
+]

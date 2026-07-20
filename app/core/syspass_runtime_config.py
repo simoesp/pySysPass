@@ -5,7 +5,9 @@ import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Optional
-from xml.etree import ElementTree
+# defusedxml hardens against XXE/billion-laughs when parsing the legacy
+# PHP config.xml (which may not be fully trusted).
+from defusedxml import ElementTree
 
 from app.core.config import settings
 from app.core.runtime_json_config import load_runtime_json_config

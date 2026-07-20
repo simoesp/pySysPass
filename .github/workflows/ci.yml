@@ -48,3 +48,71 @@ jobs:
         working-directory: frontend
       - run: npm run build
         working-directory: frontend
+
+  security:
+    name: Security scan (bandit / pip-audit / npm audit / gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install bandit pip-audit
+      # Python static security lint (medium+ severity).
+      - run: bandit -r app/ -ll
+      # Fail on known-vulnerable Python dependencies.
+      - run: pip-audit -r requirements.txt
+      # Fail on known-vulnerable frontend dependencies.
+      - run: npm audit --audit-level=high
+        working-directory: frontend
+      # Secrets scan across the full history (fetch-depth: 0 above), using
+      # the repo's .gitleaks.toml allowlist for known sample/test data.
+      - run: >-
+          docker run --rm -v "${{ github.workspace }}:/repo"
+          zricethezav/gitleaks:latest detect
+          --source=/repo --config=/repo/.gitleaks.toml --redact
+
+  compat-mysql:
+    name: Schema bootstrap on MySQL 8 (PHP compatibility)
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: syspass
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=10s --health-timeout=5s --health-retries=10
+    env:
+      DATABASE_URL: "mysql+pymysql://root:root@127.0.0.1:3306/syspass"
+      SQLALCHEMY_SCHEMA_GUARD: "false"
+      SECRET_KEY: ci-secret
+      ENCRYPTION_KEY: ci-encryption-key-32-bytes-long!!
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      # Create the full PHP-compatible schema on a real MySQL 8 instance.
+      - run: python init_db.py
+      # Assert the expected physical tables were created.
+      - run: |
+          python - <<'PY'
+          from sqlalchemy import create_engine, text
+          import os
+          e = create_engine(os.environ["DATABASE_URL"])
+          with e.connect() as c:
+              n = c.execute(text(
+                  "SELECT COUNT(*) FROM information_schema.tables "
+                  "WHERE table_schema = 'syspass' AND table_type = 'BASE TABLE'"
+              )).scalar()
+          print(f"physical tables created: {n}")
+          assert n >= 25, f"expected the full sysPass schema, got {n} tables"
+          PY

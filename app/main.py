@@ -71,7 +71,7 @@ def _get_ip(request: Request) -> str:
     fwd = request.headers.get("X-Forwarded-For")
     if fwd:
         return fwd.split(",")[0].strip()
-    return request.client.host if request.client else "0.0.0.0"
+    return request.client.host if request.client else "0.0.0.0"  # nosec B104
 
 
 def _get_user_from_request(request: Request):
@@ -99,7 +99,7 @@ async def lifespan(application: FastAPI):
 app = FastAPI(
     title="sysPass Python",
     description="Password Manager - Python Edition",
-    version="2.0.0",
+    version="2.1.0",
     lifespan=lifespan,
 )
 

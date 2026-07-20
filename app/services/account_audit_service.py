@@ -45,7 +45,7 @@ class AccountAuditService:
             date=int(time.time()),
             login=login or "",
             userId=user_id,
-            ipAddress=ip or "0.0.0.0",
+            ipAddress=ip or "0.0.0.0",  # nosec B104 - default log IP, not a bind
             action=action,
             description=f"{label}: {display} {account_marker(account_id)}",
             level="INFO",

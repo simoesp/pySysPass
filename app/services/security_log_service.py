@@ -90,7 +90,7 @@ class EventLogService:
         description: str = None,
         user_id: int = None,
         login: str = None,
-        ip: str = "0.0.0.0",
+        ip: str = "0.0.0.0",  # nosec B104 - default log IP, not a bind
         level: str = "INFO",
     ) -> EventLog:
         """Write one entry to EventLog. Level: INFO | WARN | ERROR | NOTICE."""
