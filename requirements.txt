@@ -1,19 +1,19 @@
 # FastAPI
 fastapi>=0.141.1,<1.0.0
-uvicorn[standard]>=0.52.0
+uvicorn[standard]>=0.52.3
 pydantic>=2.13.4
-pydantic-settings==2.14.2
+pydantic-settings==2.15.0
 email-validator>=2.3.0
 
 # Database
-sqlalchemy>=2.0.51
-alembic>=1.18.5
+sqlalchemy>=2.0.52
+alembic>=1.19.1
 pymysql>=1.2.0
 
 # Security
-cryptography>=49.0.0
+cryptography>=50.0.0
 defusedxml>=0.7.1
-pykeepass==4.1.1.post1
+pykeepass==4.2.0
 PyJWT>=2.13.0
 passlib[bcrypt]>=1.7.4
 python-multipart>=0.0.32
