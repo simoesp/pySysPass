@@ -12,11 +12,11 @@
     "format": "prettier --write \"**/*.{js,ts,vue,css,scss,html,json}\""
   },
   "dependencies": {
-    "@quasar/extras": "^2.0.3",
+    "@quasar/extras": "^2.0.4",
     "axios": "^1.19.0",
     "pinia": "^4.0.3",
     "qrcode": "^1.5.4",
-    "quasar": "^2.25.0",
+    "quasar": "^2.25.1",
     "vue": "^3.5.41",
     "vue-router": "^5.2.0",
     "vue3-toastify": "^0.2.8"
@@ -30,10 +30,10 @@
     "eslint-plugin-vue": "^10.10.0",
     "globals": "^17.11.0",
     "jsdom": "^30.0.1",
-    "sass": "^1.102.0",
+    "sass": "^1.103.1",
     "typescript": "^7.0.2",
-    "vite": "^8.2.1",
-    "vitest": "^4.1.10"
+    "vite": "^8.2.2",
+    "vitest": "^4.1.11"
   },
   "overrides": {
     "brace-expansion": "^5.0.9",
