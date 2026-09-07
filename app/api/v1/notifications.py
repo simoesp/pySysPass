@@ -4,18 +4,9 @@ from typing import List
 from app.db.base import get_db
 from app.schemas.notification import NotificationCreate, NotificationResponse
 from app.services.notification_service import NotificationService
-from app.services.auth_service import decode_token
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from app.api.deps import get_current_user
 
 router = APIRouter()
-security = HTTPBearer()
-
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    token = credentials.credentials
-    payload = decode_token(token)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid token")
-    return {"id": payload.get("user_id")}
 
 @router.get("/notifications", response_model=List[NotificationResponse])
 async def list_notifications(

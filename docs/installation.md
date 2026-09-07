@@ -25,7 +25,7 @@ supported; the commands are interchangeable.
 | --- | --- | --- |
 | Docker + Docker Compose v2, **or** Podman + `podman-compose` | recent | Container stack (Option A) |
 | Python | 3.11+ | Backend local development (Option B) |
-| Node.js | 18+ | Frontend local development (Option B) |
+| Node.js | 22.23.2 | Frontend local development (Option B) |
 
 The backend targets Python 3.11 (the container image is `python:3.11-slim`).
 Older versions are not supported.
@@ -173,7 +173,7 @@ afterwards.
 
 ```bash
 cd frontend
-npm install
+npm ci --legacy-peer-deps
 npm run dev   # Vite dev server on http://localhost:5173
 ```
 

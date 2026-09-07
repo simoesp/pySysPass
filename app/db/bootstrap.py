@@ -68,6 +68,11 @@ def _split_sql_script(script: str) -> list[str]:
 
 
 def _normalize_bootstrap_statement(statement: str) -> str | None:
+    # Expand MySQL executable comments only to recognize canonical views.
+    # Keep ignoring dump session settings, placeholder tables and DROP DDL.
+    expanded = re.sub(r"/\*!\d+\s*(.*?)\*/", r"\1", statement, flags=re.DOTALL).strip()
+    if re.match(r"CREATE\s+ALGORITHM\s*=", expanded, re.IGNORECASE):
+        return expanded
     normalized = statement.strip()
     lower = normalized.lower()
 
@@ -167,7 +172,9 @@ def database_requires_bootstrap(
 ) -> bool:
     tables = tuple(required_tables) if required_tables is not None else _schema_table_names()
     inspector = inspect(engine_obj)
-    return not all(inspector.has_table(table_name) for table_name in tables)
+    if not all(inspector.has_table(table_name) for table_name in tables):
+        return True
+    return required_tables is None and not VIEW_TABLES.issubset(inspector.get_view_names())
 
 
 def execute_schema_statements(
@@ -188,12 +195,34 @@ def execute_schema_statements(
         connection.close()
 
 
+def _view_name(statement: str) -> str | None:
+    match = re.search(r"\bVIEW\s+`([^`]+)`\s+AS", statement, re.IGNORECASE)
+    return match.group(1) if match else None
+
+
+def _missing_view_statements(engine_obj: Engine) -> list[str]:
+    """Create missing canonical PHP views without replacing existing objects."""
+    inspector = inspect(engine_obj)
+    existing_views = set(inspector.get_view_names())
+    statements = []
+    for statement in _load_schema_statements():
+        name = _view_name(statement)
+        if name is None or name in existing_views:
+            continue
+        if inspector.has_table(name):
+            raise RuntimeError(f"Expected PHP view {name}, but found a table; refusing to replace it")
+        statements.append(statement)
+    return statements
+
+
 def bootstrap_database(engine_obj: Engine = engine) -> bool:
     if not database_requires_bootstrap(engine_obj):
         return False
 
     logger.warning("Incomplete or virgin sysPass database detected; applying bootstrap schema.")
-    execute_schema_statements(_load_schema_statements(), engine_obj=engine_obj)
+    statements = [statement for statement in _load_schema_statements() if not _view_name(statement)]
+    statements.extend(_missing_view_statements(engine_obj))
+    execute_schema_statements(statements, engine_obj=engine_obj)
     logger.warning("sysPass bootstrap schema applied successfully.")
     return True
 

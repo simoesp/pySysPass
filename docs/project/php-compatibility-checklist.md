@@ -52,9 +52,11 @@ Compatibility should be treated as successful only when:
 - ✅ Every physical SQLAlchemy table emits `ENGINE=InnoDB`, `CHARSET=utf8`, and
   `COLLATE utf8_unicode_ci`, matching the canonical PHP schema; mapped views are
   explicitly excluded from physical table options.
-- Compare `account_data_v` and `account_search_v` definitions with upstream PHP.
-- Create both PHP views during bootstrap/migration; test fixtures now exclude
-  mapped views from `create_all` so they cannot silently become ordinary tables.
+- ✅ Bootstrap and Alembic use the canonical PHP definitions for
+  `account_data_v` and `account_search_v`. Revision `002` repairs missing views
+  in existing databases without replacing PHP-created views. A same-name
+  physical table stops repair rather than being dropped. Revision `002` requires
+  an online database connection so existing objects can be inspected.
 - Remove or isolate Python-only behavior that implies extra persisted fields not present in PHP tables.
 - Replace the explicit compatibility exception for Python-only
   `AccountHistory.action`, `oldValue`, and `newValue` fields with non-persisted
@@ -107,8 +109,14 @@ Compatibility should be treated as successful only when:
   any authenticated user; category, client, user, and group values require the
   corresponding management capability.
 - Validate account CRUD, history, favorites, tags, files, public links, and sharing against PHP-created records.
-- Apply the same profile-plus-resource ACL composition to account history,
-  files, and public links; these routes still use narrower owner-only checks.
+- ✅ Files now require `acc_files` (or the PHP account/application admin
+  scope) plus the account ACL; writes require edit access. Public-link creation
+  accepts `acc_public_links` or `mgm_public_links`; management requires
+  `mgm_public_links`, matching PHP's action gates. Nested resources must belong
+  to the account named in the URL.
+- ✅ JWT-authenticated routes reload the user on every request, reject disabled
+  or deleted PHP users, and use current `isAdminApp`/`isAdminAcc` values instead
+  of stale token roles.
 - Match PHP account-admin global account visibility while retaining its private
   and private-group filters.
 - Verify PHP application-layer behavior when deleting an account with a public
@@ -183,16 +191,30 @@ Compatibility should be treated as successful only when:
 
 ### 8. Compatibility CI
 
-- ✅ A dedicated `php-compatibility` quality job runs schema parity checks.
-- ✅ Ordinary unit tests and focused parity tests are reported as separate jobs.
-- ✅ PHP-authored encryption and serialized-profile fixtures run in the existing
-  compatibility test job without a live PHP or MySQL service.
-- Add fixture-based group permissions and import/export checks to the
-  compatibility job.
-- Fail CI on schema drift and compatibility regressions.
+- ✅ The `Backend tests (pytest)` job runs unit tests together with schema,
+  PHP-authored encryption/profile, ACL, and import/export regressions.
+- ✅ A separate MySQL 8 bootstrap job asserts all 27 physical tables and both
+  canonical account views, checks that the views are queryable, and verifies
+  bootstrap idempotence.
+- The upstream-checkout freshness and external KeePass fixture checks skip
+  when their external files are unavailable. Supply pinned fixtures before
+  claiming that those checks run in every CI build.
 
 ## Immediate Priorities
 
 1. Keep the database/API surface aligned with PHP-owned schema.
 2. Add PHP-authored sharing fixtures and export samples to the test suite.
 3. Build a parity matrix covering schema, encryption, permissions, and import/export.
+
+## Public-link limits and remaining format gap
+
+Public-link access now atomically enforces PHP's strict `countViews <
+maxCountViews` and `time < dateExpire` checks and increments both view counters.
+New links use the existing `publinks_max_views` runtime setting. Zero is an
+exhausted limit in PHP; previously Python-created zero-limit links must be
+recreated with a positive configured limit. No stored links are rewritten.
+
+Full public-link format parity is still unverified: PHP stores a serialized
+Vault in `PublicLink.data`, whereas the existing Python helper uses it for a
+link password. This change does not migrate or reinterpret that encrypted data
+and does not establish complete public-link interoperability.
