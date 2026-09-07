@@ -42,7 +42,18 @@ uses that column for a link password. Full public-link format interoperability
 is not established by these fixes and needs PHP-authored fixtures before a
 format migration is attempted.
 
-Follow-up build work: install the frontend from its lockfile, prevent local
-build artifacts from entering Docker contexts, run frontend lint and Docker
-builds in CI, and correct the documented Node requirements. Real-browser
-login/sharing coverage and external PHP fixture coverage remain separate work.
+Real-browser login/sharing coverage and external PHP fixture coverage remain
+separate work.
+
+## Frontend build follow-up
+
+Docker now copies both package manifests before `npm ci --legacy-peer-deps`.
+Its context excludes host dependencies, compiled assets, test coverage, logs,
+and local environment files. CI installs the same lockfile, runs frontend lint,
+unit tests and a production build, and builds the actual frontend container.
+Node 22.23.2 is recorded in `frontend/.nvmrc` and matches the Docker image;
+installation instructions use that version and the lockfile install command.
+
+Validation: clean install without lockfile changes; 22 frontend tests passed;
+ESLint reported zero errors and 524 existing warnings; Vite production build
+and Docker build passed. These checks do not replace real-browser tests.

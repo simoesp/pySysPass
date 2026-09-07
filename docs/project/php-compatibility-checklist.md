@@ -191,13 +191,14 @@ Compatibility should be treated as successful only when:
 
 ### 8. Compatibility CI
 
-- ✅ A dedicated `php-compatibility` quality job runs schema parity checks.
-- ✅ Ordinary unit tests and focused parity tests are reported as separate jobs.
-- ✅ PHP-authored encryption and serialized-profile fixtures run in the existing
-  compatibility test job without a live PHP or MySQL service.
-- Add fixture-based group permissions and import/export checks to the
-  compatibility job.
-- Fail CI on schema drift and compatibility regressions.
+- ✅ The `Backend tests (pytest)` job runs unit tests together with schema,
+  PHP-authored encryption/profile, ACL, and import/export regressions.
+- ✅ A separate MySQL 8 bootstrap job asserts all 27 physical tables and both
+  canonical account views, checks that the views are queryable, and verifies
+  bootstrap idempotence.
+- The upstream-checkout freshness and external KeePass fixture checks skip
+  when their external files are unavailable. Supply pinned fixtures before
+  claiming that those checks run in every CI build.
 
 ## Immediate Priorities
 
