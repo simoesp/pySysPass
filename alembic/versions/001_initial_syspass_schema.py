@@ -11,7 +11,7 @@ Alembic-created databases to diverge from both PHP and SQLAlchemy metadata.
 
 from alembic import op
 
-from app.db.bootstrap import _load_schema_statements, _ordered_schema_table_names
+from app.db.bootstrap import VIEW_TABLES, _load_schema_statements, _ordered_schema_table_names
 
 
 revision = "001"
@@ -26,5 +26,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    for view_name in sorted(VIEW_TABLES):
+        op.execute(f"DROP VIEW IF EXISTS `{view_name}`")
     for table_name in reversed(_ordered_schema_table_names()):
         op.drop_table(table_name)

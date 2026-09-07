@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.db.base import get_db
 from app.services.auth_service import decode_token
+from app.models.account import User
 
 security = HTTPBearer()
 
@@ -104,17 +105,19 @@ def get_current_user(
     if not payload:
         # Not a JWT — try it as a sysPass API token (Authorization: Bearer <token>).
         return _resolve_api_token(db, credentials.credentials, request)
-    legacy_admin = bool(payload.get("is_admin", False))
-    is_admin_app = bool(payload.get("is_admin_app", legacy_admin))
-    is_admin_acc = bool(payload.get("is_admin_acc", legacy_admin))
+    user_id = payload.get("user_id")
+    if not isinstance(user_id, int) or isinstance(user_id, bool):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+    user = db.query(User).filter(User.id == user_id).first()
+    if user is None or not user.isUserEnabled:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
     return {
-        "id": payload.get("user_id"),
-        "username": payload.get("username"),
+        "id": user.id,
+        "username": user.username,
         "master_pass": payload.get("master_pass"),
-        # is_admin remains the application-wide scope for existing callers.
-        "is_admin": is_admin_app,
-        "is_admin_app": is_admin_app,
-        "is_admin_acc": is_admin_acc,
+        "is_admin": bool(user.isAdminApp),
+        "is_admin_app": bool(user.isAdminApp),
+        "is_admin_acc": bool(user.isAdminAcc),
     }
 
 

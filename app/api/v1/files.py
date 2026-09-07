@@ -5,37 +5,23 @@ from fastapi.responses import Response
 from app.db.base import get_db
 from app.schemas.file import FileCreate, FileResponse, FileUploadResponse
 from app.services.file_service import FileService
-from app.services.auth_service import decode_token
+from app.api.deps import require_any_permission
+from app.core.security import get_encryption_service
+from app.services.account_service import AccountService
 from app.services.history_service import HistoryService
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import base64
 
 router = APIRouter()
-security = HTTPBearer()
-
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    token = credentials.credentials
-    payload = decode_token(token)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid token")
-    return {"id": payload.get("user_id")}
+file_access = require_any_permission("acc_files", account_admin=True)
 
 @router.get("/accounts/{account_id}/files", response_model=List[FileResponse])
 async def list_files(
     account_id: int,
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
+    current_user = Depends(file_access)
 ):
     """List all files attached to an account"""
-    from app.models.account import Account
-
-    # Verify user has access
-    account = db.query(Account).filter(
-        Account.id == account_id,
-        Account.userId == current_user["id"]
-    ).first()
-
-    if not account:
+    if not AccountService(db, get_encryption_service()).can_access_account(account_id, current_user["id"]):
         raise HTTPException(status_code=404, detail="Account not found")
 
     service = FileService(db)
@@ -46,18 +32,10 @@ async def upload_file(
     account_id: int,
     file_data: FileCreate,
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
+    current_user = Depends(file_access)
 ):
     """Upload a file to an account"""
-    from app.models.account import Account
-
-    # Verify user has access
-    account = db.query(Account).filter(
-        Account.id == account_id,
-        Account.userId == current_user["id"]
-    ).first()
-
-    if not account:
+    if not AccountService(db, get_encryption_service()).can_edit_account(account_id, current_user["id"]):
         raise HTTPException(status_code=404, detail="Account not found")
 
     # Decode base64 content
@@ -93,27 +71,34 @@ async def upload_file(
         message="File uploaded successfully"
     )
 
+@router.get("/accounts/{account_id}/files/count")
+async def get_file_count(
+    account_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(file_access)
+):
+    """Get the number of files attached to an account"""
+    if not AccountService(db, get_encryption_service()).can_access_account(account_id, current_user["id"]):
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    service = FileService(db)
+    count = service.get_file_count(account_id, current_user["id"])
+
+    return {"account_id": account_id, "file_count": count}
+
 @router.get("/accounts/{account_id}/files/{file_id}")
 async def get_file(
     account_id: int,
     file_id: int,
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
+    current_user = Depends(file_access)
 ):
     """Get a specific file and its content"""
-    from app.models.account import Account
-
-    # Verify user has access
-    account = db.query(Account).filter(
-        Account.id == account_id,
-        Account.userId == current_user["id"]
-    ).first()
-
-    if not account:
+    if not AccountService(db, get_encryption_service()).can_access_account(account_id, current_user["id"]):
         raise HTTPException(status_code=404, detail="Account not found")
 
     service = FileService(db)
-    file = service.get_file(file_id, current_user["id"])
+    file = service.get_file(file_id, current_user["id"], account_id=account_id)
 
     if not file:
         raise HTTPException(status_code=404, detail="File not found")
@@ -136,22 +121,14 @@ async def get_file_metadata(
     account_id: int,
     file_id: int,
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
+    current_user = Depends(file_access)
 ):
     """Get file metadata without downloading content"""
-    from app.models.account import Account
-
-    # Verify user has access
-    account = db.query(Account).filter(
-        Account.id == account_id,
-        Account.userId == current_user["id"]
-    ).first()
-
-    if not account:
+    if not AccountService(db, get_encryption_service()).can_access_account(account_id, current_user["id"]):
         raise HTTPException(status_code=404, detail="Account not found")
 
     service = FileService(db)
-    file = service.get_file(file_id, current_user["id"])
+    file = service.get_file(file_id, current_user["id"], account_id=account_id)
 
     if not file:
         raise HTTPException(status_code=404, detail="File not found")
@@ -163,46 +140,15 @@ async def delete_file(
     account_id: int,
     file_id: int,
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
+    current_user = Depends(file_access)
 ):
     """Delete a file from an account"""
-    from app.models.account import Account
-
-    # Verify user has access
-    account = db.query(Account).filter(
-        Account.id == account_id,
-        Account.userId == current_user["id"]
-    ).first()
-
-    if not account:
+    if not AccountService(db, get_encryption_service()).can_edit_account(account_id, current_user["id"]):
         raise HTTPException(status_code=404, detail="Account not found")
 
     service = FileService(db)
 
-    if not service.delete_file(file_id, current_user["id"]):
+    if not service.delete_file(file_id, current_user["id"], account_id=account_id):
         raise HTTPException(status_code=404, detail="File not found")
 
     return None
-
-@router.get("/accounts/{account_id}/files/count")
-async def get_file_count(
-    account_id: int,
-    db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
-):
-    """Get the number of files attached to an account"""
-    from app.models.account import Account
-
-    # Verify user has access
-    account = db.query(Account).filter(
-        Account.id == account_id,
-        Account.userId == current_user["id"]
-    ).first()
-
-    if not account:
-        raise HTTPException(status_code=404, detail="Account not found")
-
-    service = FileService(db)
-    count = service.get_file_count(account_id, current_user["id"])
-
-    return {"account_id": account_id, "file_count": count}

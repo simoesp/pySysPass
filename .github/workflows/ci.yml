@@ -114,5 +114,12 @@ jobs:
                   "WHERE table_schema = 'syspass' AND table_type = 'BASE TABLE'"
               )).scalar()
           print(f"physical tables created: {n}")
-          assert n >= 25, f"expected the full sysPass schema, got {n} tables"
+          assert n == 27, f"expected 27 physical PHP tables, got {n}"
+          from sqlalchemy import inspect
+          from app.db.bootstrap import bootstrap_database
+          assert set(inspect(e).get_view_names()) == {"account_data_v", "account_search_v"}
+          with e.connect() as c:
+              for view in ("account_data_v", "account_search_v"):
+                  c.execute(text(f"SELECT * FROM {view} LIMIT 0"))
+          assert bootstrap_database(e) is False, "bootstrap must be idempotent"
           PY
