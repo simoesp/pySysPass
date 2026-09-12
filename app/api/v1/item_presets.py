@@ -5,18 +5,9 @@ from sqlalchemy.orm import Session
 
 from app.db.base import get_db
 from app.services.item_preset_service import ItemPresetService, VALID_TYPES
-from app.services.auth_service import decode_token
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from app.api.deps import get_current_user
 
 router = APIRouter()
-security = HTTPBearer()
-
-
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    payload = decode_token(credentials.credentials)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid token")
-    return {"id": payload.get("user_id"), "username": payload.get("username")}
 
 
 def require_admin(current_user=Depends(get_current_user)):

@@ -5,11 +5,9 @@ from app.db.base import get_db
 from app.core.security import get_encryption_service
 from app.services.user_service import UserService
 from app.services.two_factor_service import TwoFactorConfig, TwoFactorService, TwoFactorStore
-from app.services.auth_service import decode_token
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from app.api.deps import get_current_user
 
 router = APIRouter()
-security = HTTPBearer()
 
 
 class TwoFactorRequest(BaseModel):
@@ -23,14 +21,6 @@ class TwoFactorEnableResponse(BaseModel):
 
 class TwoFactorVerifyRequest(BaseModel):
     code: str
-
-
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    token = credentials.credentials
-    payload = decode_token(token)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid token")
-    return {"id": payload.get("user_id"), "username": payload.get("username")}
 
 
 def _store(db: Session) -> TwoFactorStore:

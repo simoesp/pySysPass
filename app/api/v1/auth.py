@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from datetime import timedelta
 import secrets
 from app.db.base import get_db
+from app.api.deps import get_current_user
 from app.schemas.install import InstallRequest, InstallResponse, InstallStatusResponse
 from app.schemas.user import UserCreate, UserResponse, Token
 from app.services.auth_service import (
@@ -289,18 +290,10 @@ async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends
 
 @router.get("/me", response_model=UserResponse)
 async def get_current_user_info(
-    credentials: HTTPBearer = Depends(security),
+    current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    from app.services.auth_service import decode_token
-    from app.services.user_profile_service import UserProfileService
-    payload = decode_token(credentials.credentials)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid token")
-
-    user = db.query(User).filter(User.id == payload["user_id"]).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    user = db.query(User).filter(User.id == current_user["id"]).one()
 
     permissions = None
     if user.userProfileId:

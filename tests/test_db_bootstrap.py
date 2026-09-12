@@ -1,10 +1,15 @@
 from pathlib import Path
 
+import pytest
+
 from sqlalchemy import create_engine, text
 from sqlalchemy.pool import StaticPool
 
 from app.db.base import Base
 from app.db.bootstrap import (
+    _load_schema_statements,
+    _missing_view_statements,
+    _view_name,
     _normalize_bootstrap_statement,
     _order_bootstrap_statements,
     _split_sql_script,
@@ -139,3 +144,31 @@ def test_bootstrap_schema_uses_matching_integer_sizes_for_user_foreign_keys():
 def test_sqlalchemy_registry_includes_legacy_account_views():
     assert "account_data_v" in Base.metadata.tables
     assert "account_search_v" in Base.metadata.tables
+
+
+def test_bootstrap_includes_canonical_php_views_after_tables():
+    statements = _load_schema_statements()
+    views = {name: statement for statement in statements if (name := _view_name(statement))}
+    assert set(views) == {'account_data_v', 'account_search_v'}
+    assert '`PublicLink`.`totalCountViews`' in views['account_search_v']
+    assert 'SQL SECURITY DEFINER' in views['account_data_v']
+    first_view = min(statements.index(statement) for statement in views.values())
+    assert all(not statement.startswith('CREATE TABLE') for statement in statements[first_view:])
+
+
+def test_view_repair_preserves_existing_php_views():
+    engine = _sqlite_engine()
+    with engine.begin() as connection:
+        connection.execute(text('CREATE VIEW account_data_v AS SELECT 1 AS id'))
+        connection.execute(text('CREATE VIEW account_search_v AS SELECT 2 AS id'))
+    assert _missing_view_statements(engine) == []
+    with engine.connect() as connection:
+        assert connection.execute(text('SELECT id FROM account_search_v')).scalar_one() == 2
+
+
+def test_view_repair_refuses_to_replace_a_table():
+    engine = _sqlite_engine()
+    with engine.begin() as connection:
+        connection.execute(text('CREATE TABLE account_data_v (id INTEGER)'))
+    with pytest.raises(RuntimeError, match='refusing to replace'):
+        _missing_view_statements(engine)
