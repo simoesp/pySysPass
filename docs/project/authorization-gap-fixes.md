@@ -37,10 +37,10 @@ Existing links and encrypted payloads are not rewritten.
 
 ## Remaining work
 
-PHP stores a serialized Vault in `PublicLink.data`; the existing Python helper
-uses that column for a link password. Full public-link format interoperability
-is not established by these fixes and needs PHP-authored fixtures before a
-format migration is attempted.
+Native PHP public-link Vault reads now have a strict reader and a PHP-authored
+synthetic fixture; see [the reader notes](php-public-link-reader.md). Python
+link creation still uses the legacy format. Full write interoperability and
+live PHP UI round trips remain open; no stored payloads are migrated.
 
 Real-browser login/sharing coverage and external PHP fixture coverage remain
 separate work.

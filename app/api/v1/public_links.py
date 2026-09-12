@@ -6,6 +6,7 @@ from app.schemas.public_link import PublicLinkCreate, PublicLinkResponse, Public
 from app.services.public_link_service import PublicLinkService
 from app.api.deps import require_any_permission
 from app.core.security import get_encryption_service
+from app.core.php_public_link import PublicLinkSnapshot
 from app.services.account_service import AccountService
 
 router = APIRouter()
@@ -70,15 +71,19 @@ async def access_public_link(
     if service.is_link_expired(link):
         raise HTTPException(status_code=410, detail="Link has expired")
 
-    # Return account data (without sensitive fields)
+    # Native PHP links serve the authenticated snapshot, including its password.
+    # Legacy Python links retain their metadata-only response.
     return PublicLinkAccess(
         account_id=account.id,
         account_title=account.name,
         login=account.login,
         url=account.url,
         notes=account.notes,
-        category_id=account.categoryId,
-        client_id=account.clientId
+        category_id=account.category_id if isinstance(account, PublicLinkSnapshot) else account.categoryId,
+        client_id=account.client_id if isinstance(account, PublicLinkSnapshot) else account.clientId,
+        password=account.password if isinstance(account, PublicLinkSnapshot) else None,
+        category_name=account.category_name if isinstance(account, PublicLinkSnapshot) else None,
+        client_name=account.client_name if isinstance(account, PublicLinkSnapshot) else None
     )
 
 @router.delete("/accounts/{account_id}/public-links/{link_id}", status_code=status.HTTP_204_NO_CONTENT)
