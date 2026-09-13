@@ -214,7 +214,13 @@ New links use the existing `publinks_max_views` runtime setting. Zero is an
 exhausted limit in PHP; previously Python-created zero-limit links must be
 recreated with a positive configured limit. No stored links are rewritten.
 
-Full public-link format parity is still unverified: PHP stores a serialized
-Vault in `PublicLink.data`, whereas the existing Python helper uses it for a
-link password. This change does not migrate or reinterpret that encrypted data
-and does not establish complete public-link interoperability.
+Native PHP public-link Vault reads are now supported with a PHP-authored
+synthetic fixture, strict data-only deserialization, and Defuse authentication.
+The reader returns the frozen snapshot (including its password) and respects
+PHP view limits and counters. Legacy Python links retain their previous
+password checks. See [the reader notes](php-public-link-reader.md) for format,
+fixture provenance, and snapshot/deletion behavior.
+
+Full public-link format parity remains incomplete: Python creation still
+writes the legacy format, and native writes plus live PHP UI round trips
+remain open. No encrypted payloads are migrated.

@@ -3,6 +3,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from app.models.account import PublicLink, Account
 from app.core.security import get_encryption_service
+from app.core.php_public_link import PublicLinkSnapshot, is_php_object, read_public_link_snapshot
+from app.core.syspass_runtime_config import get_password_salt
 from app.services.account_service import AccountService
 from app.services.config_service import ConfigService
 import time
@@ -66,7 +68,7 @@ class PublicLinkService:
 
     def get_public_link(
         self, hash_value: str | bytes, password: Optional[str] = None
-    ) -> Optional[Tuple[PublicLink, Account]]:
+    ) -> Optional[Tuple[PublicLink, Account | PublicLinkSnapshot]]:
         """Get a public link by hash and verify access"""
         if isinstance(hash_value, bytes):
             encoded_hash = hash_value
@@ -84,32 +86,36 @@ class PublicLinkService:
             return None
 
         # Check if expired
-        if self.is_link_expired(link):
+        if self.is_link_expired(link) or (link.countViews or 0) >= link.maxCountViews:
             return None
 
-        # Verify password if required
-        if link.password:
-            if not password:
-                return None
+        if link.typeId != 1:
+            return None
 
-            from app.core.security import EncryptionService
-            from app.core.config import settings
-            encryption = EncryptionService(settings.ENCRYPTION_KEY)
-
+        native_snapshot = is_php_object(link.data)
+        if native_snapshot:
             try:
-                decrypted_password = encryption.decrypt(link.password.decode())
-                if decrypted_password != password:
-                    return None
-            except Exception:
+                raw_data = link.data.encode('utf-8') if isinstance(link.data, str) else link.data
+                account = read_public_link_snapshot(raw_data, encoded_hash, get_password_salt(), link.accountId)
+            except (ValueError, UnicodeError, TypeError):
                 return None
-
-        # Get the account
-        account = self.db.query(Account).filter(
-            Account.id == link.accountId
-        ).first()
-
-        if not account:
-            return None
+        else:
+            # Legacy Python links store a separate encrypted access password.
+            if link.password:
+                if not password:
+                    return None
+                from app.core.security import EncryptionService
+                from app.core.config import settings
+                encryption = EncryptionService(settings.ENCRYPTION_KEY)
+                try:
+                    decrypted_password = encryption.decrypt(link.password.decode())
+                    if decrypted_password != password:
+                        return None
+                except Exception:
+                    return None
+            account = self.db.query(Account).filter(Account.id == link.accountId).first()
+            if not account:
+                return None
 
         # Atomically consume one view so simultaneous requests cannot exceed
         # the PHP countViews < maxCountViews and time < dateExpire gates.
@@ -124,6 +130,11 @@ class PublicLinkService:
         if not consumed:
             self.db.rollback()
             return None
+        if native_snapshot:
+            self.db.query(Account).filter(Account.id == link.accountId).update({
+                Account.countView: func.coalesce(Account.countView, 0) + 1,
+                Account.countDecrypt: func.coalesce(Account.countDecrypt, 0) + 1,
+            }, synchronize_session=False)
         self.db.commit()
         self.db.refresh(link)
         return (link, account)
