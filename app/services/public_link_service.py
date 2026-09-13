@@ -1,8 +1,12 @@
 from typing import List, Optional, Tuple
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from app.models.account import PublicLink, Account
-from app.schemas.public_link import PublicLinkCreate
-from datetime import datetime, timedelta
+from app.core.security import get_encryption_service
+from app.core.php_public_link import PublicLinkSnapshot, is_php_object, read_public_link_snapshot
+from app.core.syspass_runtime_config import get_password_salt
+from app.services.account_service import AccountService
+from app.services.config_service import ConfigService
 import time
 import hashlib
 import secrets
@@ -20,12 +24,7 @@ class PublicLinkService:
     ) -> PublicLink:
         """Create a new public link for an account"""
         # Verify user has access to this account
-        account = self.db.query(Account).filter(
-            Account.id == account_id,
-            Account.userId == user_id
-        ).first()
-
-        if not account:
+        if not AccountService(self.db, get_encryption_service()).can_access_account(account_id, user_id):
             raise ValueError("Account not found or access denied")
 
         existing = self.db.query(PublicLink.id).filter(
@@ -58,7 +57,7 @@ class PublicLinkService:
             dateAdd=now,
             dateExpire=date_expire,
             dateUpdate=0,
-            maxCountViews=0,
+            maxCountViews=ConfigService(self.db).get_accounts_settings().publinks_max_views,
             password=encrypted_password,
         )
 
@@ -69,12 +68,15 @@ class PublicLinkService:
 
     def get_public_link(
         self, hash_value: str | bytes, password: Optional[str] = None
-    ) -> Optional[Tuple[PublicLink, Account]]:
+    ) -> Optional[Tuple[PublicLink, Account | PublicLinkSnapshot]]:
         """Get a public link by hash and verify access"""
         if isinstance(hash_value, bytes):
             encoded_hash = hash_value
         else:
-            encoded_hash = hash_value.encode("ascii")
+            try:
+                encoded_hash = hash_value.encode("ascii")
+            except UnicodeEncodeError:
+                return None
 
         link = self.db.query(PublicLink).filter(
             PublicLink.hash == encoded_hash
@@ -84,51 +86,70 @@ class PublicLinkService:
             return None
 
         # Check if expired
-        if self.is_link_expired(link):
+        if self.is_link_expired(link) or (link.countViews or 0) >= link.maxCountViews:
             return None
 
-        # Verify password if required
-        if link.password:
-            if not password:
-                return None
+        if link.typeId != 1:
+            return None
 
-            from app.core.security import EncryptionService
-            from app.core.config import settings
-            encryption = EncryptionService(settings.ENCRYPTION_KEY)
-
+        native_snapshot = is_php_object(link.data)
+        if native_snapshot:
             try:
-                decrypted_password = encryption.decrypt(link.password.decode())
-                if decrypted_password != password:
+                raw_data = link.data.encode('utf-8') if isinstance(link.data, str) else link.data
+                account = read_public_link_snapshot(raw_data, encoded_hash, get_password_salt(), link.accountId)
+            except (ValueError, UnicodeError, TypeError):
+                return None
+        else:
+            # Legacy Python links store a separate encrypted access password.
+            if link.password:
+                if not password:
                     return None
-            except Exception:
+                from app.core.security import EncryptionService
+                from app.core.config import settings
+                encryption = EncryptionService(settings.ENCRYPTION_KEY)
+                try:
+                    decrypted_password = encryption.decrypt(link.password.decode())
+                    if decrypted_password != password:
+                        return None
+                except Exception:
+                    return None
+            account = self.db.query(Account).filter(Account.id == link.accountId).first()
+            if not account:
                 return None
 
-        # Get the account
-        account = self.db.query(Account).filter(
-            Account.id == link.accountId
-        ).first()
-
-        if not account:
+        # Atomically consume one view so simultaneous requests cannot exceed
+        # the PHP countViews < maxCountViews and time < dateExpire gates.
+        consumed = self.db.query(PublicLink).filter(
+            PublicLink.id == link.id,
+            PublicLink.dateExpire > int(time.time()),
+            PublicLink.countViews < PublicLink.maxCountViews,
+        ).update({
+            PublicLink.countViews: PublicLink.countViews + 1,
+            PublicLink.totalCountViews: func.coalesce(PublicLink.totalCountViews, 0) + 1,
+        }, synchronize_session=False)
+        if not consumed:
+            self.db.rollback()
             return None
-
+        if native_snapshot:
+            self.db.query(Account).filter(Account.id == link.accountId).update({
+                Account.countView: func.coalesce(Account.countView, 0) + 1,
+                Account.countDecrypt: func.coalesce(Account.countDecrypt, 0) + 1,
+            }, synchronize_session=False)
+        self.db.commit()
+        self.db.refresh(link)
         return (link, account)
 
-    def delete_public_link(self, link_id: int, user_id: int) -> bool:
+    def delete_public_link(self, link_id: int, user_id: int, account_id: Optional[int] = None) -> bool:
         """Delete a public link"""
         link = self.db.query(PublicLink).filter(
             PublicLink.id == link_id
         ).first()
 
-        if not link:
+        if not link or (account_id is not None and link.accountId != account_id):
             return False
 
-        # Verify user owns the account
-        account = self.db.query(Account).filter(
-            Account.id == link.accountId,
-            Account.userId == user_id
-        ).first()
-
-        if not account:
+        # Verify the account ACL
+        if not AccountService(self.db, get_encryption_service()).can_access_account(link.accountId, user_id):
             return False
 
         self.db.delete(link)
@@ -138,34 +159,26 @@ class PublicLinkService:
     def get_public_links_for_account(self, account_id: int, user_id: int) -> List[PublicLink]:
         """Get all public links for an account"""
         # Verify user has access
-        account = self.db.query(Account).filter(
-            Account.id == account_id,
-            Account.userId == user_id
-        ).first()
-
-        if not account:
+        if not AccountService(self.db, get_encryption_service()).can_access_account(account_id, user_id):
             return []
 
         return self.db.query(PublicLink).filter(
             PublicLink.accountId == account_id
         ).all()
 
-    def get_public_link_by_id(self, link_id: int, user_id: int) -> Optional[PublicLink]:
+    def get_public_link_by_id(
+        self, link_id: int, user_id: int, account_id: Optional[int] = None
+    ) -> Optional[PublicLink]:
         """Get a specific public link"""
         link = self.db.query(PublicLink).filter(
             PublicLink.id == link_id
         ).first()
 
-        if not link:
+        if not link or (account_id is not None and link.accountId != account_id):
             return None
 
-        # Verify user owns the account
-        account = self.db.query(Account).filter(
-            Account.id == link.accountId,
-            Account.userId == user_id
-        ).first()
-
-        if not account:
+        # Verify the account ACL
+        if not AccountService(self.db, get_encryption_service()).can_access_account(link.accountId, user_id):
             return None
 
         return link
@@ -177,7 +190,4 @@ class PublicLinkService:
 
     def is_link_expired(self, link: PublicLink) -> bool:
         """Check if a public link has expired"""
-        if not link.expire:
-            return False
-
-        return int(time.time()) > link.dateExpire
+        return link.dateExpire is None or int(time.time()) >= link.dateExpire

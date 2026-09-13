@@ -5,6 +5,8 @@ from the live MySQL schema.
 """
 from datetime import UTC, datetime
 
+from app.core.php_public_link import is_php_object
+
 from sqlalchemy import (
     Boolean, Column, DateTime, ForeignKey, Index, Integer,
     SmallInteger, String, Text, UniqueConstraint, event, func, select, text,
@@ -689,7 +691,7 @@ class PublicLink(Base):
     @password.setter
     def password(self, value): self.data = value
     @property
-    def has_password(self): return self.data is not None
+    def has_password(self): return self.data is not None and not is_php_object(self.data)
 
     account = relationship(
         'Account',

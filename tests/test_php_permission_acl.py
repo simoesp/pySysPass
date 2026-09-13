@@ -52,10 +52,15 @@ def test_php_admin_scopes_remain_distinct(db_session, test_user):
     _set_permissions(db_session, test_user)
     client = _client(db_session)
 
+    test_user.isAdminAcc = True
+    db_session.commit()
     account_admin_headers = _headers(test_user, is_admin_acc=True)
     assert client.get("/api/v1/accounts", headers=account_admin_headers).status_code == 200
     assert client.get("/config-probe", headers=account_admin_headers).status_code == 403
 
+    test_user.isAdminAcc = False
+    test_user.isAdminApp = True
+    db_session.commit()
     app_admin_headers = _headers(test_user, is_admin_app=True)
     assert client.get("/config-probe", headers=app_admin_headers).status_code == 200
 

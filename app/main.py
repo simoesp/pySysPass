@@ -99,7 +99,7 @@ async def lifespan(application: FastAPI):
 app = FastAPI(
     title="sysPass Python",
     description="Password Manager - Python Edition",
-    version="2.1.0",
+    version="2.2.0",
     lifespan=lifespan,
 )
 

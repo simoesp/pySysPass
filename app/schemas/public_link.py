@@ -28,3 +28,6 @@ class PublicLinkAccess(BaseModel):
     notes: Optional[str] = None
     category_id: Optional[int] = None
     client_id: Optional[int] = None
+    password: Optional[str] = None  # Present only in native PHP encrypted snapshots.
+    category_name: Optional[str] = None
+    client_name: Optional[str] = None

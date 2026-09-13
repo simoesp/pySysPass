@@ -112,7 +112,7 @@ running against an existing sysPass PHP database, see
 ### Prerequisites
 
 - Docker with Compose v2, or Podman with `podman-compose`
-- Node.js 18+ for frontend-only local development
+- Node.js 22.23.2 for frontend-only local development
 - Python 3.11+ for backend-only local development
 
 ### Start the full stack
@@ -182,9 +182,13 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 ```bash
 cd pySysPass/frontend
-npm install
+npm ci --legacy-peer-deps
 npm run dev
 ```
+
+Use the Node version in `frontend/.nvmrc` (`nvm install && nvm use` from
+`frontend/`). CI and Docker use the same Node release and install the committed
+lockfile. The legacy peer-dependency flag matches how that lockfile was generated.
 
 The default Vite dev server runs on `http://localhost:5173`.
 

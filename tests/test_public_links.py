@@ -1,11 +1,11 @@
 import pytest
 from app.services.public_link_service import PublicLinkService
+from app.schemas.account import AccountCreate
+from app.services.account_service import AccountService
 
 @pytest.mark.asyncio
 async def test_create_public_link(db_session, encryption_service, test_user):
     """Test creating a public link"""
-    from app.services.account_service import AccountService
-    from app.schemas.account import AccountCreate
 
     account_service = AccountService(db_session, encryption_service)
     account = account_service.create_account(
@@ -27,8 +27,6 @@ async def test_create_public_link(db_session, encryption_service, test_user):
 @pytest.mark.asyncio
 async def test_create_public_link_with_password(db_session, encryption_service, test_user):
     """Test creating a public link with password protection"""
-    from app.services.account_service import AccountService
-    from app.schemas.account import AccountCreate
 
     account_service = AccountService(db_session, encryption_service)
     account = account_service.create_account(
@@ -48,8 +46,6 @@ async def test_create_public_link_with_password(db_session, encryption_service, 
 @pytest.mark.asyncio
 async def test_create_public_link_with_expiration(db_session, encryption_service, test_user):
     """Test creating a public link with expiration"""
-    from app.services.account_service import AccountService
-    from app.schemas.account import AccountCreate
 
     account_service = AccountService(db_session, encryption_service)
     account = account_service.create_account(
@@ -69,8 +65,6 @@ async def test_create_public_link_with_expiration(db_session, encryption_service
 @pytest.mark.asyncio
 async def test_get_public_links_for_account(db_session, encryption_service, test_user):
     """Test getting all public links for an account"""
-    from app.services.account_service import AccountService
-    from app.schemas.account import AccountCreate
 
     account_service = AccountService(db_session, encryption_service)
     account = account_service.create_account(
@@ -90,8 +84,6 @@ async def test_get_public_links_for_account(db_session, encryption_service, test
 @pytest.mark.asyncio
 async def test_account_can_only_have_one_public_link(db_session, encryption_service, test_user):
     """Match the PHP uk_PublicLink_02 unique constraint on itemId."""
-    from app.services.account_service import AccountService
-    from app.schemas.account import AccountCreate
 
     account = AccountService(db_session, encryption_service).create_account(
         AccountCreate(title="Test Account", password="secret"),
@@ -106,8 +98,6 @@ async def test_account_can_only_have_one_public_link(db_session, encryption_serv
 @pytest.mark.asyncio
 async def test_get_public_link_by_hash(db_session, encryption_service, test_user):
     """Test getting a public link by hash"""
-    from app.services.account_service import AccountService
-    from app.schemas.account import AccountCreate
 
     account_service = AccountService(db_session, encryption_service)
     account = account_service.create_account(
@@ -131,8 +121,6 @@ async def test_get_public_link_by_hash(db_session, encryption_service, test_user
 @pytest.mark.asyncio
 async def test_public_link_requires_correct_password(db_session, encryption_service, test_user):
     """Test that password-protected links require correct password"""
-    from app.services.account_service import AccountService
-    from app.schemas.account import AccountCreate
 
     account_service = AccountService(db_session, encryption_service)
     account = account_service.create_account(
@@ -158,8 +146,6 @@ async def test_public_link_requires_correct_password(db_session, encryption_serv
 @pytest.mark.asyncio
 async def test_cannot_access_public_link_without_password(db_session, encryption_service, test_user):
     """Test that password-protected links cannot be accessed without password"""
-    from app.services.account_service import AccountService
-    from app.schemas.account import AccountCreate
 
     account_service = AccountService(db_session, encryption_service)
     account = account_service.create_account(
@@ -181,8 +167,6 @@ async def test_cannot_access_public_link_without_password(db_session, encryption
 @pytest.mark.asyncio
 async def test_delete_public_link(db_session, encryption_service, test_user):
     """Test deleting a public link"""
-    from app.services.account_service import AccountService
-    from app.schemas.account import AccountCreate
 
     account_service = AccountService(db_session, encryption_service)
     account = account_service.create_account(
@@ -218,10 +202,8 @@ async def test_cannot_create_public_link_for_nonexistent_account(db_session, enc
 @pytest.mark.asyncio
 async def test_cannot_access_others_public_links(db_session, encryption_service, test_user):
     """Test that users cannot access other users' public links"""
-    from app.services.account_service import AccountService
     from app.models.account import User
     from app.services.auth_service import get_password_hash
-    from app.schemas.account import AccountCreate
 
     # Create another user
     other_user = User(
@@ -261,3 +243,49 @@ def test_public_link_routes_are_registered():
     assert "/api/v1/accounts/{account_id}/public-links" in route_paths
     assert "/api/v1/accounts/{account_id}/public-links/{link_id}" in route_paths
     assert "/api/v1/public-links/{link_hash}/access" in route_paths
+
+
+@pytest.mark.parametrize('limit', [0, 1, 2])
+def test_php_public_link_view_limit_and_counters(db_session, encryption_service, test_user, limit):
+
+    account = AccountService(db_session, encryption_service).create_account(
+        AccountCreate(title='View limit', password='test-only'), test_user.id,
+    )
+    service = PublicLinkService(db_session)
+    link = service.create_public_link(account.id, test_user.id)
+    link.maxCountViews = limit
+    link.totalCountViews = 7
+    db_session.commit()
+    for _ in range(limit):
+        assert service.get_public_link(link.hash) is not None
+    assert service.get_public_link(link.hash) is None
+    db_session.refresh(link)
+    assert link.countViews == limit
+    assert link.totalCountViews == 7 + limit
+
+
+@pytest.mark.parametrize('expiry_offset', [-1, 0, 1])
+def test_php_public_link_expiration_boundary(db_session, encryption_service, test_user, monkeypatch, expiry_offset):
+
+    monkeypatch.setattr('app.services.public_link_service.time.time', lambda: 2000000000)
+    account = AccountService(db_session, encryption_service).create_account(
+        AccountCreate(title='Expiry', password='test-only'), test_user.id,
+    )
+    service = PublicLinkService(db_session)
+    link = service.create_public_link(account.id, test_user.id)
+    link.dateExpire = 2000000000 + expiry_offset
+    db_session.commit()
+    assert (service.get_public_link(link.hash) is not None) == (expiry_offset > 0)
+
+
+def test_rejected_link_password_does_not_consume_view(db_session, encryption_service, test_user):
+
+    account = AccountService(db_session, encryption_service).create_account(
+        AccountCreate(title='Protected limit', password='test-only'), test_user.id,
+    )
+    service = PublicLinkService(db_session)
+    link = service.create_public_link(account.id, test_user.id, password='link-password')
+    assert service.get_public_link(link.hash, 'wrong') is None
+    assert link.countViews == 0
+    assert service.get_public_link(link.hash, 'link-password') is not None
+    assert link.countViews == 1
