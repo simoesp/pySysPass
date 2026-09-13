@@ -3,6 +3,47 @@
 All notable changes to pySysPass are documented here. Versions follow
 [Semantic Versioning](https://semver.org/). Dates are ISO 8601.
 
+## [2.2.0] — 2026-09-13
+
+Closes live authorization gaps against PHP session/profile/ACL rules and adds
+native PHP public-link compatibility. No database schema changes beyond
+migration `002` (view repair only).
+
+### Added
+- Public-link access now **natively reads PHP-created Vault links**: a
+  bounded, data-only PHP-serialize reader decrypts the `SP\Core\Crypt\Vault`
+  stored in `PublicLink.data` with Defuse and returns the frozen
+  `AccountExtData` snapshot (password, category/client names included),
+  matching PHP `AccountController::viewLinkAction`. Verified against a
+  PHP-authored synthetic fixture (21 tests); see
+  `docs/project/php-public-link-reader.md`.
+- Alembic migration `002_restore_php_account_views` repairs missing PHP
+  account views on existing databases without touching existing PHP objects;
+  bootstrap now creates the canonical views for fresh installs.
+- CI: frontend lint job and a Docker build validation job; installs now use
+  the committed frontend lockfile.
+
+### Fixed
+- JWT sessions no longer retain access after a user is disabled or demoted:
+  requests reload live user state instead of trusting stale token claims.
+- File and public-link routes now enforce PHP profile permissions and
+  account ACLs, including URL-to-resource ownership checks that were
+  previously skipped.
+- Public-link reads atomically enforce PHP's `countViews < maxCountViews`
+  and expiry gates, closing a race that let concurrent requests exceed a
+  link's configured view limit.
+
+### Changed
+- Existing zero-view-limit public links are now treated as exhausted, per
+  PHP's rules; they must be recreated with a positive configured view limit.
+  No stored links are rewritten.
+
+### Notes
+- Full public-link write interoperability (native Vault creation, live PHP
+  UI round trips) remains open; no encrypted payloads are migrated.
+- See `docs/project/authorization-gap-fixes.md` for the full authorization
+  gap analysis and validation record.
+
 ## [2.1.0] — 2026-07-20
 
 Security and CI hardening. No API or database changes.
