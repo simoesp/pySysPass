@@ -3,6 +3,16 @@
 All notable changes to pySysPass are documented here. Versions follow
 [Semantic Versioning](https://semver.org/). Dates are ISO 8601.
 
+## [2.2.1] — 2026-09-13
+
+Routine dependency updates. No API or database changes.
+
+### Changed
+- Backend: `pydantic` 2.13.4 → 2.13.5.
+- Frontend: `quasar` 2.27.0 → 2.31.0, `vitest` 4.1.11 → 5.0.0, `vue-router`
+  5.3.0 → 5.3.1, `eslint` 10.9.1 → 10.10.0, `eslint-plugin-vue` 10.10.0 →
+  10.11.0, `globals` 17.11.0 → 17.12.0, `sass` 1.103.1 → 1.104.0.
+
 ## [2.2.0] — 2026-09-13
 
 Closes live authorization gaps against PHP session/profile/ACL rules and adds
