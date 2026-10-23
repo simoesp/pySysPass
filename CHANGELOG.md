@@ -3,6 +3,28 @@
 All notable changes to pySysPass are documented here. Versions follow
 [Semantic Versioning](https://semver.org/). Dates are ISO 8601.
 
+## [2.2.2] — 2026-10-23
+
+Routine dependency and security updates. No API or database changes.
+
+### Changed
+- Backend: `fastapi` 0.141.1 → 0.143.2, `uvicorn` 0.52.4 → 0.54.0, `pydantic`
+  2.13.5 → 2.14.1, `pydantic-settings` 2.15.0 → 2.16.0, `sqlalchemy` 2.0.52 →
+  2.1.4, `alembic` 1.19.1 → 1.20.0, `pymysql` 1.2.0 → 1.2.3, `cryptography`
+  50.0.1 → 50.0.2, `PyJWT` 2.13.0 → 2.15.1, `python-dotenv` 1.2.3 → 1.2.4.
+- Frontend: `quasar` 2.31.0 → 2.35.1, `@quasar/extras` 2.0.4 → 2.1.0, `vue`
+  3.5.42 → 3.5.44, `vue-router` 5.3.1 → 5.4.0, `pinia` 4.0.3 → 4.1.0, `vite`
+  8.2.2 → 8.3.5, `vitest` 5.0.0 → 5.0.5, `@vitejs/plugin-vue` 6.0.8 → 6.0.10,
+  `@pinia/testing` 2.0.1 → 2.0.2, `@vue/test-utils` 2.5.0 → 2.5.1, `eslint`
+  10.10.0 → 10.12.0, `eslint-plugin-vue` 10.11.0 → 10.11.1, `globals` 17.12.0 →
+  17.13.0, `jsdom` 30.0.1 → 30.1.3, `sass` 1.104.0 → 1.105.2.
+
+### Security
+- Frontend transitive dependencies updated to clear `npm audit` advisories:
+  `brace-expansion` 5.0.9 → 5.0.12, `follow-redirects` 1.16.0 → 1.16.1,
+  `undici` 8.10.0 → 8.12.3, `postcss-selector-parser` 7.1.4 → 7.1.7,
+  `source-map-js` 1.2.1 → 1.2.2.
+
 ## [2.2.1] — 2026-09-13
 
 Routine dependency updates. No API or database changes.
