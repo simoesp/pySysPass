@@ -103,6 +103,49 @@ encryption key simply to satisfy validation**: existing ciphertext requires it.
 The unsafe online rekey operation is disabled pending a complete migration and
 recovery workflow. Explicit `DEBUG=true` permits ephemeral development keys.
 
+### Container user and volume ownership
+
+The backend image runs as the unprivileged `syspass` account (UID/GID
+`10001`). Application code is root-owned and read-only to that account; only
+`/app/data` (runtime JSON config, RSA transport key) and `/app/backups` are
+writable. New named volumes inherit that ownership automatically.
+
+Volumes created by images before this change hold root-owned files, which the
+new backend cannot write: `/health/ready` reports `data directory not
+writable` and the container stays unhealthy. Stop the stack, take a backup of
+the volume, then change ownership once with the new image:
+
+```bash
+docker compose -f podman-compose.yml stop backend frontend
+docker compose -f podman-compose.yml run --rm --no-deps --user 0 \
+  --entrypoint chown backend -R 10001:10001 /app/data /app/backups
+docker compose -f podman-compose.yml up -d
+```
+
+Bind mounts need the same ownership on the host (`chown -R 10001:10001`), or
+`--userns`/`:U` mapping with rootless Podman.
+
+### Reproducible builds
+
+The image copies an explicit file allowlist (see `.dockerignore`); `.env*`,
+`data/`, `backups/`, `config/runtime-config.json`, tests, and tooling never
+enter the build context. It installs `requirements.lock`, a hash-pinned
+resolution of `requirements.txt` for Python 3.11, with `pip
+--require-hashes`, and no test tools or compiler. Base images are pinned by
+digest. After changing `requirements.txt`, regenerate and verify the lock:
+
+```bash
+uv pip compile requirements.txt --generate-hashes --python-version 3.11 --universal -o requirements.lock
+python scripts/check-requirements-lock.py
+```
+
+CI fails when the lock no longer satisfies `requirements.txt`, tests run
+against the locked set, and pip-audit checks it. Dependabot updates the
+ranges and image digests but does not regenerate the lock; refresh it in the
+same pull request. The frontend's nginx master process still starts as root
+(workers run as `nginx`), and `Dockerfile.security` is an unmaintained
+scanning image, not a deployment artifact.
+
 ## First-run setup
 
 A freshly bootstrapped database has an empty schema but **no administrator and
@@ -187,7 +230,8 @@ Then open http://localhost:8080 and sign in through the UI.
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install --require-hashes -r requirements.lock   # or: pip install -r requirements.txt
+pip install -r requirements-dev.txt                # test tools (pytest)
 
 export DATABASE_URL="sqlite:///./syspass.db"   # or a MySQL URL
 export SECRET_KEY="$(openssl rand -hex 32)"

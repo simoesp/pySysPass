@@ -173,7 +173,7 @@ Provide at least these environment variables in Portainer before deploying:
 cd pySysPass
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements.txt -r requirements-dev.txt
 DEBUG=true uvicorn app.main:app --reload --host 127.0.0.1 --port 8000 --no-proxy-headers
 ```
 

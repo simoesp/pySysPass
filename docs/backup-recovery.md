@@ -51,6 +51,11 @@ runtime and backup volumes, placing config at `/app/data/runtime-config.json`.
 Retain the old container until volumes and key material have been verified.
 Empty named volumes do not migrate existing files.
 
+The backend now runs as UID `10001`. Files copied into volumes as root, and
+volumes written by older root images, must be re-owned before the new backend
+can use them; see [container user and volume ownership](installation.md#container-user-and-volume-ownership).
+The offline restore command runs as the same account.
+
 ## Disposable rehearsal
 
 `scripts/check-backup-recovery.py` tests an actual dump/import and runtime file

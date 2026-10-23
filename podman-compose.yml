@@ -2,7 +2,7 @@ version: "3.8"
 
 services:
   db:
-    image: docker.io/library/mysql:8.0
+    image: docker.io/library/mysql:8.0@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b
     container_name: syspass-db
     restart: unless-stopped
     environment:
@@ -83,7 +83,7 @@ services:
         ipv4_address: 172.30.81.10
 
   graphify:
-    image: docker.io/library/nginx:alpine
+    image: docker.io/library/nginx:alpine@sha256:a3554c0d0b48177b1413c26e01f695334428020d9df01243fbae3e11cfd17417
     container_name: syspass-graphify
     restart: unless-stopped
     ports:

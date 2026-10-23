@@ -285,3 +285,34 @@ connection. Ruff and Bandit passed; the three Compose files parsed. Limitations:
 schema check confirms canonical tables and views exist; it does not compare column
 definitions, migration revision, or encrypted data. A hung database connection may
 hold a pool thread until the driver's own connect timeout.
+
+R14 / #63 follow-up: the backend build context is an allowlist (`.dockerignore` denies
+everything, then re-includes application code, schemas, Alembic files, the lock, and
+`config/cors-origins.json`), and the Dockerfile copies the same explicit paths. The
+image installs the hash-pinned `requirements.lock` (48 packages, Python 3.11, universal
+markers) with `--require-hashes`. Test tools moved to `requirements-dev.txt`. Compiler
+and header packages were removed. The service runs as UID/GID 10001 with read-only
+code; only `/app/data` and `/app/backups` are writable. Backend, frontend, MySQL, and
+graphify base images are pinned by multi-arch digest; Dependabot now proposes digest
+updates. CI tests the locked set, checks that the lock satisfies `requirements.txt`,
+audits it with pip-audit, and asserts the image is non-root and free of tests, pytest,
+gcc, and runtime config.
+
+Validation: with probe secrets placed in `.env.probe-secret`, `app/.env`,
+`data/rsa_private.pem`, and `backups/old.zip`, none reached the built image. Inside the
+image: `id -u` is 10001, pytest and gcc are absent, `/app/app` is not writable, and
+`mysqldump` is present. The backend suite passed inside the image on Python 3.11 as
+UID 10001 (337 passed, 8 skipped), and on the host. Live probes: with an unreachable
+database and auto-initialization disabled, `/health` returned 200 and `/health/ready`
+returned 503 (`database unreachable`); with MySQL 8.0.46 and a fresh named volume,
+readiness returned 200; with a root-owned volume left by an older image, readiness
+returned 503 (`data directory not writable`) until the documented one-time `chown`, then
+200. The recovery rehearsal passed as UID 10001 on a named volume. The pinned frontend
+image passed the SPA header check. pip-audit found no known vulnerabilities in the lock.
+Ruff and Bandit passed; all three Compose files parsed.
+
+Upgrade impact: existing volumes created by root images need the one-time ownership
+change in `docs/installation.md`; until then readiness fails closed. Limitations: the
+frontend nginx master still starts as root; Dependabot does not regenerate
+`requirements.lock` (CI fails until it is refreshed); `Dockerfile.security` was not
+updated and is not a deployment artifact; no container OS vulnerability scan was run.

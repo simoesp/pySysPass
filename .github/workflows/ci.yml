@@ -31,7 +31,10 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-      - run: pip install -r requirements.txt
+      # Test exactly the hash-pinned set the container ships, plus test tools.
+      - run: pip install --require-hashes -r requirements.lock
+      - run: pip install -r requirements-dev.txt
+      - run: python scripts/check-requirements-lock.py
       - run: python -m pytest tests/ -q
 
   frontend-build:
@@ -77,6 +80,8 @@ jobs:
       - run: bandit -r app/ -ll
       # Fail on known-vulnerable Python dependencies.
       - run: pip-audit -r requirements.txt
+      # Audit the exact hash-pinned set the backend image installs.
+      - run: pip-audit --disable-pip -r requirements.lock
       # Fail on known-vulnerable frontend dependencies.
       - run: npm audit --audit-level=high
         working-directory: frontend
@@ -113,7 +118,8 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-      - run: pip install -r requirements.txt
+      - run: pip install --require-hashes -r requirements.lock
+      - run: pip install -r requirements-dev.txt
       # Create the full PHP-compatible schema on a real MySQL 8 instance.
       - run: python init_db.py
       # Assert the expected physical tables were created.
@@ -150,9 +156,16 @@ jobs:
           docker volume create recovery-ci-data
           docker run --rm --network host \
             -v recovery-ci-data:/app/data \
+            -v "$PWD/scripts:/app/scripts:ro" \
             -e DATABASE_URL -e SQLALCHEMY_SCHEMA_GUARD -e DEBUG=false \
             -e ALLOW_DISPOSABLE_RECOVERY_TEST=yes -e PYTHONPATH=/app \
             pysyspass-recovery:ci python scripts/check-backup-recovery.py
+      # The runtime image must stay non-root and free of local state/tooling.
+      - name: Verify hardened backend image
+        run: |
+          test "$(docker run --rm pysyspass-recovery:ci id -u)" = 10001
+          docker run --rm pysyspass-recovery:ci sh -c \
+            '! python -c "import pytest" 2>/dev/null && ! command -v gcc && test ! -e /app/tests && test ! -e /app/config/runtime-config.json && ! touch /app/app/probe 2>/dev/null'
       - name: Remove recovery volume
         if: always()
         run: docker volume rm recovery-ci-data || true
