@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import fcntl
 import json
+import os
+import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional
 
@@ -113,13 +117,42 @@ def load_runtime_json_config() -> dict:
     return _ensure_sections(data)
 
 
+@contextmanager
+def _write_lock(path: Path):
+    """Serialize read/modify/write across local worker processes."""
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    descriptor = os.open(str(path) + ".lock", os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(descriptor)
+
+
+def _write_document(path: Path, document: dict) -> None:
+    payload = json.dumps(_ensure_sections(document), indent=2, sort_keys=True) + "\n"
+    descriptor, name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    temporary = Path(name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+            output.write(payload)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, path)
+        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def save_runtime_json_config(document: dict) -> None:
+    """Atomically replace the document; use set_runtime_config_values for key updates."""
     path = _config_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(_ensure_sections(document), indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    with _write_lock(path):
+        _write_document(path, document)
 
 
 def get_runtime_config_value(parameter: str) -> Optional[str]:
@@ -134,17 +167,25 @@ def get_runtime_config_value(parameter: str) -> Optional[str]:
     return str(value)
 
 
-def set_runtime_config_value(parameter: str, value: Optional[str]) -> bool:
-    location = SECTION_KEYS.get(parameter)
-    if not location:
-        return False
+def set_runtime_config_values(values: dict[str, Optional[str]]) -> set[str]:
+    """Apply all recognized keys in one locked, atomic read/modify/write."""
+    recognized = set(values) & SECTION_KEYS.keys()
+    if not recognized:
+        return set()
+    path = _config_path()
+    with _write_lock(path):
+        document = load_runtime_json_config()
+        for parameter in recognized:
+            section, key = SECTION_KEYS[parameter]
+            bucket = document.setdefault(section, {})
+            value = values[parameter]
+            if value is None:
+                bucket.pop(key, None)
+            else:
+                bucket[key] = value
+        _write_document(path, document)
+    return recognized
 
-    section, key = location
-    document = load_runtime_json_config()
-    bucket = document.setdefault(section, {})
-    if value is None:
-        bucket.pop(key, None)
-    else:
-        bucket[key] = value
-    save_runtime_json_config(document)
-    return True
+
+def set_runtime_config_value(parameter: str, value: Optional[str]) -> bool:
+    return bool(set_runtime_config_values({parameter: value}))

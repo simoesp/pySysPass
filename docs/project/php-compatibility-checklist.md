@@ -237,3 +237,7 @@ Backup recovery follow-up: a MySQL 8 rehearsal restores the canonical schema and
 a Category row using container dump/import clients without adding schema fields.
 Mounted runtime files restore offline. This is recovery coverage, not proof of
 full PHP runtime or encrypted payload parity; external fixture skips remain.
+
+Runtime JSON writes now serialize and replace atomically without changing key
+names, grouped values, or XML/cache fallback precedence. Regression tests preserve
+the existing PHP password salt and unrecognized document sections during updates.

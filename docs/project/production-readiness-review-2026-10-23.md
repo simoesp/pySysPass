@@ -236,3 +236,11 @@ The security gate has an exact historical-fingerprint exception for a synthetic
 key in a test; full-history scanning remains enabled. GitHub reported dependency
 alerts whose affected ranges exclude the versions in the current frontend lockfile;
 the alerts were not dismissed. The earlier dependency audit found no advisories.
+
+R15 follow-up: runtime JSON key updates now use a POSIX file lock across the full
+read/modify/write, a same-directory temporary file with mode 0600, fsync, and atomic
+replacement. Bulk runtime settings use one transaction. Tests cover 12 concurrent
+processes, replacement failure, malformed input preservation, unknown document
+sections, and retention of the existing PHP password salt. The supplied Linux
+containers support these semantics; shared storage must support POSIX locking and
+atomic rename. This does not coordinate external writers that ignore the lock.

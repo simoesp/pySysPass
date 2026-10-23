@@ -1,6 +1,12 @@
-from sqlalchemy.orm import Session
 from typing import Optional, Dict
-from app.core.runtime_json_config import get_runtime_config_value, set_runtime_config_value
+
+from sqlalchemy.orm import Session
+
+from app.core.runtime_json_config import (
+    get_runtime_config_value,
+    set_runtime_config_value,
+    set_runtime_config_values,
+)
 from app.models.account import Config
 from app.schemas.config import (
     GeneralSettings, MailSettings, LdapSettings, AllSettings,
@@ -30,8 +36,10 @@ class ConfigService:
         self.db.commit()
 
     def set_many(self, params: Dict[str, Optional[str]]) -> None:
+        handled = set_runtime_config_values(params)
         for k, v in params.items():
-            self.set(k, v)
+            if k not in handled:
+                self.set(k, v)
 
     def get_all(self) -> Dict[str, Optional[str]]:
         rows = self.db.query(Config).all()
