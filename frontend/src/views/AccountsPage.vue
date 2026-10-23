@@ -230,10 +230,10 @@
           <q-input v-model="form.url" label="URL" outlined dense />
           <div class="row q-gutter-sm">
             <q-select v-model="form.category_id" :options="catOpts" option-label="name"
-              option-value="id" label="Category" outlined dense emit-value map-options class="col" clearable
+              option-value="id" label="Category *" outlined dense emit-value map-options class="col"
               use-input hide-selected fill-input input-debounce="0" @filter="filterCats" />
             <q-select v-model="form.client_id" :options="clientOpts" option-label="name"
-              option-value="id" label="Client" outlined dense emit-value map-options class="col" clearable
+              option-value="id" label="Client *" outlined dense emit-value map-options class="col"
               use-input hide-selected fill-input input-debounce="0" @filter="filterClients" />
           </div>
           <!-- Tags -->
@@ -523,8 +523,9 @@ function openAdd() {
 }
 
 async function createAccount() {
-  if (!form.value.title || !form.value.password) {
-    Notify.create({ message: 'Name and password are required', color: 'warning' })
+  // sysPass requires a client and a category for every account.
+  if (!form.value.title || !form.value.password || !form.value.category_id || !form.value.client_id) {
+    Notify.create({ message: 'Name, password, category and client are required', color: 'warning' })
     return
   }
   saving.value = true

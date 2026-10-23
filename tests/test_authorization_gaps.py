@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from app.api.v1 import accounts, auth, files, item_presets, notifications, public_links, two_factor, users
 from app.db.base import get_db
 from app.models.account import AccountToUser, User, UserGroup, UserProfile
-from app.schemas.account import AccountCreate
+from tests.account_refs import account_create
 from app.services.account_service import AccountService
 from app.services.auth_service import create_access_token
 from app.services.file_service import FileService
@@ -64,7 +64,7 @@ def test_admin_claim_does_not_survive_demotion(gap_client, db_session, test_user
 
 def _account(db_session, encryption_service, user):
     return AccountService(db_session, encryption_service).create_account(
-        AccountCreate(title='Authorization regression', password='test-only', is_public=True), user.id)
+        account_create(title='Authorization regression', password='test-only', is_public=True), user.id)
 
 
 def test_php_profile_denies_files_and_link_creation(gap_client, db_session, encryption_service, test_user):

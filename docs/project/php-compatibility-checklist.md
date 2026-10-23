@@ -58,12 +58,19 @@ Compatibility should be treated as successful only when:
   physical table stops repair rather than being dropped. Revision `002` requires
   an online database connection so existing objects can be inspected.
 - Remove or isolate Python-only behavior that implies extra persisted fields not present in PHP tables.
-- Replace the explicit compatibility exception for Python-only
-  `AccountHistory.action`, `oldValue`, and `newValue` fields with non-persisted
-  or PHP-compatible behavior.
-- Remove the explicit nullability exceptions after account creation and test
-  fixtures always supply the PHP-required user profile, hash, client, and
-  category values.
+- ✅ No Python-only `AccountHistory` columns are mapped; the Python-only column
+  exception map is empty (`action` is a computed, non-persisted property).
+- ✅ `Account.clientId`/`categoryId` and the matching `AccountHistory` columns
+  are `NOT NULL` in the ORM, as in PHP, and their nullability exceptions were
+  removed. The API requires both IDs, as PHP `AccountForm::checkCommon()` does,
+  and returns 422 for missing or unknown client/category/tag/user/group IDs
+  and for values longer than the PHP columns. Deleting a client or category
+  still used by an account or history row returns 409 (PHP's FKs restrict it;
+  the ORM previously nulled the references). Verified on MySQL 8.0.46 by
+  `tests/test_mysql_account_references.py`, which also runs in CI.
+- Remaining nullability exceptions (`User.name`, `User.userProfileId`,
+  `User.hashSalt`, and the `id` columns of `User`, `UserGroup`, `UserProfile`)
+  still need fixtures that supply PHP-required values.
 
 ### 2. Encryption And Secret Handling
 
@@ -149,7 +156,15 @@ Compatibility should be treated as successful only when:
 - Importing a complete Python-generated export through the PHP UI remains an
   open mutation test; run it against an isolated database before calling the
   reverse application-level round trip complete.
-- Add fixture-based checks for KeePass and CSV mappings where compatibility claims are made.
+- ✅ CSV, XML, and KeePass imports follow upstream PHP (`CsvImportBase`,
+  `KeepassImport`, master `9d0e169`): CSV/XML rows without a client or category
+  are rejected and reported, and KeePass entries get the `KeePass` client and a
+  category named after their parent group, including root-group entries
+  (previously uncategorized). A failing row is rolled back to a savepoint so
+  later rows still import. Python's header-based CSV and per-entry `client`
+  KeePass field remain Python conveniences, not PHP formats.
+- Add PHP-authored KeePass and CSV fixtures before claiming byte-level format
+  parity; the external KeePass fixture test still skips without `../phpSysPass`.
 
 ### 6. Runtime Configuration Compatibility
 
@@ -203,6 +218,8 @@ Compatibility should be treated as successful only when:
 - ✅ A separate MySQL 8 bootstrap job asserts all 27 physical tables and both
   canonical account views, checks that the views are queryable, and verifies
   bootstrap idempotence.
+- ✅ The MySQL job also runs API and import tests on a disposable database
+  bootstrapped from the canonical schema (`tests/test_mysql_account_references.py`).
 - The upstream-checkout freshness and external KeePass fixture checks skip
   when their external files are unavailable. Supply pinned fixtures before
   claiming that those checks run in every CI build.

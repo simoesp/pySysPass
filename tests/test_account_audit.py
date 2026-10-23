@@ -2,7 +2,7 @@
 import pytest
 
 from app.models.account import EventLog, User
-from app.schemas.account import AccountCreate
+from tests.account_refs import account_create
 from app.services.account_service import AccountService
 from app.services.account_audit_service import AccountAuditService, account_marker
 from app.services.auth_service import get_password_hash
@@ -10,7 +10,7 @@ from app.services.auth_service import get_password_hash
 
 def _account(db_session, encryption_service, user, title="Secret"):
     return AccountService(db_session, encryption_service).create_account(
-        AccountCreate(title=title, password="pass", is_public=True), user.id,
+        account_create(title=title, password="pass", is_public=True), user.id,
     )
 
 

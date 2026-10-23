@@ -4,7 +4,7 @@ from typing import List
 
 from app.db.base import get_db
 from app.schemas.client import ClientCreate, ClientResponse, ClientUpdate
-from app.services.category_service import ClientService
+from app.services.category_service import ClientService, ItemInUseError
 from app.api.deps import get_current_user, require_permission
 
 router = APIRouter()
@@ -58,6 +58,10 @@ async def delete_client(
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('mgm_customers')),
 ):
-    if not ClientService(db).delete_client(client_id):
+    try:
+        deleted = ClientService(db).delete_client(client_id)
+    except ItemInUseError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    if not deleted:
         raise HTTPException(status_code=404, detail="Client not found")
     return None

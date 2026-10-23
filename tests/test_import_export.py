@@ -192,8 +192,8 @@ def test_php_native_protected_xml_round_trip(db_session, test_user):
     stats = importer.import_accounts(parsed)
     assert stats == {"success": 1, "failed": 0, "skipped": 0}
     imported = db_session.query(Account).one()
-    assert db_session.query(Category).one().hash == make_item_hash(category_name)
-    assert db_session.query(Client).one().hash == make_item_hash(client_name)
+    assert db_session.query(Category).filter_by(name=category_name).one().hash == make_item_hash(category_name)
+    assert db_session.query(Client).filter_by(name=client_name).one().hash == make_item_hash(client_name)
     assert db_session.query(Tag).one().hash == make_item_hash(tag_name)
     assert decrypt_with_password(
         imported.pass_.decode("ascii"),

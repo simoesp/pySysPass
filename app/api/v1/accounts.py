@@ -6,7 +6,7 @@ from app.schemas.account import (
     AccountCreate, AccountResponse, AccountUpdate, PasswordResponse,
     SharedUserInfo, SharedGroupInfo, AccountAuditEntry,
 )
-from app.services.account_service import AccountService
+from app.services.account_service import AccountService, AccountValidationError
 from app.services.account_audit_service import AccountAuditService
 from app.core.security import get_encryption_service
 from app.api.deps import (
@@ -100,8 +100,9 @@ async def create_account(
         return AccountService(db, get_encryption_service()).create_account(
             account, current_user["id"], master_pass=current_user.get("master_pass")
         )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except AccountValidationError as e:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(e))
 
 
 @router.get("/accounts/{account_id}/audit", response_model=List[AccountAuditEntry])
@@ -163,9 +164,13 @@ async def update_account(
         enforce_permissions(
             current_user, db, "acc_permission", account_admin=True
         )
-    result = AccountService(db, get_encryption_service()).update_account(
-        account_id, account, current_user["id"], master_pass=current_user.get("master_pass")
-    )
+    try:
+        result = AccountService(db, get_encryption_service()).update_account(
+            account_id, account, current_user["id"], master_pass=current_user.get("master_pass")
+        )
+    except AccountValidationError as e:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(e))
     if not result:
         raise HTTPException(status_code=404, detail="Account not found")
     # account.edit is recorded by the global audit middleware (with the

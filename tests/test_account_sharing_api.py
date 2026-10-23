@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 from app.api.v1 import account_sharing
 from app.db.base import get_db
 from app.models.account import User, UserGroup, UserToUserGroup
-from app.schemas.account import AccountCreate
+from tests.account_refs import account_create
 from app.services.account_service import AccountService
 from app.services.auth_service import create_access_token, get_password_hash
 
@@ -56,7 +56,7 @@ def test_account_sharing_api_requires_authentication(db_session, encryption_serv
     target_group = _make_group(db_session, "Target Group")
     target = _make_user(db_session, "share-target", target_group.id)
     account = AccountService(db_session, encryption_service).create_account(
-        AccountCreate(title="Protected Sharing", password="secret123", is_public=True),
+        account_create(title="Protected Sharing", password="secret123", is_public=True),
         test_user.id,
     )
 
@@ -73,7 +73,7 @@ def test_account_sharing_api_only_owner_can_share_account(db_session, encryption
     outsider = _make_user(db_session, "outsider-share", other_group.id)
     target = _make_user(db_session, "target-share", other_group.id)
     account = AccountService(db_session, encryption_service).create_account(
-        AccountCreate(title="Owner Controlled", password="secret123", is_public=True),
+        account_create(title="Owner Controlled", password="secret123", is_public=True),
         test_user.id,
     )
 
@@ -95,7 +95,7 @@ def test_account_sharing_api_owner_can_list_shared_users(db_session, encryption_
     target = _make_user(db_session, "listed-user", target_group.id)
     service = AccountService(db_session, encryption_service)
     account = service.create_account(
-        AccountCreate(
+        account_create(
             title="Share Listing",
             password="secret123",
             is_public=True,
@@ -124,7 +124,7 @@ def test_account_sharing_api_non_owner_cannot_list_shared_users(db_session, encr
     outsider = _make_user(db_session, "outsider-list", outsider_group.id)
     service = AccountService(db_session, encryption_service)
     account = service.create_account(
-        AccountCreate(
+        account_create(
             title="Hidden Share List",
             password="secret123",
             is_public=True,
@@ -150,7 +150,7 @@ def test_account_sharing_api_user_shared_accounts_are_self_only(db_session, encr
     viewer = _make_user(db_session, "viewer-self", target_group.id)
     service = AccountService(db_session, encryption_service)
     account = service.create_account(
-        AccountCreate(
+        account_create(
             title="Shared Self",
             password="secret123",
             is_public=True,
@@ -185,7 +185,7 @@ def test_account_sharing_api_group_accounts_require_membership(db_session, encry
 
     service = AccountService(db_session, encryption_service)
     account = service.create_account(
-        AccountCreate(
+        account_create(
             title="Group Visible",
             password="secret123",
             is_public=True,

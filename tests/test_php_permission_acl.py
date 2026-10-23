@@ -7,7 +7,7 @@ from app.api.deps import require_permission
 from app.api.v1 import accounts, custom_fields, import_export
 from app.core.security import get_encryption_service
 from app.db.base import get_db
-from app.schemas.account import AccountCreate
+from tests.account_refs import TEST_CATEGORY_ID, TEST_CLIENT_ID, account_create
 from app.schemas.user_profile import ProfilePermissions
 from app.models.account import User, UserGroup
 from app.models.custom_field import CustomFieldDef, CustomFieldType, CustomFieldValue
@@ -116,7 +116,10 @@ def test_php_account_view_accepts_view_or_edit_permission(db_session, test_user)
 def test_php_account_create_and_private_capabilities_are_separate(db_session, test_user):
     client = _client(db_session)
     headers = _headers(test_user)
-    payload = {"title": "Capability test", "password": "secret", "is_public": True}
+    payload = {
+        "title": "Capability test", "password": "secret", "is_public": True,
+        "client_id": TEST_CLIENT_ID, "category_id": TEST_CATEGORY_ID,
+    }
 
     _set_permissions(db_session, test_user, acc_view=True)
     assert client.post("/api/v1/accounts", json=payload, headers=headers).status_code == 403
@@ -133,7 +136,7 @@ def test_php_account_create_and_private_capabilities_are_separate(db_session, te
 
 def test_php_password_permissions_are_independent_from_account_edit(db_session, test_user):
     account = AccountService(db_session, get_encryption_service()).create_account(
-        AccountCreate(title="Protected password", password="secret", is_public=True),
+        account_create(title="Protected password", password="secret", is_public=True),
         test_user.id,
     )
     client = _client(db_session)
@@ -169,7 +172,7 @@ def test_php_password_permissions_are_independent_from_account_edit(db_session, 
 def test_account_custom_fields_inherit_profile_and_object_acl(db_session, test_user):
     account_service = AccountService(db_session, get_encryption_service())
     own_account = account_service.create_account(
-        AccountCreate(title="Custom fields owner", password="secret", is_public=True),
+        account_create(title="Custom fields owner", password="secret", is_public=True),
         test_user.id,
     )
     other_group = UserGroup(name="Custom field outsiders")
@@ -184,7 +187,7 @@ def test_account_custom_fields_inherit_profile_and_object_acl(db_session, test_u
     db_session.add(other_user)
     db_session.flush()
     hidden_account = account_service.create_account(
-        AccountCreate(title="Hidden custom fields", password="secret", is_public=True),
+        account_create(title="Hidden custom fields", password="secret", is_public=True),
         other_user.id,
     )
     field_type = CustomFieldType(id=1, name="text", text="Text")

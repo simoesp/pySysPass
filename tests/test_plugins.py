@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from app.core.security import EncryptionService
-from app.schemas.account import AccountCreate
+from tests.account_refs import account_create
 from app.services.account_service import AccountService
 from app.services.plugin_service import PLATFORM_HOOKS, PluginService
 
@@ -122,7 +122,7 @@ def test_account_service_emits_plugin_hook(db_session, tmp_path, monkeypatch):
 
     service = AccountService(db_session, EncryptionService("test-encryption-key-32bytes!!"))
     account = service.create_account(
-        AccountCreate(
+        account_create(
             title="Plugin Test",
             login="plugin-user",
             password="secret123",

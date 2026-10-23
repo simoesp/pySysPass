@@ -23,10 +23,6 @@ ORM_VIEWS = {"account_data_v", "account_search_v"}
 
 KNOWN_PYTHON_ONLY_COLUMNS = {}
 KNOWN_NULLABILITY_DRIFT = {
-    "Account.clientId",
-    "Account.categoryId",
-    "AccountHistory.clientId",
-    "AccountHistory.categoryId",
     "User.id",
     "User.name",
     "User.userProfileId",

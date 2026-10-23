@@ -347,7 +347,7 @@
           </div>
           <q-input v-model="editForm.url" label="URL" outlined dense />
           <q-select v-model="editForm.category_id" :options="catOpts" option-label="name"
-            option-value="id" label="Category" outlined dense emit-value map-options clearable
+            option-value="id" label="Category *" outlined dense emit-value map-options
             use-input hide-selected fill-input input-debounce="0" @filter="filterCats" />
           <!-- Tags -->
           <q-select v-model="editForm.tag_ids" :options="tagOpts" option-label="name" option-value="id"

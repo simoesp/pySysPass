@@ -4,7 +4,7 @@ from typing import List
 
 from app.db.base import get_db
 from app.schemas.category import CategoryCreate, CategoryResponse, CategoryUpdate
-from app.services.category_service import CategoryService
+from app.services.category_service import CategoryService, ItemInUseError
 from app.api.deps import get_current_user, require_permission
 
 router = APIRouter()
@@ -58,6 +58,10 @@ async def delete_category(
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('mgm_categories')),
 ):
-    if not CategoryService(db).delete_category(category_id):
+    try:
+        deleted = CategoryService(db).delete_category(category_id)
+    except ItemInUseError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    if not deleted:
         raise HTTPException(status_code=404, detail="Category not found")
     return None

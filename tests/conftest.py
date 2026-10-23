@@ -10,6 +10,7 @@ from app.models.account import User, UserGroup, UserProfile
 from app.schemas.user_profile import ProfilePermissions
 import secrets
 
+from tests.account_refs import add_reference_rows
 from tests.seed_data import seed_demo_workspace
 
 # Test database (SQLite in-memory)
@@ -38,6 +39,7 @@ def _bootstrap_test_fixtures(db) -> UserGroup:
     group = UserGroup(id=1, name="Default Group", description="Test group")
     db.add(group)
     db.flush()
+    add_reference_rows(db)
     return group
 
 

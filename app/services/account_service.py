@@ -4,7 +4,7 @@ from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 from app.models.account import (
     Account, AccountHistory, AccountToTag, AccountToFavorite, AccountToUser, AccountToUserGroup,
-    User, UserGroup, UserToUserGroup
+    Category, Client, Tag, User, UserGroup, UserToUserGroup
 )
 from app.schemas.account import (
     AccountCreate, AccountUpdate, AccountResponse,
@@ -26,6 +26,10 @@ class ServiceResult(dict):
             return self[name]
         except KeyError as exc:
             raise AttributeError(name) from exc
+
+
+class AccountValidationError(ValueError):
+    """Request data references rows the PHP schema requires to exist."""
 
 
 class AccountService:
@@ -255,19 +259,52 @@ class AccountService:
                 ))
         return result
 
+    def _missing_ids(self, model, ids) -> List[int]:
+        wanted = set(ids)
+        if not wanted:
+            return []
+        found = {row[0] for row in self.db.query(model.id).filter(model.id.in_(wanted)).all()}
+        return sorted(wanted - found)
+
+    def _validate_references(
+        self,
+        client_id: Optional[int] = None,
+        category_id: Optional[int] = None,
+        tag_ids: Optional[List[int]] = None,
+        shared_users: Optional[List[SharedUserEntry]] = None,
+        shared_groups: Optional[List[SharedGroupEntry]] = None,
+    ) -> None:
+        """Reject references the canonical MySQL foreign keys would refuse.
+
+        Mirrors sysPass PHP AccountForm validation (client and category are
+        mandatory) and turns FK violations into validation errors instead of
+        database errors.
+        """
+        checks = (
+            ("client", Client, [client_id] if client_id is not None else []),
+            ("category", Category, [category_id] if category_id is not None else []),
+            ("tag", Tag, tag_ids or []),
+            ("user", User, [e.user_id for e in shared_users or []]),
+            ("user group", UserGroup, [e.group_id for e in shared_groups or []]),
+        )
+        for label, model, ids in checks:
+            missing = self._missing_ids(model, ids)
+            if missing:
+                raise AccountValidationError(f"Unknown {label} id: {', '.join(map(str, missing))}")
+
     def _sync_tags(self, account_id: int, tag_ids: List[int]):
         self.db.query(AccountToTag).filter(AccountToTag.accountId == account_id).delete()
-        for tid in tag_ids:
+        for tid in dict.fromkeys(tag_ids):
             self.db.add(AccountToTag(accountId=account_id, tagId=tid))
 
     def _sync_shared_users(self, account_id: int, entries: List[SharedUserEntry]):
         self.db.query(AccountToUser).filter(AccountToUser.accountId == account_id).delete()
-        for e in entries:
+        for e in {e.user_id: e for e in entries}.values():
             self.db.add(AccountToUser(accountId=account_id, userId=e.user_id, isEdit=e.is_edit))
 
     def _sync_shared_groups(self, account_id: int, entries: List[SharedGroupEntry]):
         self.db.query(AccountToUserGroup).filter(AccountToUserGroup.accountId == account_id).delete()
-        for e in entries:
+        for e in {e.group_id: e for e in entries}.values():
             self.db.add(AccountToUserGroup(accountId=account_id, userGroupId=e.group_id, isEdit=e.is_edit))
 
     def _to_response(self, account: Account, user_id: int, group_ids: Optional[Set[int]] = None) -> ServiceResult:
@@ -443,6 +480,9 @@ class AccountService:
     # ── Mutations ─────────────────────────────────────────────────────────
 
     def create_account(self, data: AccountCreate, user_id: int, master_pass: Optional[str] = None) -> dict:
+        self._validate_references(
+            data.client_id, data.category_id, data.tag_ids, data.shared_users, data.shared_groups
+        )
         plaintext = maybe_decrypt(data.password)
         user = self.db.query(User).filter(User.id == user_id).first()
         user_group_id = user.userGroupId if user else 1
@@ -497,6 +537,9 @@ class AccountService:
             return None
         if not self._can_edit_account(account, user_id, group_ids):
             return None
+        self._validate_references(
+            data.client_id, data.category_id, data.tag_ids, data.shared_users, data.shared_groups
+        )
 
         # sysPass PHP saves the complete pre-update account state in the same
         # transaction, so password and metadata changes can be restored.

@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 from app.api.v1 import accounts
 from app.db.base import get_db
 from app.models.account import User, UserGroup
-from app.schemas.account import AccountCreate
+from tests.account_refs import account_create
 from app.services.account_service import AccountService
 from app.services.auth_service import create_access_token, get_password_hash
 
@@ -57,7 +57,7 @@ def test_accounts_api_shared_user_view_only_cannot_update(db_session, encryption
     viewer = _make_user(db_session, "api-viewer", viewer_group.id)
     service = AccountService(db_session, encryption_service)
     account = service.create_account(
-        AccountCreate(
+        account_create(
             title="API Shared",
             password="secret123",
             is_public=True,
@@ -88,7 +88,7 @@ def test_accounts_api_owner_can_grant_and_revoke_user_acl(db_session, encryption
     viewer = _make_user(db_session, "acl-target", other_group.id)
     service = AccountService(db_session, encryption_service)
     account = service.create_account(
-        AccountCreate(title="ACL Route", password="secret123", is_public=True),
+        account_create(title="ACL Route", password="secret123", is_public=True),
         test_user.id,
     )
 
@@ -127,7 +127,7 @@ def test_accounts_api_non_owner_cannot_manage_user_acl(db_session, encryption_se
     target = _make_user(db_session, "target-api", 1)
     service = AccountService(db_session, encryption_service)
     account = service.create_account(
-        AccountCreate(title="Owner Only ACL", password="secret123", is_public=True),
+        account_create(title="Owner Only ACL", password="secret123", is_public=True),
         test_user.id,
     )
 
@@ -150,7 +150,7 @@ def test_accounts_api_group_acl_grant_allows_group_member_visibility(db_session,
 
     service = AccountService(db_session, encryption_service)
     account = service.create_account(
-        AccountCreate(title="Group ACL API", password="secret123", is_public=True),
+        account_create(title="Group ACL API", password="secret123", is_public=True),
         test_user.id,
     )
 

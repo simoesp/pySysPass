@@ -1,5 +1,6 @@
 from app.models.account import AccountToUser, AccountToUserGroup, Config, User, UserGroup, UserToUserGroup
-from app.schemas.account import AccountCreate, AccountUpdate
+from app.schemas.account import AccountUpdate
+from tests.account_refs import account_create
 from app.services.account_service import AccountService
 from app.services.auth_service import get_password_hash
 
@@ -31,7 +32,7 @@ def test_shared_user_can_view_and_edit_when_acl_allows(db_session, encryption_se
     service = AccountService(db_session, encryption_service)
 
     account = service.create_account(
-        AccountCreate(
+        account_create(
             title="Shared Account",
             password="secret123",
             is_public=True,
@@ -60,7 +61,7 @@ def test_secondary_group_share_requires_php_full_group_access(db_session, encryp
 
     service = AccountService(db_session, encryption_service)
     account = service.create_account(
-        AccountCreate(
+        account_create(
             title="Group Shared",
             password="secret123",
             is_public=True,
@@ -83,7 +84,7 @@ def test_secondary_group_share_requires_php_full_group_access(db_session, encryp
 def test_owner_flags_and_pass_date_change_round_trip(db_session, encryption_service, test_user):
     service = AccountService(db_session, encryption_service)
     account = service.create_account(
-        AccountCreate(
+        account_create(
             title="Flags",
             password="secret123",
             is_public=False,
@@ -108,7 +109,7 @@ def test_shared_user_with_view_access_cannot_edit(db_session, encryption_service
     service = AccountService(db_session, encryption_service)
 
     account = service.create_account(
-        AccountCreate(
+        account_create(
             title="View Only Account",
             password="secret123",
             is_public=True,
@@ -131,7 +132,7 @@ def test_remove_user_access_revokes_visibility_for_unrelated_user(db_session, en
     service = AccountService(db_session, encryption_service)
 
     account = service.create_account(
-        AccountCreate(title="Temporary Share", password="secret123", is_public=True),
+        account_create(title="Temporary Share", password="secret123", is_public=True),
         test_user.id,
     )
 
@@ -147,7 +148,7 @@ def test_primary_group_member_can_edit_like_php_acl(db_session, encryption_servi
     service = AccountService(db_session, encryption_service)
 
     account = service.create_account(
-        AccountCreate(
+        account_create(
             title="Group Editable",
             password="secret123",
             is_public=True,
@@ -172,11 +173,11 @@ def test_admin_sees_and_edits_all_accounts_like_php(db_session, encryption_servi
 
     service = AccountService(db_session, encryption_service)
     account = service.create_account(
-        AccountCreate(title="Unshared Account", password="secret123", is_public=True),
+        account_create(title="Unshared Account", password="secret123", is_public=True),
         test_user.id,
     )
     private = service.create_account(
-        AccountCreate(title="Private Account", password="secret123", is_public=False),
+        account_create(title="Private Account", password="secret123", is_public=False),
         test_user.id,
     )
 
@@ -203,7 +204,7 @@ def test_group_access_grant_and_revoke_controls_visibility(db_session, encryptio
 
     service = AccountService(db_session, encryption_service)
     account = service.create_account(
-        AccountCreate(title="Group Grant", password="secret123", is_public=True),
+        account_create(title="Group Grant", password="secret123", is_public=True),
         test_user.id,
     )
 
@@ -225,7 +226,7 @@ def test_global_search_permission_widens_visibility(db_session, encryption_servi
 
     service = AccountService(db_session, encryption_service)
     service.create_account(
-        AccountCreate(title="Owner Only", password="pass", is_public=True), test_user.id,
+        account_create(title="Owner Only", password="pass", is_public=True), test_user.id,
     )
 
     profile = UserProfileService(db_session).create_user_profile(UserProfileCreate(
@@ -258,7 +259,7 @@ def test_view_only_user_share_short_circuits_group_edit(db_session, encryption_s
 
     service = AccountService(db_session, encryption_service)
     account = service.create_account(
-        AccountCreate(title="Shared", password="pass", is_public=True), test_user.id,
+        account_create(title="Shared", password="pass", is_public=True), test_user.id,
     )
     acc_row = db_session.query(Account).filter(Account.id == account.id).first()
 

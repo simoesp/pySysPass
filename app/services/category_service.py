@@ -1,7 +1,7 @@
 from typing import List, Optional
 import hashlib
 from sqlalchemy.orm import Session
-from app.models.account import Category, Client
+from app.models.account import Account, AccountHistory, Category, Client
 from app.schemas.category import CategoryCreate, CategoryUpdate
 from app.schemas.client import ClientCreate, ClientUpdate
 
@@ -10,6 +10,20 @@ def make_item_hash(name: str) -> bytes:
     # PHP sysPass persists this exact SHA-1 hex identifier in varbinary(40).
     # It is a lookup fingerprint, never a password or authenticity primitive.
     return hashlib.sha1(name.encode("utf-8"), usedforsecurity=False).hexdigest().encode("ascii")
+
+
+class ItemInUseError(ValueError):
+    """The canonical schema's RESTRICT foreign keys forbid this delete."""
+
+
+def _ensure_unreferenced(db: Session, column_name: str, item_id: int, label: str) -> None:
+    # PHP sysPass relies on fk_Account*_categoryId / fk_Account*_clientId
+    # (RESTRICT) to refuse deleting items that accounts or history still use.
+    # Without this check the ORM would null the child FKs instead.
+    for model in (Account, AccountHistory):
+        column = getattr(model, column_name)
+        if db.query(model.id).filter(column == item_id).first() is not None:
+            raise ItemInUseError(f"{label} is in use by accounts or account history")
 
 
 class CategoryService:
@@ -56,6 +70,7 @@ class CategoryService:
         category = self.get_category(category_id)
         if not category:
             return False
+        _ensure_unreferenced(self.db, "categoryId", category_id, "Category")
 
         self.db.delete(category)
         self.db.commit()
@@ -111,6 +126,7 @@ class ClientService:
         client = self.get_client(client_id)
         if not client:
             return False
+        _ensure_unreferenced(self.db, "clientId", client_id, "Client")
 
         self.db.delete(client)
         self.db.commit()

@@ -1,14 +1,15 @@
 import pytest
 
 from app.models.account import Account, AccountHistory, Config
-from app.schemas.account import AccountCreate, AccountUpdate
+from app.schemas.account import AccountUpdate
+from tests.account_refs import account_create
 from app.services.account_service import AccountService
 from app.services.history_service import HistoryService
 
 
 def _create_account(db_session, encryption_service, user, title="Test Account", password="secret"):
     return AccountService(db_session, encryption_service).create_account(
-        AccountCreate(title=title, password=password), user.id
+        account_create(title=title, password=password), user.id
     )
 
 
@@ -135,7 +136,7 @@ def test_history_api_returns_snapshots_to_shared_users(
     db_session.refresh(viewer)
 
     created = AccountService(db_session, encryption_service).create_account(
-        AccountCreate(
+        account_create(
             title="Shared History Version 1",
             password="secret",
             is_public=True,

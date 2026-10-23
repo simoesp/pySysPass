@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from app.db.base import get_db
 from app.api.v1 import accounts, categories
 from app.models.account import User
-from app.schemas.account import AccountCreate
+from tests.account_refs import account_create
 from app.services.account_service import AccountService
 from app.services.auth_token_service import AuthTokenService
 import app.core.security as core_security
@@ -32,7 +32,7 @@ def _auth(token):
 
 def test_account_search_token_lists_accounts(db_session, encryption_service, test_user, monkeypatch):
     AccountService(db_session, encryption_service).create_account(
-        AccountCreate(title="Token Visible", password="pass"), test_user.id,
+        account_create(title="Token Visible", password="pass"), test_user.id,
     )
     token = AuthTokenService(db_session).create_token(test_user.id, 3, test_user.id).token
 

@@ -244,3 +244,26 @@ processes, replacement failure, malformed input preservation, unknown document
 sections, and retention of the existing PHP password salt. The supplied Linux
 containers support these semantics; shared storage must support POSIX locking and
 atomic rename. This does not coordinate external writers that ignore the lock.
+
+R4 / #55 follow-up: account create requires `client_id` and `category_id`, matching
+upstream PHP `AccountForm::checkCommon()` and the canonical `NOT NULL` foreign keys.
+Missing, zero, or unknown client/category/tag/user/group IDs and values longer than
+the PHP columns (name 100, login 50, URL 255 characters; notes 65,535 UTF-8 bytes)
+return 422 before any write. Updates validate the same way and leave the account and
+its history unchanged. The ORM now declares these columns `NOT NULL`, removing four
+nullability parity exceptions, so SQLite tests enforce the PHP rule too. Deleting a
+client or category still referenced by an account or history row returns 409 instead
+of silently nulling references. CSV and XML imports reject rows without both a client
+and a category; KeePass imports use PHP's `KeePass` client and parent-group category,
+including entries in the root group. Each import row runs in a savepoint, so one
+database error no longer aborts the rest of the import. The account form marks both
+fields as required.
+
+Validation: 328 backend tests passed, 6 skipped (the two external PHP fixtures plus
+four MySQL tests that need a server). The four MySQL tests passed against a disposable
+MySQL 8.0.46 database bootstrapped from `schemas/dbstructure.sql`; against the
+previous code they reproduced error 1048 (`clientId` cannot be null) as HTTP 500.
+CI's MySQL job now runs them. Frontend tests (22) and build passed; lint has no
+errors (523 existing warnings). Ruff and Bandit passed. Remaining limitations: CRUD
+coverage on MySQL is limited to the account-reference paths above, not the full API;
+the remaining `User`/`UserGroup`/`UserProfile` nullability exceptions are unchanged.

@@ -1,6 +1,6 @@
 import pytest
 from app.services.public_link_service import PublicLinkService
-from app.schemas.account import AccountCreate
+from tests.account_refs import account_create
 from app.services.account_service import AccountService
 
 @pytest.mark.asyncio
@@ -9,7 +9,7 @@ async def test_create_public_link(db_session, encryption_service, test_user):
 
     account_service = AccountService(db_session, encryption_service)
     account = account_service.create_account(
-        AccountCreate(title="Test Account", password="secret"),
+        account_create(title="Test Account", password="secret"),
         test_user.id
     )
 
@@ -30,7 +30,7 @@ async def test_create_public_link_with_password(db_session, encryption_service, 
 
     account_service = AccountService(db_session, encryption_service)
     account = account_service.create_account(
-        AccountCreate(title="Test Account", password="secret"),
+        account_create(title="Test Account", password="secret"),
         test_user.id
     )
 
@@ -49,7 +49,7 @@ async def test_create_public_link_with_expiration(db_session, encryption_service
 
     account_service = AccountService(db_session, encryption_service)
     account = account_service.create_account(
-        AccountCreate(title="Test Account", password="secret"),
+        account_create(title="Test Account", password="secret"),
         test_user.id
     )
 
@@ -68,7 +68,7 @@ async def test_get_public_links_for_account(db_session, encryption_service, test
 
     account_service = AccountService(db_session, encryption_service)
     account = account_service.create_account(
-        AccountCreate(title="Test Account", password="secret"),
+        account_create(title="Test Account", password="secret"),
         test_user.id
     )
 
@@ -86,7 +86,7 @@ async def test_account_can_only_have_one_public_link(db_session, encryption_serv
     """Match the PHP uk_PublicLink_02 unique constraint on itemId."""
 
     account = AccountService(db_session, encryption_service).create_account(
-        AccountCreate(title="Test Account", password="secret"),
+        account_create(title="Test Account", password="secret"),
         test_user.id,
     )
     service = PublicLinkService(db_session)
@@ -101,7 +101,7 @@ async def test_get_public_link_by_hash(db_session, encryption_service, test_user
 
     account_service = AccountService(db_session, encryption_service)
     account = account_service.create_account(
-        AccountCreate(title="Test Account", password="secret"),
+        account_create(title="Test Account", password="secret"),
         test_user.id
     )
 
@@ -124,7 +124,7 @@ async def test_public_link_requires_correct_password(db_session, encryption_serv
 
     account_service = AccountService(db_session, encryption_service)
     account = account_service.create_account(
-        AccountCreate(title="Test Account", password="secret"),
+        account_create(title="Test Account", password="secret"),
         test_user.id
     )
 
@@ -149,7 +149,7 @@ async def test_cannot_access_public_link_without_password(db_session, encryption
 
     account_service = AccountService(db_session, encryption_service)
     account = account_service.create_account(
-        AccountCreate(title="Test Account", password="secret"),
+        account_create(title="Test Account", password="secret"),
         test_user.id
     )
 
@@ -170,7 +170,7 @@ async def test_delete_public_link(db_session, encryption_service, test_user):
 
     account_service = AccountService(db_session, encryption_service)
     account = account_service.create_account(
-        AccountCreate(title="Test Account", password="secret"),
+        account_create(title="Test Account", password="secret"),
         test_user.id
     )
 
@@ -219,7 +219,7 @@ async def test_cannot_access_others_public_links(db_session, encryption_service,
 
     account_service = AccountService(db_session, encryption_service)
     account = account_service.create_account(
-        AccountCreate(title="Private Account", password="secret"),
+        account_create(title="Private Account", password="secret"),
         test_user.id
     )
 
@@ -249,7 +249,7 @@ def test_public_link_routes_are_registered():
 def test_php_public_link_view_limit_and_counters(db_session, encryption_service, test_user, limit):
 
     account = AccountService(db_session, encryption_service).create_account(
-        AccountCreate(title='View limit', password='test-only'), test_user.id,
+        account_create(title='View limit', password='test-only'), test_user.id,
     )
     service = PublicLinkService(db_session)
     link = service.create_public_link(account.id, test_user.id)
@@ -269,7 +269,7 @@ def test_php_public_link_expiration_boundary(db_session, encryption_service, tes
 
     monkeypatch.setattr('app.services.public_link_service.time.time', lambda: 2000000000)
     account = AccountService(db_session, encryption_service).create_account(
-        AccountCreate(title='Expiry', password='test-only'), test_user.id,
+        account_create(title='Expiry', password='test-only'), test_user.id,
     )
     service = PublicLinkService(db_session)
     link = service.create_public_link(account.id, test_user.id)
@@ -281,7 +281,7 @@ def test_php_public_link_expiration_boundary(db_session, encryption_service, tes
 def test_rejected_link_password_does_not_consume_view(db_session, encryption_service, test_user):
 
     account = AccountService(db_session, encryption_service).create_account(
-        AccountCreate(title='Protected limit', password='test-only'), test_user.id,
+        account_create(title='Protected limit', password='test-only'), test_user.id,
     )
     service = PublicLinkService(db_session)
     link = service.create_public_link(account.id, test_user.id, password='link-password')

@@ -11,6 +11,7 @@ from app.models.account import (
     UserToUserGroup,
 )
 from app.services.account_service import AccountService
+from tests.account_refs import TEST_CATEGORY_ID, TEST_CLIENT_ID
 
 
 FIXTURE_PATH = Path(__file__).parents[1] / "fixtures" / "php_syspass_3211_acl.json"
@@ -63,6 +64,7 @@ def _seed_php_acl_fixture(db_session, fixture: dict) -> dict[str, User]:
                 key=b"fixture",
                 isPrivate=account_id in private_ids,
                 isPrivateGroup=account_id in private_group_ids,
+                clientId=TEST_CLIENT_ID, categoryId=TEST_CATEGORY_ID,
             )
         )
     db_session.flush()
