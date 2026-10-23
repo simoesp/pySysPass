@@ -31,7 +31,7 @@ def _seed_php_acl_fixture(db_session, fixture: dict) -> dict[str, User]:
     for user_id, login, primary_group_id, secondary_group_id in fixture["users"]:
         user = User(
             id=user_id,
-            username=login,
+            name=login, hashSalt=b"s" * 32, username=login,
             password=b"fixture",
             userGroupId=primary_group_id,
             userProfileId=1,

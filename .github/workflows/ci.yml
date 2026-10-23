@@ -94,6 +94,36 @@ jobs:
           --source=/repo --config=/repo/.gitleaks.toml
           --gitleaks-ignore-path=/repo/.gitleaksignore --redact
 
+  backend-tests-mysql:
+    name: Backend tests on canonical MySQL 8
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b
+        env:
+          MYSQL_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install --require-hashes -r requirements.lock
+      - run: pip install -r requirements-dev.txt
+      # The whole suite against a disposable database bootstrapped from
+      # schemas/dbstructure.sql, so NOT NULL columns, foreign keys, strict
+      # lengths and InnoDB transactions apply as in a PHP-created database.
+      - name: Run every backend test on MySQL
+        env:
+          PYSYSPASS_SUITE_MYSQL_URL: "mysql+pymysql://root:root@127.0.0.1:3306/"
+          PYSYSPASS_MYSQL_TEST_URL: "mysql+pymysql://root:root@127.0.0.1:3306/"
+        run: python -m pytest tests/ -q -rs
+
   compat-php-reverse:
     name: PHP reads Python writes (sysPass 9d0e169)
     runs-on: ubuntu-latest

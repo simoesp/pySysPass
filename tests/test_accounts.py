@@ -114,7 +114,7 @@ async def test_account_access_is_scoped_to_owner(db_session, encryption_service,
     from app.services.auth_service import get_password_hash
 
     other_user = User(
-        username="otheruser",
+        name="otheruser", userProfileId=1, hashSalt=b"s" * 32, username="otheruser",
         email="other@example.com",
         password=get_password_hash("testpassword"),
         isUserAdmin=False,
@@ -240,11 +240,12 @@ async def test_get_accounts_filters_and_count(db_session, encryption_service, te
 
 @pytest.mark.asyncio
 async def test_count_accounts_is_scoped_to_user(db_session, encryption_service, test_user):
-    from app.models.account import User
+    from app.models.account import User, UserGroup
     from app.services.auth_service import get_password_hash
 
+    db_session.add(UserGroup(id=99, name="Counters"))
     other_user = User(
-        username="counter",
+        name="counter", userProfileId=1, hashSalt=b"s" * 32, username="counter",
         email="counter@example.com",
         password=get_password_hash("testpassword"),
         isUserAdmin=False,

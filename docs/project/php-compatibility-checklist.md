@@ -68,9 +68,14 @@ Compatibility should be treated as successful only when:
   still used by an account or history row returns 409 (PHP's FKs restrict it;
   the ORM previously nulled the references). Verified on MySQL 8.0.46 by
   `tests/test_mysql_account_references.py`, which also runs in CI.
-- Remaining nullability exceptions (`User.name`, `User.userProfileId`,
-  `User.hashSalt`, and the `id` columns of `User`, `UserGroup`, `UserProfile`)
-  still need fixtures that supply PHP-required values.
+- ✅ `User.name`, `User.userProfileId`, and `User.hashSalt` are `NOT NULL` in
+  the ORM, as in PHP, and their parity exceptions are gone. Only the `id`
+  columns of `User`, `UserGroup`, and `UserProfile` remain listed; they are
+  assigned explicitly, as in PHP.
+- ✅ The entire backend suite also runs on MySQL 8, against a database
+  bootstrapped from `schemas/dbstructure.sql` (`PYSYSPASS_SUITE_MYSQL_URL`, CI
+  job "Backend tests on canonical MySQL 8"). Real foreign keys, `NOT NULL`
+  columns, and strict lengths therefore apply to every test.
 
 ### 2. Encryption And Secret Handling
 

@@ -7,7 +7,7 @@ from app.services.auth_service import get_password_hash
 
 def create_user(db_session, username, email, group_id):
     user = User(
-        username=username,
+        name=username, userProfileId=1, hashSalt=b"s" * 32, username=username,
         email=email,
         password=get_password_hash("testpassword"),
         isUserAdmin=False,
@@ -241,6 +241,7 @@ def test_global_search_permission_widens_visibility(db_session, encryption_servi
     profile = UserProfileService(db_session).create_user_profile(UserProfileCreate(
         name="Searcher", permissions=ProfilePermissions(acc_global_search=True),
     ))
+    db_session.add(UserGroup(id=99, name="Searchers"))
     outsider = create_user(db_session, "searcher", "searcher@example.com", 99)
     outsider.userProfileId = profile["id"]
     db_session.commit()
@@ -255,8 +256,11 @@ def test_global_search_permission_widens_visibility(db_session, encryption_servi
         runtime_json_config.set_runtime_config_value("global_search", "true")
         assert AccountService(db_session, encryption_service).count_accounts(outsider.id) == 1
 
-        # Config on, no permission: still filtered
-        outsider.userProfileId = None
+        # Config on, no permission: still filtered (PHP requires a profile)
+        plain = UserProfileService(db_session).create_user_profile(UserProfileCreate(
+            name="Plain", permissions=ProfilePermissions(acc_global_search=False),
+        ))
+        outsider.userProfileId = plain["id"]
         db_session.commit()
         assert AccountService(db_session, encryption_service).count_accounts(outsider.id) == 0
     finally:

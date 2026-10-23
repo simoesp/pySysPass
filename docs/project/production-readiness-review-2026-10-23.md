@@ -474,3 +474,19 @@ sign-in with TOTP and a single-use recovery code. The byte test caught a real ty
 mismatch: PHP stores `twofaEnabled` as an int. CI's PHP job now covers the plugin.
 Remaining: legacy pySysPass 2FA rows are read but not converted; PHP's expiry warnings are
 not shown; the round trips use PHP class libraries rather than the PHP web UI.
+
+R16 / #65 second follow-up (full MySQL suite): every backend test can now run on MySQL 8
+against a disposable database bootstrapped from `schemas/dbstructure.sql`, rather than ORM
+metadata on SQLite. `tests/conftest.py` switches on `PYSYSPASS_SUITE_MYSQL_URL` and resets
+the tables between tests. A new CI job runs the full suite this way, together with the
+dedicated MySQL tests. The first run found 51 tests whose data the canonical schema rejects:
+users without the PHP-required name, profile, or salt; groups, users, and custom-field types
+that did not exist; and a test that set a user's profile to NULL. The application's own
+creation paths already set these values. With the test data fixed, the ORM now declares
+`User.name`, `User.userProfileId`, and `User.hashSalt` `NOT NULL` like PHP, removing three
+more nullability exceptions.
+
+Validation: 390 passed, 12 skipped on MySQL 8.0.46 (6 min 53 s) and on SQLite. The skips
+are the 2 external PHP fixtures plus 10 tests that need the PHP runtime or a dedicated
+MySQL URL; both run in CI. This is full-suite coverage on MySQL, not new endpoint coverage:
+routes without tests are still untested on either database.

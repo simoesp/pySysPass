@@ -123,7 +123,7 @@ def test_history_api_returns_snapshots_to_shared_users(
     from app.services.auth_service import issue_session_token, get_password_hash
 
     viewer = User(
-        username="history-viewer",
+        name="history-viewer", username="history-viewer",
         email="history-viewer@example.com",
         password=get_password_hash("testpassword"),
         isUserAdmin=False,
@@ -207,7 +207,7 @@ async def test_history_visibility_follows_snapshot_group(
     history.create_snapshot(acc_row, is_modify=True)  # snapshot from group-21 era
 
     viewer = User(
-        username="era-b-viewer", email="erab@example.com",
+        name="era-b-viewer", userProfileId=1, hashSalt=b"s" * 32, username="era-b-viewer", email="erab@example.com",
         password=get_password_hash("x"), userGroupId=21,
     )
     db_session.add(viewer)

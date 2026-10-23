@@ -78,9 +78,9 @@ def test_disabled_user_token_rejected(db_session, encryption_service, test_user,
     assert client.get("/api/v1/accounts", headers=_auth(token)).status_code == 401
 
 
-def test_list_tokens_omits_secret_but_create_reveals_it(db_session):
+def test_list_tokens_omits_secret_but_create_reveals_it(db_session, test_user):
     svc = AuthTokenService(db_session)
-    created = svc.create_token(1, 3, 1)
+    created = svc.create_token(test_user.id, 3, test_user.id)
     assert created.token and len(created.token) == 64      # revealed on create
 
     regenerated = svc.regenerate_token(created.id)

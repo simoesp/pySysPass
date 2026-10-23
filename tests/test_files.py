@@ -189,7 +189,7 @@ async def test_cannot_access_others_files(db_session, encryption_service, test_u
 
     # Create another user
     other_user = User(
-        username="otheruser",
+        name="otheruser", userProfileId=1, hashSalt=b"s" * 32, username="otheruser",
         email="other@example.com",
         password=get_password_hash("password"),
         isUserAdmin=False,

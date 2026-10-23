@@ -98,7 +98,11 @@ def test_audit_endpoint_records_and_gates_access(db_session, encryption_service,
     assert audit.json()[0]["username"] == test_user.username
 
     # An outsider (different user, no group/share) is refused
-    outsider = User(username="outsider", email="o@x", password=get_password_hash("x"), userGroupId=99)
+    from app.models.account import UserGroup
+
+    db_session.add(UserGroup(id=99, name="Outsiders"))
+    outsider = User(name="outsider", userProfileId=1, hashSalt=b"s" * 32, username="outsider", email="o@x",
+                    password=get_password_hash("x"), userGroupId=99)
     db_session.add(outsider)
     db_session.commit()
     db_session.refresh(outsider)

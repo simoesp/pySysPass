@@ -10,7 +10,7 @@ from app.api.v1 import auth
 from app.core.defuse_compat import decrypt_account_pass, encrypt_account_pass
 from app.db.base import get_db
 from app.models.account import Account, AccountHistory, Config, User
-from app.models.custom_field import CustomFieldDef, CustomFieldValue
+from app.models.custom_field import CustomFieldDef, CustomFieldType, CustomFieldValue
 from app.services.auth_service import (
     hash_master_key, issue_session_token, store_user_master_pass, verify_master_password_hash,
 )
@@ -51,6 +51,8 @@ def php_vault(db_session, test_user, tmp_path, monkeypatch):
                        clientId=TEST_CLIENT_ID, categoryId=TEST_CATEGORY_ID, name="old", notes="",
                        pass_=b"older", key=b"older", mPassHash=b"$2y$10$older-master-hash"),
     ])
+    db_session.add(CustomFieldType(id=1, name="password", text="Password"))
+    db_session.flush()
     definition = CustomFieldDef(name="PIN", moduleId=1, typeId=1, isEncrypted=True)
     db_session.add(definition)
     db_session.flush()

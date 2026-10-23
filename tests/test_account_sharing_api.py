@@ -38,7 +38,7 @@ def _make_group(db_session, name: str) -> UserGroup:
 
 def _make_user(db_session, username: str, group_id: int) -> User:
     user = User(
-        username=username,
+        name=username, username=username,
         email=f"{username}@example.com",
         password=get_password_hash("testpassword"),
         isUserAdmin=False,

@@ -21,7 +21,7 @@ PHP_CRYPTO_FIXTURE = Path(__file__).parent / "fixtures" / "php_syspass_3211_cryp
 PHP_KEEPASS_FIXTURE = Path("../phpSysPass/tests/res/import/data_keepass.xml")
 
 
-def test_keepass_export_generates_valid_string_entries(db_session):
+def test_keepass_export_generates_valid_string_entries(db_session, test_user):
     encryption = EncryptionService("test-encryption-key-32bytes!!")
     encrypted_password = encryption.encrypt("secret-pass").encode("utf-8")
     category = Category(id=1, name="Infrastructure", hash=make_item_hash("Infrastructure"))
@@ -32,8 +32,8 @@ def test_keepass_export_generates_valid_string_entries(db_session):
     account = Account(
         id=1,
         userGroupId=1,
-        userId=1,
-        userEditId=1,
+        userId=test_user.id,
+        userEditId=test_user.id,
         clientId=1,
         name="Demo Account",
         categoryId=1,

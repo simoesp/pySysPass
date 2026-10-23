@@ -176,7 +176,7 @@ def test_account_custom_fields_inherit_profile_and_object_acl(db_session, test_u
     db_session.add(other_group)
     db_session.flush()
     other_user = User(
-        username="custom-field-owner",
+        name="custom-field-owner", hashSalt=b"s" * 32, username="custom-field-owner",
         password=get_password_hash("testpassword"),
         userGroupId=other_group.id,
         userProfileId=1,
