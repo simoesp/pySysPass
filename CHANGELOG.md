@@ -25,6 +25,11 @@ Evidence for each item: `docs/project/production-readiness-review-2026-10-23.md`
   both are skipped. In-use clients and categories cannot be deleted (409).
 - After a master password change made in sysPass PHP, users must re-enter the
   master password at their next sign-in, as in PHP.
+- 2FA is stored in the sysPass Authenticator plugin's format, under the vault
+  master password; changing 2FA settings requires an unlocked vault. Users
+  enrolled by earlier pySysPass releases keep working, but PHP cannot read
+  their rows; have them disable and re-enable 2FA. Saving the 2FA mode once
+  moves it out of `Plugin.data`.
 - Production startup fails without explicit, non-sample `SECRET_KEY` and
   `ENCRYPTION_KEY`; `DEBUG` defaults to false.
 - `GET /api/v1/tags/{id}` now requires authentication.
@@ -42,7 +47,7 @@ Evidence for each item: `docs/project/production-readiness-review-2026-10-23.md`
 
 ### Changed
 - Credentials are always written as native sysPass Defuse ciphertext; public
-  links as native PHP Vaults.
+  links as native PHP Vaults; 2FA enrollments as PHP Authenticator plugin data.
 - Force HTTPS, maintenance mode and attachment limits are enforced server-side.
 - Logout, password changes (from either application) and 2FA changes revoke sessions.
 - Backups fail closed; runtime JSON config writes are locked and atomic.
