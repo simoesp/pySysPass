@@ -39,7 +39,10 @@ services:
       AUTO_INIT_DB_ON_STARTUP: ${AUTO_INIT_DB_ON_STARTUP:-true}
       DEBUG: ${DEBUG:-false}
       CORS_ORIGINS_FILE: /app/config/cors-origins.json
-      SYSPASS_RUNTIME_CONFIG_JSON_PATH: /app/config/runtime-config.json
+      SYSPASS_RUNTIME_CONFIG_JSON_PATH: /app/data/runtime-config.json
+    volumes:
+      - syspass_runtime_data:/app/data
+      - syspass_backup_data:/app/backups
     expose:
       - "8000"
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-proxy-headers
@@ -85,3 +88,5 @@ networks:
 
 volumes:
   syspass_mysql_data:
+  syspass_runtime_data:
+  syspass_backup_data:

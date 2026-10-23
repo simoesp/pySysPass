@@ -23,6 +23,7 @@ services:
       SYSPASS_RUNTIME_CONFIG_JSON_PATH: /app/data/runtime-config.json
     volumes:
       - pysyspass_runtime_data:/app/data
+      - pysyspass_backup_data:/app/backups
     expose:
       - "8000"
     healthcheck:
@@ -65,3 +66,4 @@ networks:
 
 volumes:
   pysyspass_runtime_data:
+  pysyspass_backup_data:

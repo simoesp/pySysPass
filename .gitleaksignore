@@ -1,0 +1,3 @@
+# Synthetic configuration regression: SECRET_KEY is a test parameter and the
+# encryption key is the constant expression "a" * 64, not a credential.
+4edd552871bb88ad996a24e5822af5f3e3f7decf:tests/test_production_security.py:generic-api-key:54

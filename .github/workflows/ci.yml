@@ -85,7 +85,8 @@ jobs:
       - run: >-
           docker run --rm -v "${{ github.workspace }}:/repo"
           zricethezav/gitleaks:latest detect
-          --source=/repo --config=/repo/.gitleaks.toml --redact
+          --source=/repo --config=/repo/.gitleaks.toml
+          --gitleaks-ignore-path=/repo/.gitleaksignore --redact
 
   compat-mysql:
     name: Schema bootstrap on MySQL 8 (PHP compatibility)
@@ -136,3 +137,16 @@ jobs:
                   c.execute(text(f"SELECT * FROM {view} LIMIT 0"))
           assert bootstrap_database(e) is False, "bootstrap must be idempotent"
           PY
+      - name: Build recovery container
+        run: docker build -t pysyspass-recovery:ci .
+      - name: Rehearse database and mounted runtime recovery
+        run: |
+          docker volume create recovery-ci-data
+          docker run --rm --network host \
+            -v recovery-ci-data:/app/data \
+            -e DATABASE_URL -e SQLALCHEMY_SCHEMA_GUARD -e DEBUG=false \
+            -e ALLOW_DISPOSABLE_RECOVERY_TEST=yes -e PYTHONPATH=/app \
+            pysyspass-recovery:ci python scripts/check-backup-recovery.py
+      - name: Remove recovery volume
+        if: always()
+        run: docker volume rm recovery-ci-data || true

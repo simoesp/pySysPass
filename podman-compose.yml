@@ -48,6 +48,7 @@ services:
       - ./app:/app/app:ro
       - ./tests:/app/tests:ro
       - runtime_data:/app/data
+      - backup_data:/app/backups
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 15s
@@ -123,3 +124,4 @@ networks:
 volumes:
   mysql_data:
   runtime_data:
+  backup_data:

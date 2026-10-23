@@ -25,3 +25,5 @@ This directory organizes the project documentation by topic so the main reposito
 
 - `AGENTS.md` remains at the repository root because it is used as a tooling instruction file rather than reader-facing project documentation.
 - The repository root is intentionally kept minimal. Reader-facing project documentation lives in this `docs/` tree, with `README.md` serving as the main entry point.
+
+- [Backup and offline recovery](backup-recovery.md)

@@ -39,12 +39,14 @@ async def list_backups(current_user=Depends(require_permission('config_backup'))
 
 
 @router.post("/create")
-async def create_backup(
+def create_backup(
     include_db: bool = True,
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_backup')),
 ):
-    """Trigger a new backup. Includes mysqldump if available."""
+    """Publish a backup only when all requested components succeed."""
+    if include_db and not settings.DATABASE_URL:
+        raise HTTPException(status_code=503, detail="Database backup requires DATABASE_URL")
     db_url = settings.DATABASE_URL if include_db else None
     try:
         result = _svc().create_full_backup(db_url=db_url, include_files=True)
@@ -68,15 +70,11 @@ async def restore_backup(
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_backup')),
 ):
-    """Restore a backup archive into the current runtime."""
-    _safe_path(filename)
-    try:
-        result = _svc().restore_backup(filename, db_url=settings.DATABASE_URL)
-        PluginService(db).call_plugin_hook("on_backup_restored", payload=result, actor_user_id=current_user.get("id"))
-        return result
-    except RuntimeError as exc:
-        logger.exception("Backup restore failed")
-        raise HTTPException(status_code=500, detail="Backup restore failed") from exc
+    """Recovery must run offline to avoid concurrent writes and cached keys."""
+    raise HTTPException(
+        status_code=409,
+        detail="Stop all application writers and use the offline restore command documented in the recovery guide.",
+    )
 
 
 @router.delete("/{filename}")

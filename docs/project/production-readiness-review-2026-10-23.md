@@ -214,3 +214,25 @@ Add observable failures and alerting, explicit background-job ownership, suitabl
 5. Exercise critical browser flows and representative concurrent load, including slow database/email/backup operations. Establish alerting and rollback procedures.
 
 The review covered source, configuration, local tests, dependency/secret scans, image builds, selected runtime probes, and canonical schema bootstrap. It did not certify an external deployment, conduct a live penetration test, test real SMTP/LDAP services, or establish capacity and disaster-recovery objectives. No production database was accessed.
+
+## Recovery implementation follow-up
+
+Draft PR #66 now addresses R2, R3, and R11: requested dumps fail closed,
+archives publish only after validation, dump/import clients ship in the backend,
+and all supplied stacks persist runtime state and archives. Web restore is blocked;
+the offline command stages files on the destination filesystem, preserves mounted
+directory roots, and attempts database/file rollback with retained recovery material
+when rollback fails. See [the recovery procedure](../backup-recovery.md), including
+migration of existing Portainer files and nontransactional SQL limitations.
+
+Validation: 313 backend tests passed, two external PHP fixture tests skipped;
+frontend production build passed. An actual MySQL 8 canonical-schema dump/import
+restored a changed Category row and a runtime file on a Docker named volume while
+preserving the mount root. CI now repeats this rehearsal. This small fixture does
+not establish production recovery time, application-wide PHP parity, or large-data
+recovery guarantees. Issues remain open until review and merge.
+
+The security gate has an exact historical-fingerprint exception for a synthetic
+key in a test; full-history scanning remains enabled. GitHub reported dependency
+alerts whose affected ranges exclude the versions in the current frontend lockfile;
+the alerts were not dismissed. The earlier dependency audit found no advisories.

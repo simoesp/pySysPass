@@ -231,3 +231,9 @@ fixture provenance, and snapshot/deletion behavior.
 Full public-link format parity remains incomplete: Python creation still
 writes the legacy format, and native writes plus live PHP UI round trips
 remain open. No encrypted payloads are migrated.
+
+
+Backup recovery follow-up: a MySQL 8 rehearsal restores the canonical schema and
+a Category row using container dump/import clients without adding schema fields.
+Mounted runtime files restore offline. This is recovery coverage, not proof of
+full PHP runtime or encrypted payload parity; external fixture skips remain.
