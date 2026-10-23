@@ -122,7 +122,7 @@ def _enroll_2fa(db_session, user, mode="enabled"):
     )
 
     TwoFactorConfig(db_session).set_mode(mode)
-    store = TwoFactorStore(db_session, get_encryption_service())
+    store = TwoFactorStore(db_session, get_encryption_service(), master_pass="vault-master")
     secret = TwoFactorService.generate_secret()
     store.start_setup(user.id, secret)
     store.enable(user.id, ["1111122222"])
@@ -179,7 +179,7 @@ def test_login_accepts_backup_code_and_consumes_it(db_session):
     )
     assert response.status_code == 200
 
-    store = TwoFactorStore(db_session, get_encryption_service())
+    store = TwoFactorStore(db_session, get_encryption_service(), master_pass="vault-master")
     assert store.get_backup_codes(user.id) == []
 
     # Consumed code cannot be reused

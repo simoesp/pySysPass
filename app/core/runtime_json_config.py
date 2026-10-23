@@ -15,6 +15,8 @@ SECTION_KEYS: dict[str, tuple[str, str]] = {
     "sitelang": ("general", "sitelang"),
     "sitetheme": ("general", "sitetheme"),
     "session_timeout": ("general", "session_timeout"),
+    # pySysPass-only 2FA policy (enabled vs enforced); PHP only has Plugin.enabled.
+    "two_factor_mode": ("general", "two_factor_mode"),
     "app_url": ("general", "app_url"),
     "https_enabled": ("general", "https_enabled"),
     "debug": ("general", "debug"),

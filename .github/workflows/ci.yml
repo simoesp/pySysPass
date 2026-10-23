@@ -100,6 +100,7 @@ jobs:
     env:
       SYSPASS_COMMIT: 9d0e169d2163897238877fb65130db47fe1ddcfa
       DEFUSE_COMMIT: f53396c2d34225064647a05ca76c1da9d99e5828  # v2.4.0
+      PLUGIN_2FA_REF: b3046617b51656999fe7e277a1ec4a4d7e374732
       PHP_IMAGE: docker.io/library/php:8.2-cli@sha256:2d72ff4b0cfe82e22f01f15223bc4ab4c825d318cb2e3275554cd32299a5ea50
     steps:
       - uses: actions/checkout@v7
@@ -112,19 +113,22 @@ jobs:
       - name: Fetch pinned upstream sysPass and Defuse sources
         run: |
           for spec in "syspass https://github.com/nuxsmin/sysPass.git $SYSPASS_COMMIT" \
-                      "defuse https://github.com/defuse/php-encryption.git $DEFUSE_COMMIT"; do
+                      "defuse https://github.com/defuse/php-encryption.git $DEFUSE_COMMIT" \
+                      "authenticator https://github.com/sysPass/plugin-Authenticator.git $PLUGIN_2FA_REF"; do
             set -- $spec
             git init -q "/tmp/upstream/$1"
             git -C "/tmp/upstream/$1" fetch -q --depth 1 "$2" "$3"
             git -C "/tmp/upstream/$1" checkout -q FETCH_HEAD
           done
       # Fails if sysPass PHP cannot decrypt account credentials or open public
-      # links written by pySysPass (API, copy, CSV/KeePass/XML import, links).
+      # links written by pySysPass (API, copy, CSV/KeePass/XML import, links),
+      # or the Authenticator plugin cannot read pySysPass 2FA enrollments.
       - name: Decode pySysPass writes with upstream PHP
         env:
           PYSYSPASS_PHP_VERIFY_CMD: >-
             docker run --rm -i -v /tmp/upstream:/upstream:ro -v ${{ github.workspace }}/scripts:/scripts:ro
             ${{ env.PHP_IMAGE }} php /scripts/verify-python-writes.php /upstream/syspass /upstream/defuse
+            /upstream/authenticator
         run: python -m pytest -q -rs tests/compatibility/test_php_reverse_roundtrip.py
 
   compat-mysql:

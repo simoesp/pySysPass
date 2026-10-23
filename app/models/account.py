@@ -163,6 +163,11 @@ class User(Base):
         ).first()
         if not row or not row.data:
             return False
+        key = row.key.decode('ascii', 'ignore') if isinstance(row.key, (bytes, bytearray)) else str(row.key or '')
+        if key.startswith('def10000'):
+            # Native PHP AuthenticatorData is encrypted under the master
+            # password; PHP stores a row only for enrolled users.
+            return True
         raw = row.data
         if isinstance(raw, (bytes, bytearray)):
             raw = raw.decode('utf-8', errors='ignore')

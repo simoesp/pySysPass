@@ -24,8 +24,17 @@ class TwoFactorVerifyRequest(BaseModel):
     code: str
 
 
-def _store(db: Session) -> TwoFactorStore:
-    return TwoFactorStore(db, get_encryption_service())
+def _require_vault(current_user: dict) -> None:
+    if not current_user.get("master_pass"):
+        raise HTTPException(status_code=428, detail={
+            "code": "MASTER_PASSWORD_REQUIRED",
+            "message": "Two-factor settings are encrypted under the vault master password",
+        })
+
+
+def _store(db: Session, current_user: dict) -> TwoFactorStore:
+    # Native Authenticator data is encrypted under the vault master password.
+    return TwoFactorStore(db, get_encryption_service(), master_pass=current_user.get("master_pass"))
 
 
 def _get_user_or_404(db: Session, user_id: int):
@@ -43,7 +52,7 @@ async def two_factor_status(
     """Global 2FA mode plus the calling user's enrollment state."""
     user = _get_user_or_404(db, current_user["id"])
     mode = TwoFactorConfig(db).get_mode()
-    enrolled = _store(db).is_enabled(user.id)
+    enrolled = _store(db, current_user).is_enabled(user.id)
     return {
         "mode": mode,
         "enrolled": enrolled,
@@ -63,11 +72,12 @@ async def setup_two_factor(
     if TwoFactorConfig(db).get_mode() == "disabled":
         raise HTTPException(status_code=400, detail="Two-factor authentication is disabled by the administrator")
     user = _get_user_or_404(db, current_user["id"])
+    _require_vault(current_user)
     if not UserService(db).verify_user_password(user, request.password):
         raise HTTPException(status_code=401, detail="Invalid password")
 
     secret = TwoFactorService.generate_secret()
-    _store(db).start_setup(user.id, secret)
+    _store(db, current_user).start_setup(user.id, secret)
     return {
         "secret": secret,
         "provisioning_uri": TwoFactorService.generate_provisioning_uri(
@@ -85,7 +95,8 @@ async def enable_two_factor(
     """Step 2: confirm the TOTP code generated from the pending secret;
     on success 2FA is enabled and backup codes are issued."""
     user = _get_user_or_404(db, current_user["id"])
-    store = _store(db)
+    _require_vault(current_user)
+    store = _store(db, current_user)
 
     pending = store.get_pending_secret(user.id)
     if not pending:
@@ -93,7 +104,7 @@ async def enable_two_factor(
     if not TwoFactorService.verify_token(pending, request.code):
         raise HTTPException(status_code=401, detail="Invalid 2FA code")
 
-    backup_codes = TwoFactorService.generate_backup_codes(8)
+    backup_codes = TwoFactorService.generate_backup_codes()
     store.enable(user.id, backup_codes)
     # Sessions opened without a second factor must not outlive enrollment.
     return {
@@ -112,7 +123,8 @@ async def disable_two_factor(
 ):
     """Disable 2FA for the user"""
     user = _get_user_or_404(db, current_user["id"])
-    store = _store(db)
+    _require_vault(current_user)
+    store = _store(db, current_user)
 
     if not store.is_enabled(user.id):
         raise HTTPException(status_code=400, detail="2FA is not enabled")
@@ -134,7 +146,8 @@ async def verify_two_factor_code(
 ):
     """Verify a 2FA code"""
     user = _get_user_or_404(db, current_user["id"])
-    store = _store(db)
+    _require_vault(current_user)
+    store = _store(db, current_user)
 
     if not store.is_enabled(user.id):
         raise HTTPException(status_code=400, detail="2FA is not enabled for this user")
@@ -153,7 +166,8 @@ async def use_backup_code(
 ):
     """Use a backup code when the 2FA device is unavailable"""
     user = _get_user_or_404(db, current_user["id"])
-    store = _store(db)
+    _require_vault(current_user)
+    store = _store(db, current_user)
 
     if not store.is_enabled(user.id):
         raise HTTPException(status_code=400, detail="2FA is not enabled")

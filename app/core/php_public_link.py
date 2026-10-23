@@ -9,6 +9,8 @@ from app.core.defuse_compat import decrypt_with_password
 
 VAULT_CLASS = b'SP\\Core\\Crypt\\Vault'
 ACCOUNT_CLASS = b'SP\\DataModel\\AccountExtData'
+AUTHENTICATOR_CLASS = b'SP\\Modules\\Web\\Plugins\\Authenticator\\Models\\AuthenticatorData'
+ALLOWED_CLASSES = (VAULT_CLASS, ACCOUNT_CLASS, AUTHENTICATOR_CLASS)
 MAX_SERIALIZED_BYTES = 4 * 1024 * 1024
 
 
@@ -81,7 +83,7 @@ class _Reader:
         name = None
         if kind == b'O':
             name = self._string()
-            if name not in (VAULT_CLASS, ACCOUNT_CLASS):
+            if name not in ALLOWED_CLASSES:
                 raise ValueError('Unsupported PHP object class')
             self._expect(b':')
         count = self._number(b':')

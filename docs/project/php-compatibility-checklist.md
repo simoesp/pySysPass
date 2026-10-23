@@ -109,8 +109,20 @@ Compatibility should be treated as successful only when:
   `AccountExtData` that `getDataForLink()` would produce. Its serializer
   reproduces the PHP-authored fixture byte for byte. PHP links have no access
   password, so new links cannot have one; legacy password links stay readable.
-- Built-in 2FA state still uses a Python JSON/AES format in the PHP
-  `Authenticator` `PluginData` row; the PHP Authenticator plugin cannot read it.
+- ✅ Built-in 2FA writes the PHP Authenticator plugin's own format: a
+  `PluginData` row per enrolled user holding serialized `AuthenticatorData`,
+  Defuse-encrypted under the vault master password (plugin commit `b304661`).
+  The upstream plugin decodes pySysPass enrollments, and its TOTP check accepts
+  them (CI). A PHP-authored row is a committed fixture; Python reproduces its
+  bytes and signs in with its TOTP and recovery codes. As in PHP, 2FA is checked
+  after the vault is unlocked. Pending setup secrets stay outside PHP tables
+  (`data/two-factor-pending.json`), so a row always means "enrolled". New
+  secrets and recovery codes use PHP's formats.
+- Legacy pySysPass 2FA rows (JSON) stay readable until the user disables 2FA.
+  PHP cannot read them, so affected users should re-enroll. The enabled/enforced
+  policy now lives in runtime JSON. Saving the 2FA mode clears the old JSON in
+  `Plugin.data` and sets PHP's `versionLevel`; until then PHP's plugin upgrade
+  could fail on that row. PHP's per-plugin expiry warnings are not shown.
 - Confirm temporary master password and password-reset flows do not diverge from PHP semantics where shared data is involved.
 
 ### 3. Auth, Permissions, And Profiles

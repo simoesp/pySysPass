@@ -54,6 +54,24 @@ def isolated_session_store(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def isolated_runtime_json(tmp_path, monkeypatch):
+    """Never let a test write the checkout's config/runtime-config.json."""
+    monkeypatch.setattr(
+        "app.core.runtime_json_config.settings.SYSPASS_RUNTIME_CONFIG_JSON_PATH",
+        str(tmp_path / "runtime-config.json"),
+    )
+
+
+@pytest.fixture(autouse=True)
+def isolated_two_factor_pending(tmp_path, monkeypatch):
+    """Keep pending 2FA enrollment secrets out of the checkout's data/ directory."""
+    from app.services import two_factor_service
+
+    monkeypatch.setattr(two_factor_service._PendingSetups, "_path",
+                        staticmethod(lambda: tmp_path / "two-factor-pending.json"))
+
+
+@pytest.fixture(autouse=True)
 def fresh_runtime_policy():
     """Runtime policy is cached per process; never carry it across tests."""
     from app.services.runtime_policy import invalidate_policy_cache

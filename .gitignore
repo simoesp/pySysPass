@@ -80,6 +80,10 @@ develop-eggs/
 dist/
 downloads/
 backups/
+# Runtime state: RSA transport key, sessions, pending 2FA setups, runtime config.
+data/
+# Lock files created next to runtime JSON config.
+*.json.lock
 eggs/
 .eggs/
 lib/

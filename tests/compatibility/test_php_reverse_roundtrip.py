@@ -143,3 +143,31 @@ def test_php_accepts_a_python_master_password_change(db_session, test_user, tmp_
     })
     assert result["accounts"] == [fixture["known_values"]["account_password"], "history"]
     assert result["hash_checks"] == [True, False]
+
+
+def test_php_authenticator_plugin_reads_python_2fa_enrollment(db_session, encryption_service, test_user):
+    """R5 / #56: built-in 2FA state is the PHP Authenticator plugin's own format."""
+    import pyotp
+
+    from app.models.account import PluginData
+    from app.services.two_factor_service import TwoFactorService, TwoFactorStore
+
+    store = TwoFactorStore(db_session, encryption_service, master_pass=TEST_MASTER_PASSWORD)
+    secret = TwoFactorService.generate_secret()
+    codes = TwoFactorService.generate_backup_codes()
+    store.start_setup(test_user.id, secret)
+    store.enable(test_user.id, codes)
+    store.set_backup_codes(test_user.id, codes[1:])  # one recovery code used
+    row = db_session.query(PluginData).filter_by(name="Authenticator", itemId=test_user.id).one()
+
+    result = _php({
+        "master_password": TEST_MASTER_PASSWORD,
+        "authenticator": [{"data": row.data.decode(), "key": row.key.decode(), "totp": pyotp.TOTP(secret).now()}],
+    })
+    (php_state,) = result["authenticator"]
+    assert php_state["userId"] == test_user.id
+    assert php_state["enabled"] is True
+    assert php_state["IV"] == secret
+    assert php_state["recoveryCodes"] == codes[1:]
+    assert php_state["expireDays"] == 0 and php_state["lastRecoveryTime"] > 0
+    assert php_state["totpMatches"] is True

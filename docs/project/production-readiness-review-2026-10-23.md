@@ -454,3 +454,23 @@ nginx start-up (a CI flake seen on 02a198c).
 Still open for #65: no load or failure-budget test; no browser acceptance suite; no
 full-API MySQL suite; many async routes still do synchronous database work; alerting
 depends on external log monitoring; the two external PHP fixture skips remain.
+
+R5 / #56 second follow-up (2FA state): pySysPass now writes the sysPass Authenticator
+plugin's own format, one `PluginData` row per enrolled user holding
+`serialize(AuthenticatorData)` encrypted under the vault master password, instead of a
+Python JSON/AES document. Sign-in checks 2FA after the vault is unlocked, as PHP's
+`login.finish` hook does. 2FA changes need an unlocked vault (`428` otherwise). Pending
+enrollment secrets are kept in `data/` rather than the PHP table. Secrets and recovery
+codes use PHP's formats. The 2FA policy moved from `Plugin.data` (which PHP's plugin
+upgrade unserializes) to runtime JSON, and created `Plugin` rows record PHP's
+`versionLevel`.
+
+Validation: with upstream sysPass `9d0e169`, Defuse 2.4.0, and plugin-Authenticator
+`b304661` in `php:8.2-cli`, PHP decoded a pySysPass enrollment, including a consumed
+recovery code, and `Google2FA::verify_key` accepted a current TOTP from it. A PHP-authored
+`AuthenticatorData` fixture (`tests/fixtures/php_authenticator_plugindata.json`,
+generator in `scripts/`) decodes in Python, re-serializes to identical bytes, and works for
+sign-in with TOTP and a single-use recovery code. The byte test caught a real type
+mismatch: PHP stores `twofaEnabled` as an int. CI's PHP job now covers the plugin.
+Remaining: legacy pySysPass 2FA rows are read but not converted; PHP's expiry warnings are
+not shown; the round trips use PHP class libraries rather than the PHP web UI.

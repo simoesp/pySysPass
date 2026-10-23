@@ -190,45 +190,6 @@ def login(
     # a non-admin account exists while maintenance is on.
     enforce_maintenance(db, user)
 
-    # PHP Authenticator parity: when the global 2FA mode is not disabled,
-    # enrolled users must supply a TOTP (or backup) code to log in.
-    if TwoFactorConfig(db).get_mode() != "disabled":
-        tf_store = TwoFactorStore(db, get_encryption_service())
-        if tf_store.is_enabled(user.id):
-            otp = (otp or "").strip()
-            if not otp:
-                raise HTTPException(
-                    status_code=428,
-                    detail={
-                        "code": "TWO_FACTOR_REQUIRED",
-                        "message": "Two-factor authentication code required",
-                    },
-                )
-            secret = tf_store.get_secret(user.id)
-            valid = bool(secret) and TwoFactorService.verify_token(secret, otp)
-            if not valid:
-                ok, remaining = TwoFactorService.verify_backup_code(
-                    tf_store.get_backup_codes(user.id), otp
-                )
-                if ok:
-                    tf_store.set_backup_codes(user.id, remaining)
-                    valid = True
-            if not valid:
-                track.record_attempt(ip, source="login", user_id=user.id)
-                locked = track.maybe_lock(ip)
-                elog.log_event(
-                    "auth.login.2fa_fail",
-                    f"Invalid 2FA code for '{user.username}' from {ip}" + (" — IP now locked" if locked else ""),
-                    user_id=user.id, login=user.username, ip=ip, level="WARN",
-                )
-                raise HTTPException(
-                    status_code=401,
-                    detail={
-                        "code": "TWO_FACTOR_INVALID",
-                        "message": "Invalid two-factor code",
-                    },
-                )
-
     supplied_master_pass = _decode_secret(mpass or None, "master password")
     old_password = _decode_secret(oldpass or None, "previous password")
     master_pass = decrypt_user_master_pass(user, plain_password)
@@ -292,6 +253,47 @@ def login(
                     "message": "Master password required to unlock your vault",
                 },
             )
+
+    # PHP Authenticator parity: when the global 2FA mode is not disabled,
+    # enrolled users must supply a TOTP (or recovery) code. As in PHP, this
+    # runs after the vault is unlocked (login.finish): the plugin's data is
+    # encrypted under the master password.
+    if TwoFactorConfig(db).get_mode() != "disabled":
+        tf_store = TwoFactorStore(db, get_encryption_service(), master_pass=master_pass)
+        if tf_store.is_enabled(user.id):
+            otp = (otp or "").strip()
+            if not otp:
+                raise HTTPException(
+                    status_code=428,
+                    detail={
+                        "code": "TWO_FACTOR_REQUIRED",
+                        "message": "Two-factor authentication code required",
+                    },
+                )
+            secret = tf_store.get_secret(user.id)
+            valid = bool(secret) and TwoFactorService.verify_token(secret, otp)
+            if not valid:
+                ok, remaining = TwoFactorService.verify_backup_code(
+                    tf_store.get_backup_codes(user.id), otp
+                )
+                if ok:
+                    tf_store.set_backup_codes(user.id, remaining)
+                    valid = True
+            if not valid:
+                track.record_attempt(ip, source="login", user_id=user.id)
+                locked = track.maybe_lock(ip)
+                elog.log_event(
+                    "auth.login.2fa_fail",
+                    f"Invalid 2FA code for '{user.username}' from {ip}" + (" — IP now locked" if locked else ""),
+                    user_id=user.id, login=user.username, ip=ip, level="WARN",
+                )
+                raise HTTPException(
+                    status_code=401,
+                    detail={
+                        "code": "TWO_FACTOR_INVALID",
+                        "message": "Invalid two-factor code",
+                    },
+                )
 
     access_token = issue_session_token(
         user, master_pass=master_pass, timeout_seconds=resolve_session_timeout(db),
