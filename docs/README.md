@@ -17,6 +17,7 @@ This directory organizes the project documentation by topic so the main reposito
 
 ### Development and Project Status
 
+- [project/production-readiness-review-2026-10-23.md](project/production-readiness-review-2026-10-23.md): production readiness findings, validation evidence, release criteria, and GitHub milestones/issues
 - [project/feature-completion.md](project/feature-completion.md): implemented feature notes and historical delivery summary
 - [project/php-compatibility-checklist.md](project/php-compatibility-checklist.md): compatibility goals and parity checklist against sysPass PHP
 

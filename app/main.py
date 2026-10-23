@@ -2,7 +2,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
-from app.core.config import settings
+from app.core.config import settings, validate_production_settings
 from app.db.bootstrap import bootstrap_database_on_startup
 from app.db.base import SchemaMutationError
 from app.api.v1 import (
@@ -61,16 +61,6 @@ def _resolve_audit(method: str, path: str):
 
 
 def _get_ip(request: Request) -> str:
-    # X-Real-IP is set by nginx to $remote_addr (single, reliable value).
-    # X-Forwarded-For is used as fallback for other proxies.
-    # After ProxyHeadersMiddleware, request.client.host already reflects the
-    # forwarded IP, but we read headers directly to be explicit.
-    real_ip = request.headers.get("X-Real-IP")
-    if real_ip:
-        return real_ip.strip()
-    fwd = request.headers.get("X-Forwarded-For")
-    if fwd:
-        return fwd.split(",")[0].strip()
     return request.client.host if request.client else "0.0.0.0"  # nosec B104
 
 
@@ -91,6 +81,7 @@ def _get_user_from_request(request: Request):
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
+    validate_production_settings(settings)
     bootstrap_database_on_startup()
     task_service.start_scheduler()
     yield
@@ -102,11 +93,6 @@ app = FastAPI(
     version="2.2.2",
     lifespan=lifespan,
 )
-
-# Trust X-Forwarded-For / X-Real-IP from the nginx reverse proxy.
-# trusted_hosts="*" is safe here because the upstream proxy is in the same
-# private Docker network — no untrusted clients can reach the backend directly.
-app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
 
 # CORS
 app.add_middleware(
@@ -149,6 +135,10 @@ async def audit_log_middleware(request: Request, call_next):
         except Exception:
             pass  # never let audit logging break a request
     return response
+
+# Install last so proxy normalization happens before audit attribution.
+# Uvicorn must use --no-proxy-headers to avoid a second trust policy.
+app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=settings.TRUSTED_PROXY_HOSTS)
 
 # Include routers
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])

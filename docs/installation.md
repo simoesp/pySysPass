@@ -53,9 +53,8 @@ Services and published ports:
 | Service | URL | Purpose |
 | --- | --- | --- |
 | `frontend` | http://localhost:8080 | Web UI |
-| `backend` | http://localhost:8000 | REST API |
-| Swagger UI | http://localhost:8000/docs | Interactive API docs |
-| Health check | http://localhost:8000/health | Liveness probe |
+| API | http://localhost:8080/api/v1/ | REST endpoints through nginx; backend is private |
+| Health check | http://localhost:8080/health | Liveness probe |
 | `db` | localhost:3306 | MySQL 8 |
 | `graphify` | http://localhost:8090 | Static knowledge-graph report |
 
@@ -64,12 +63,45 @@ creates the full sysPass-compatible schema automatically on first boot. Wait for
 the backend health check to pass before continuing:
 
 ```bash
-curl -fsS http://localhost:8000/health && echo " backend up"
+curl -fsS http://localhost:8080/health && echo " backend up"
 ```
 
 > **Change the defaults.** `podman-compose.yml` ships development secrets
 > (`SECRET_KEY`, `ENCRYPTION_KEY`, `MYSQL_*`, and a sample `SYSPASS_PASSWORD_SALT`).
 > Replace all of them before any shared or exposed deployment.
+
+### Proxy trust and production startup
+
+The backend port is no longer published by the supplied stacks. API requests go
+through the frontend's `/api/` proxy. Run Uvicorn with `--no-proxy-headers`:
+the application applies its own `TRUSTED_PROXY_HOSTS` allowlist, which defaults
+to an empty list. Never enable a second, broader proxy policy in Uvicorn.
+
+Each stack pins its frontend address and trusts only that address:
+
+| Stack | Network | Trusted frontend |
+| --- | --- | --- |
+| Development | `172.30.81.0/24` | `172.30.81.10` |
+| External database | `172.30.82.0/24` | `172.30.82.10` |
+| Portainer | `172.30.83.0/24` | `172.30.83.10` |
+
+If one of these ranges conflicts with your host networks, change the subnet,
+both service addresses, and `TRUSTED_PROXY_HOSTS` together. Recreate the stack
+network after changing it; do not remove persistent database volumes. For a
+custom deployment, supply a JSON array of trusted proxy IPs or narrow CIDRs,
+for example `TRUSTED_PROXY_HOSTS='["10.20.0.10"]'`, and keep the backend private.
+Nginx replaces forwarded client-IP headers with its actual peer address. If
+another reverse proxy terminates TLS in front of nginx, configure nginx's real-IP
+trust explicitly for that proxy before relying on per-client lockouts.
+
+`DEBUG` now defaults to `false`. Production startup requires `DATABASE_URL`
+and explicitly supplied `SECRET_KEY` and `ENCRYPTION_KEY` values of at least
+32 bytes; empty and known sample keys are rejected. Values in `.env` count as
+explicit configuration. Use independently generated random secrets and retain
+the existing encryption key for an existing vault. **Do not replace a live
+encryption key simply to satisfy validation**: existing ciphertext requires it.
+The unsafe online rekey operation is disabled pending a complete migration and
+recovery workflow. Explicit `DEBUG=true` permits ephemeral development keys.
 
 ## First-run setup
 
@@ -92,14 +124,14 @@ save it somewhere safe, because it cannot be recovered.
 Check installation state:
 
 ```bash
-curl -s http://localhost:8000/api/v1/auth/install/status
+curl -s http://localhost:8080/api/v1/auth/install/status
 # {"installed": false, "user_count": 0, "has_master_password": false}
 ```
 
 Install with a generated master password (returned once, in the response):
 
 ```bash
-curl -s -X POST http://localhost:8000/api/v1/auth/install \
+curl -s -X POST http://localhost:8080/api/v1/auth/install \
   -H 'Content-Type: application/json' \
   -d '{
         "username": "admin",
@@ -126,7 +158,7 @@ To set your own master password instead, send `master_password` (minimum 12
 characters) and omit `generate_master_password`:
 
 ```bash
-curl -s -X POST http://localhost:8000/api/v1/auth/install \
+curl -s -X POST http://localhost:8080/api/v1/auth/install \
   -H 'Content-Type: application/json' \
   -d '{"username":"admin","password":"strong-login-password","master_password":"your-master-password"}'
 ```
@@ -137,11 +169,11 @@ Installing twice is refused with HTTP 409 (`sysPass is already installed`).
 
 ```bash
 # Setup is complete
-curl -s http://localhost:8000/api/v1/auth/install/status
+curl -s http://localhost:8080/api/v1/auth/install/status
 # {"installed": true, "user_count": 1, "has_master_password": true}
 
 # Log in with the administrator credentials created above
-curl -s -X POST http://localhost:8000/api/v1/auth/login \
+curl -s -X POST http://localhost:8080/api/v1/auth/login \
   -H 'Content-Type: application/json' \
   -d '{"username":"admin","password":"choose-a-strong-login-password"}'
 ```
@@ -161,7 +193,7 @@ export DATABASE_URL="sqlite:///./syspass.db"   # or a MySQL URL
 export SECRET_KEY="$(openssl rand -hex 32)"
 export ENCRYPTION_KEY="$(openssl rand -hex 32)"
 
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+DEBUG=true uvicorn app.main:app --reload --host 127.0.0.1 --port 8000 --no-proxy-headers
 ```
 
 The backend runs against SQLite for development or MySQL for
@@ -197,8 +229,7 @@ docker compose --env-file .env.external -f podman-compose.external.yml up -d --b
 podman-compose --env-file .env.external -f podman-compose.external.yml up -d --build
 ```
 
-Defaults expose the UI at http://localhost:8081 and the backend at
-http://localhost:8001. The `passwordSalt` is required to decrypt PHP-created
+Defaults expose only the UI at http://localhost:8081; the backend is private. The `passwordSalt` is required to decrypt PHP-created
 master-password material; without the matching salt, existing users cannot log
 in. Because the database already has an administrator and master password, skip
 first-run setup and log in with the existing PHP credentials.
@@ -223,8 +254,8 @@ Settings are read from environment variables (and optionally an `.env` file) via
 | Variable | Default | Description |
 | --- | --- | --- |
 | `DATABASE_URL` | unset (required) | SQLAlchemy connection string |
-| `SECRET_KEY` | generated at runtime when unset | JWT signing secret |
-| `ENCRYPTION_KEY` | generated at runtime when unset | Master key for AES encryption |
+| `SECRET_KEY` | required outside explicit debug mode | JWT signing secret |
+| `ENCRYPTION_KEY` | required outside explicit debug mode | Master key for AES encryption |
 | `SYSPASS_PASSWORD_SALT` | empty | sysPass password-salt compatibility value (from PHP `config.xml`) |
 | `SYSPASS_RUNTIME_CONFIG_JSON_PATH` | `config/runtime-config.json` | Structured JSON runtime config file |
 | `SQLALCHEMY_SCHEMA_GUARD` | `true` | Prevents unintended schema mutation |
@@ -233,7 +264,7 @@ Settings are read from environment variables (and optionally an `.env` file) via
 | `SYSPASS_CONFIG_CACHE_PATH` | empty | Legacy PHP `config.cache` fallback file |
 | `ALLOWED_HOSTS` | `["*"]` | Host header allowlist for the backend |
 | `AUTO_INIT_DB_ON_STARTUP` | `true` | Bootstrap schema when the database is empty |
-| `DEBUG` | `true` | Debug-friendly runtime behaviour |
+| `DEBUG` | `false` | Debug-friendly runtime behaviour |
 | `CORS_ORIGINS` | empty | Allowed browser origins; falls back to `config/cors-origins.json` when unset |
 | `CORS_ORIGINS_FILE` | `config/cors-origins.json` | Browser origin allowlist file |
 

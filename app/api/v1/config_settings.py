@@ -262,66 +262,11 @@ async def rekey_encryption(
     db: Session = Depends(get_db),
     current_user=Depends(require_admin),
 ):
-    """Re-encrypt all stored passwords with a new key.
-
-    Decrypts every Account.pass_ and AccountHistory.pass_ with current_key,
-    re-encrypts with new_key, then persists new_key in the Config table.
-    The ENCRYPTION_KEY environment variable must also be updated before the
-    next application restart so the runtime picks up the new key.
-    """
-    from app.core.security import EncryptionService
-    from app.models.account import Account, AccountHistory
-
-    if body.new_key != body.new_key_confirm:
-        raise HTTPException(status_code=422, detail="New keys do not match")
-    if len(body.new_key) < 16:
-        raise HTTPException(status_code=422, detail="New key must be at least 16 characters")
-    if body.current_key == body.new_key:
-        raise HTTPException(status_code=422, detail="New key must differ from the current key")
-
-    old_enc = EncryptionService(body.current_key)
-    new_enc = EncryptionService(body.new_key)
-
-    # Re-key accounts
-    accounts = db.query(Account).filter(Account.pass_.is_not(None)).all()
-    errors = []
-    rekey_count = 0
-
-    for acc in accounts:
-        try:
-            raw = acc.pass_ if isinstance(acc.pass_, bytes) else acc.pass_.encode()
-            plaintext = old_enc.decrypt(raw.decode())
-            acc.pass_ = new_enc.encrypt(plaintext).encode()
-            rekey_count += 1
-        except Exception as e:
-            errors.append(f"Account {acc.id}: {e}")
-
-    # Re-key account history snapshots
-    history_rows = db.query(AccountHistory).filter(AccountHistory.pass_.is_not(None)).all()
-    history_count = 0
-    for row in history_rows:
-        try:
-            raw = row.pass_ if isinstance(row.pass_, bytes) else row.pass_.encode()
-            plaintext = old_enc.decrypt(raw.decode())
-            row.pass_ = new_enc.encrypt(plaintext).encode()
-            history_count += 1
-        except Exception as e:
-            errors.append(f"History {row.id}: {e}")
-
-    if errors:
-        db.rollback()
-        raise HTTPException(
-            status_code=400,
-            detail=f"Re-key failed — current key may be wrong. Errors: {errors[:5]}"
-        )
-
-    # Persist new key in Config table
-    ConfigService(db).set("encryption_key", body.new_key)
-    db.commit()
-
-    return {
-        "message": "Re-key completed successfully",
-        "accounts_rekeyed": rekey_count,
-        "history_rekeyed": history_count,
-        "warning": "Update the ENCRYPTION_KEY environment variable to this new key before restarting the application.",
-    }
+    """Refuse rotation until all PHP and runtime secret formats are supported."""
+    raise HTTPException(
+        status_code=409,
+        detail=(
+            "Encryption key rotation is unavailable until a complete, recoverable "
+            "rotation process is implemented. Existing keys and encrypted data were not changed."
+        ),
+    )

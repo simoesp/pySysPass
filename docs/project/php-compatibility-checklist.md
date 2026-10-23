@@ -67,6 +67,13 @@ Compatibility should be treated as successful only when:
 
 ### 2. Encryption And Secret Handling
 
+- Password reset and administrator password edits now use the existing PHP
+  `isChangedPass` migration flow. Regression coverage begins with PHP-authored
+  `mPass`/`mKey`, verifies they remain unchanged at password replacement, then
+  verifies recovery with the previous login password. No schema changes are used.
+- The incomplete online encryption-key rotation route now refuses requests
+  without reading or changing ciphertext. A complete native-format-aware
+  rotation and recovery workflow remains outstanding.
 - ✅ The offline sysPass 3.2.11 fixture verifies PHP-created login/master bcrypt
   hashes, decrypts PHP-created `User.mPass`/`User.mKey`, and decrypts a password
   written by PHP's `account/saveCreate` endpoint from `Account.pass`/`Account.key`.

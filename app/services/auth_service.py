@@ -23,6 +23,14 @@ def get_password_hash(password: str) -> str:
     return hashed.replace(b"$2b$", b"$2y$").decode()
 
 
+def set_user_login_password(user: User, password: str) -> None:
+    """Change login credentials while preserving PHP vault migration state."""
+    user.password = get_password_hash(password).encode("utf-8")
+    user.isChangePass = False
+    user.isChangedPass = True
+    user.isMigrate = False
+
+
 def make_user_key(login_pass: str, login_user: str) -> str:
     """Replicates PHP UserPassService::makeKeyForUser()."""
     return (login_pass + login_user + get_password_salt()).strip()

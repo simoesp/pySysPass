@@ -5,10 +5,10 @@ services:
     image: docker.io/library/mysql:8.0
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-syspass}
       MYSQL_USER: ${MYSQL_USER:-syspass}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD}
     ports:
       - "${MYSQL_PORT:-3306}:3306"
     volumes:
@@ -30,18 +30,19 @@ services:
     labels:
       com.pysyspass.stack-revision: "2026-07-02-user-group-schema-fix"
     environment:
-      DATABASE_URL: mysql+pymysql://${MYSQL_USER:-syspass}:${MYSQL_PASSWORD}@db:3306/${MYSQL_DATABASE:-syspass}
-      SECRET_KEY: ${SECRET_KEY}
-      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      TRUSTED_PROXY_HOSTS: '["172.30.83.10"]'
+      DATABASE_URL: mysql+pymysql://${MYSQL_USER:-syspass}:${MYSQL_PASSWORD:?Set MYSQL_PASSWORD}@db:3306/${MYSQL_DATABASE:-syspass}
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Set ENCRYPTION_KEY}
       SYSPASS_PASSWORD_SALT: ${SYSPASS_PASSWORD_SALT:-}
       SQLALCHEMY_SCHEMA_GUARD: ${SQLALCHEMY_SCHEMA_GUARD:-true}
       AUTO_INIT_DB_ON_STARTUP: ${AUTO_INIT_DB_ON_STARTUP:-true}
       DEBUG: ${DEBUG:-false}
       CORS_ORIGINS_FILE: /app/config/cors-origins.json
       SYSPASS_RUNTIME_CONFIG_JSON_PATH: /app/config/runtime-config.json
-    ports:
-      - "${BACKEND_PORT:-8000}:8000"
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips=*
+    expose:
+      - "8000"
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-proxy-headers
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 15s
@@ -51,7 +52,8 @@ services:
       db:
         condition: service_healthy
     networks:
-      - syspass
+      syspass:
+        ipv4_address: 172.30.83.11
 
   frontend:
     build:
@@ -71,11 +73,15 @@ services:
       timeout: 5s
       retries: 10
     networks:
-      - syspass
+      syspass:
+        ipv4_address: 172.30.83.10
 
 networks:
   syspass:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.83.0/24
 
 volumes:
   syspass_mysql_data:

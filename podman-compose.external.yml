@@ -10,6 +10,7 @@ services:
     container_name: pysyspass-external-backend
     restart: unless-stopped
     environment:
+      TRUSTED_PROXY_HOSTS: '["172.30.82.10"]'
       DATABASE_URL: ${PYSYSPASS_DATABASE_URL:?Set PYSYSPASS_DATABASE_URL}
       SECRET_KEY: ${PYSYSPASS_SECRET_KEY:?Set PYSYSPASS_SECRET_KEY}
       ENCRYPTION_KEY: ${PYSYSPASS_ENCRYPTION_KEY:?Set PYSYSPASS_ENCRYPTION_KEY}
@@ -22,8 +23,8 @@ services:
       SYSPASS_RUNTIME_CONFIG_JSON_PATH: /app/data/runtime-config.json
     volumes:
       - pysyspass_runtime_data:/app/data
-    ports:
-      - "${PYSYSPASS_BACKEND_PORT:-8001}:8000"
+    expose:
+      - "8000"
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
       interval: 10s
@@ -31,7 +32,8 @@ services:
       retries: 10
       start_period: 10s
     networks:
-      - pysyspass-external
+      pysyspass-external:
+        ipv4_address: 172.30.82.11
 
   frontend:
     build:
@@ -51,11 +53,15 @@ services:
       retries: 10
       start_period: 10s
     networks:
-      - pysyspass-external
+      pysyspass-external:
+        ipv4_address: 172.30.82.10
 
 networks:
   pysyspass-external:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.82.0/24
 
 volumes:
   pysyspass_runtime_data:

@@ -6,7 +6,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from app.models.account import User, UserPassRecover
-from app.services.auth_service import get_password_hash
+from app.services.auth_service import set_user_login_password
 from app.services.config_service import ConfigService
 from app.services.email_service import EmailService
 
@@ -123,7 +123,7 @@ class PasswordResetService:
         if not user:
             return False
 
-        user.password = get_password_hash(new_password)
+        set_user_login_password(user, new_password)
         row.used = True
         self.db.commit()
         return True

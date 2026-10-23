@@ -132,7 +132,7 @@ podman-compose up -d --build
 This starts:
 
 - `db` on `3306`
-- `backend` on `8000`
+- `backend` on private container port `8000` (not published)
 - `frontend` on `8080`
 - `graphify` on `8090`
 - `test` as an on-demand pytest container
@@ -140,9 +140,8 @@ This starts:
 ### Local URLs
 
 - Frontend: `http://localhost:8080`
-- API root: `http://localhost:8000/`
-- Swagger UI: `http://localhost:8000/docs`
-- Health check: `http://localhost:8000/health`
+- API: `http://localhost:8080/api/v1/` (individual endpoints)
+- Health check: `http://localhost:8080/health`
 - Graphify report: `http://localhost:8090`
 
 ### First-run setup
@@ -175,7 +174,7 @@ cd pySysPass
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+DEBUG=true uvicorn app.main:app --reload --host 127.0.0.1 --port 8000 --no-proxy-headers
 ```
 
 ### Frontend
@@ -200,13 +199,14 @@ Application-level settings are stored in `config/runtime-config.json`, which is 
 | Variable | Default | Description |
 | --- | --- | --- |
 | `DATABASE_URL` | unset | SQLAlchemy connection string |
-| `SECRET_KEY` | generated at runtime when unset | JWT signing secret |
-| `ENCRYPTION_KEY` | generated at runtime when unset | Master key for AES encryption |
+| `SECRET_KEY` | required outside explicit debug mode | JWT signing secret |
+| `ENCRYPTION_KEY` | required outside explicit debug mode | Master key for AES encryption |
 | `SYSPASS_PASSWORD_SALT` | empty | Runtime sysPass password salt compatibility value |
 | `SYSPASS_RUNTIME_CONFIG_JSON_PATH` | `config/runtime-config.json` | Structured JSON runtime configuration file |
 | `SQLALCHEMY_SCHEMA_GUARD` | `true` | Prevents unintended schema mutation paths |
 | `AUTO_INIT_DB_ON_STARTUP` | `true` | Bootstrap schema automatically when the database is empty |
-| `DEBUG` | `true` | Enables debug-friendly runtime behaviour |
+| `DEBUG` | `false` | Enables debug-friendly runtime behaviour |
+| `TRUSTED_PROXY_HOSTS` | `[]` | JSON array of proxy IPs/CIDRs allowed to supply forwarded client addresses |
 | `CORS_ORIGINS` | empty by default | Allowed browser origins; when unset, values are loaded from `config/cors-origins.json` |
 | `CORS_ORIGINS_FILE` | `config/cors-origins.json` | Path to the JSON file containing the browser origin allowlist |
 
@@ -214,6 +214,11 @@ The settings API continues to work, and file-backed JSON settings are preferred 
 
 The compose stack includes development defaults. Change all secrets before any shared or production deployment.
 `podman-compose.yml` keeps developer-friendly bind mounts and `--reload`; `portainer-stack.yml` is the cleaner runtime-oriented variant.
+
+Production startup rejects missing, short, or sample application keys. Keep an
+existing vault's encryption key: changing it requires a verified migration.
+The supplied stacks keep the backend private and configure explicit proxy trust;
+see [deployment and startup requirements](docs/installation.md#proxy-trust-and-production-startup).
 
 ### Run against an existing sysPass database
 
@@ -229,8 +234,8 @@ cp .env.external.example .env.external
 podman-compose --env-file .env.external -f podman-compose.external.yml up -d --build
 ```
 
-The defaults expose the UI at `http://localhost:8081` and the backend at
-`http://localhost:8001`. The frontend proxies `/api/` and `/health` to the
+The defaults expose the UI at `http://localhost:8081`. The backend has no
+published host port. The frontend proxies `/api/` and `/health` to the
 backend over the private Compose network. Stop the stack with:
 
 ```bash

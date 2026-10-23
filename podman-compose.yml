@@ -30,6 +30,7 @@ services:
     container_name: syspass-backend
     restart: unless-stopped
     environment:
+      TRUSTED_PROXY_HOSTS: '["172.30.81.10"]'
       DATABASE_URL: mysql+pymysql://syspass:syspass_password@db:3306/syspass
       SQLALCHEMY_SCHEMA_GUARD: "true"
       SECRET_KEY: change-this-in-production-very-secure-key
@@ -41,8 +42,8 @@ services:
       # Runtime config (LDAP/mail/general settings) lives in a JSON file, not
       # the database; keep it on a volume so rebuilds don't reset it.
       SYSPASS_RUNTIME_CONFIG_JSON_PATH: /app/data/runtime-config.json
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
     volumes:
       - ./app:/app/app:ro
       - ./tests:/app/tests:ro
@@ -56,8 +57,9 @@ services:
       db:
         condition: service_healthy
     networks:
-      - syspass-network
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --proxy-headers --forwarded-allow-ips='*'
+      syspass-network:
+        ipv4_address: 172.30.81.11
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --no-proxy-headers
 
   frontend:
     build:
@@ -76,7 +78,8 @@ services:
       timeout: 5s
       retries: 10
     networks:
-      - syspass-network
+      syspass-network:
+        ipv4_address: 172.30.81.10
 
   graphify:
     image: docker.io/library/nginx:alpine
@@ -113,6 +116,9 @@ services:
 networks:
   syspass-network:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.81.0/24
 
 volumes:
   mysql_data:
