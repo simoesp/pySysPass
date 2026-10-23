@@ -42,7 +42,7 @@ account_permission = require_any_permission("acc_permission", account_admin=True
 
 
 @router.get("/accounts", response_model=List[AccountResponse])
-async def list_accounts(
+def list_accounts(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     q: Optional[str] = Query(None),
@@ -59,7 +59,7 @@ async def list_accounts(
 
 
 @router.get("/accounts/count")
-async def count_accounts(
+def count_accounts(
     q: Optional[str] = Query(None),
     category_id: Optional[int] = Query(None),
     client_id: Optional[int] = Query(None),
@@ -75,7 +75,7 @@ async def count_accounts(
 
 
 @router.get("/accounts/search", response_model=List[AccountResponse])
-async def search_accounts(
+def search_accounts(
     q: str,
     db: Session = Depends(get_db),
     current_user=Depends(account_view),
@@ -84,7 +84,7 @@ async def search_accounts(
 
 
 @router.post("/accounts", response_model=AccountResponse, status_code=status.HTTP_201_CREATED)
-async def create_account(
+def create_account(
     account: AccountCreate,
     db: Session = Depends(get_db),
     current_user=Depends(account_create),
@@ -114,7 +114,7 @@ async def create_account(
 
 
 @router.get("/accounts/{account_id}/audit", response_model=List[AccountAuditEntry])
-async def get_account_audit(
+def get_account_audit(
     account_id: int,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
@@ -133,7 +133,7 @@ async def get_account_audit(
 
 
 @router.get("/accounts/{account_id}", response_model=AccountResponse)
-async def get_account(
+def get_account(
     account_id: int,
     request: Request,
     db: Session = Depends(get_db),
@@ -150,7 +150,7 @@ async def get_account(
 
 
 @router.put("/accounts/{account_id}", response_model=AccountResponse)
-async def update_account(
+def update_account(
     account_id: int,
     account: AccountUpdate,
     db: Session = Depends(get_db),
@@ -190,7 +190,7 @@ async def update_account(
 
 
 @router.delete("/accounts/{account_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_account(
+def delete_account(
     account_id: int,
     db: Session = Depends(get_db),
     current_user=Depends(account_delete),
@@ -201,7 +201,7 @@ async def delete_account(
 
 
 @router.get("/accounts/{account_id}/password")
-async def get_account_password(
+def get_account_password(
     account_id: int,
     request: Request,
     db: Session = Depends(get_db),
@@ -223,7 +223,7 @@ async def get_account_password(
 
 
 @router.post("/accounts/{account_id}/favorite")
-async def toggle_favorite(
+def toggle_favorite(
     account_id: int,
     db: Session = Depends(get_db),
     current_user=Depends(account_view),
@@ -236,7 +236,7 @@ async def toggle_favorite(
 
 
 @router.post("/accounts/{account_id}/copy", response_model=AccountResponse, status_code=status.HTTP_201_CREATED)
-async def copy_account(
+def copy_account(
     account_id: int,
     db: Session = Depends(get_db),
     current_user=Depends(account_copy),
@@ -255,7 +255,7 @@ async def copy_account(
 # ── ACL: shared users ─────────────────────────────────────────────────────
 
 @router.put("/accounts/{account_id}/users/{target_user_id}")
-async def set_user_access(
+def set_user_access(
     account_id: int,
     target_user_id: int,
     is_edit: bool = Body(False, embed=True),
@@ -271,7 +271,7 @@ async def set_user_access(
 
 
 @router.delete("/accounts/{account_id}/users/{target_user_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def remove_user_access(
+def remove_user_access(
     account_id: int,
     target_user_id: int,
     db: Session = Depends(get_db),
@@ -286,7 +286,7 @@ async def remove_user_access(
 # ── ACL: shared groups ────────────────────────────────────────────────────
 
 @router.put("/accounts/{account_id}/groups/{group_id}")
-async def set_group_access(
+def set_group_access(
     account_id: int,
     group_id: int,
     is_edit: bool = Body(False, embed=True),
@@ -302,7 +302,7 @@ async def set_group_access(
 
 
 @router.delete("/accounts/{account_id}/groups/{group_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def remove_group_access(
+def remove_group_access(
     account_id: int,
     group_id: int,
     db: Session = Depends(get_db),

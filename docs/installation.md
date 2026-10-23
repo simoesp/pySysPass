@@ -139,10 +139,10 @@ Bind mounts need the same ownership on the host (`chown -R 10001:10001`), or
   `POST /api/v1/backup/create` or running the backup in the backend container,
   and copy archives off the host.
 - Probe `/health/ready` for readiness and `/health` for liveness.
-- Sign-in and the audit middleware run blocking work (bcrypt, Defuse key
-  derivation, database writes) in the threadpool. Many other routes still do
-  synchronous database work on the event loop, so size workers for peak load;
-  no load test has established capacity.
+- API routes run their blocking work (database, bcrypt, Defuse, files) in the
+  threadpool rather than on the event loop, so one slow request does not stall
+  others. Each worker has about 40 threadpool slots; size workers for peak load.
+  No load test has established capacity.
 
 ### Reproducible builds
 

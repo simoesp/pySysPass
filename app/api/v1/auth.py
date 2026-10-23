@@ -68,7 +68,7 @@ def _decode_secret(value: str | None, field_name: str) -> str | None:
 
 
 @router.get("/install/status", response_model=InstallStatusResponse)
-async def install_status(db: Session = Depends(get_db)):
+def install_status(db: Session = Depends(get_db)):
     user_count, has_master_password = _installation_state(db)
     return InstallStatusResponse(
         installed=user_count > 0 and has_master_password,
@@ -78,7 +78,7 @@ async def install_status(db: Session = Depends(get_db)):
 
 
 @router.post("/install", response_model=InstallResponse, status_code=status.HTTP_201_CREATED)
-async def install(body: InstallRequest, db: Session = Depends(get_db)):
+def install(body: InstallRequest, db: Session = Depends(get_db)):
     user_count, has_master_password = _installation_state(db)
     if user_count > 0 or has_master_password:
         raise HTTPException(status_code=409, detail="sysPass is already installed")
@@ -129,7 +129,7 @@ async def install(body: InstallRequest, db: Session = Depends(get_db)):
     "/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(reject_during_maintenance)],
 )
-async def register(user: UserCreate, db: Session = Depends(get_db)):
+def register(user: UserCreate, db: Session = Depends(get_db)):
     raise HTTPException(
         status_code=410,
         detail=(
@@ -303,7 +303,7 @@ def login(
     return {"access_token": access_token, "token_type": "bearer"}  # nosec B105
 
 @router.get("/me", response_model=UserResponse)
-async def get_current_user_info(
+def get_current_user_info(
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -337,7 +337,7 @@ def _require_session(current_user: dict) -> dict:
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
-async def logout(current_user: dict = Depends(get_current_user)):
+def logout(current_user: dict = Depends(get_current_user)):
     """Revoke the presented session token, like PHP destroying its session."""
     session = _require_session(current_user)
     session_store.revoke_token(session["jti"], session["exp"] or time.time() + MAX_SESSION_SECONDS)
@@ -345,7 +345,7 @@ async def logout(current_user: dict = Depends(get_current_user)):
 
 
 @router.post("/refresh", response_model=Token)
-async def refresh_session(current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+def refresh_session(current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
     """Extend an active session by one inactivity window.
 
     The SPA calls this only after user input, so an idle browser still times

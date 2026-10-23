@@ -2,6 +2,7 @@
 from typing import Optional
 import logging
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Response
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -66,8 +67,10 @@ async def import_csv(
         db, get_encryption_service(), user_id, master_password=_import_master_password(db, current_user)
     )
     try:
-        data = service.parse_csv(content_str, delimiter=delimiter)
-        stats = service.import_accounts(data)
+        # Parsing, per-row Defuse encryption and DB writes leave the event loop.
+        stats = await run_in_threadpool(
+            lambda: service.import_accounts(service.parse_csv(content_str, delimiter=delimiter))
+        )
         return {'format': 'csv', 'stats': stats, 'errors': service.errors[:10]}
     except Exception:
         logger.exception("CSV import failed")
@@ -101,8 +104,8 @@ async def import_xml(
         current_master_password=_import_master_password(db, current_user, current_master_password),
     )
     try:
-        data = service.parse_xml(content_str)
-        stats = service.import_accounts(data)
+        # Parsing, per-row Defuse encryption and DB writes leave the event loop.
+        stats = await run_in_threadpool(lambda: service.import_accounts(service.parse_xml(content_str)))
         return {'format': 'xml', 'stats': stats, 'errors': service.errors[:10]}
     except Exception:
         logger.exception("sysPass XML import failed")
@@ -128,8 +131,8 @@ async def import_keepass(
         db, get_encryption_service(), user_id, master_password=_import_master_password(db, current_user)
     )
     try:
-        data = service.parse_keepass(content_str)
-        stats = service.import_accounts(data)
+        # Parsing, per-row Defuse encryption and DB writes leave the event loop.
+        stats = await run_in_threadpool(lambda: service.import_accounts(service.parse_keepass(content_str)))
         return {'format': 'keepass', 'stats': stats, 'errors': service.errors[:10]}
     except Exception:
         logger.exception("KeePass XML import failed")
@@ -137,7 +140,7 @@ async def import_keepass(
 
 
 @router.get("/export/csv")
-async def export_csv(
+def export_csv(
     account_ids: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_backup')),
@@ -155,7 +158,7 @@ async def export_csv(
 
 
 @router.get("/export/xml")
-async def export_xml(
+def export_xml(
     account_ids: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_backup')),
@@ -180,7 +183,7 @@ async def export_xml(
 
 
 @router.post("/export/xml/protected")
-async def export_xml_protected(
+def export_xml_protected(
     export_password: str = Form(...),
     master_password: str = Form(""),
     account_ids: str = Form(""),
@@ -221,7 +224,7 @@ async def export_xml_protected(
 
 
 @router.get("/export/keepass")
-async def export_keepass(
+def export_keepass(
     account_ids: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_backup')),
@@ -245,7 +248,7 @@ async def export_keepass(
 
 
 @router.post("/export/keepass/kdbx")
-async def export_keepass_kdbx(
+def export_keepass_kdbx(
     body: KdbxExportRequest,
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_backup')),

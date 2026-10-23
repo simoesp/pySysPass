@@ -45,7 +45,7 @@ def _get_user_or_404(db: Session, user_id: int):
 
 
 @router.get("/2fa/status")
-async def two_factor_status(
+def two_factor_status(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -61,7 +61,7 @@ async def two_factor_status(
 
 
 @router.post("/2fa/setup", response_model=TwoFactorEnableResponse)
-async def setup_two_factor(
+def setup_two_factor(
     request: TwoFactorRequest,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
@@ -87,7 +87,7 @@ async def setup_two_factor(
 
 
 @router.post("/2fa/enable")
-async def enable_two_factor(
+def enable_two_factor(
     request: TwoFactorVerifyRequest,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
@@ -116,7 +116,7 @@ async def enable_two_factor(
 
 
 @router.post("/2fa/disable")
-async def disable_two_factor(
+def disable_two_factor(
     request: TwoFactorRequest,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
@@ -139,7 +139,7 @@ async def disable_two_factor(
 
 
 @router.post("/2fa/verify")
-async def verify_two_factor_code(
+def verify_two_factor_code(
     request: TwoFactorVerifyRequest,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
@@ -159,7 +159,7 @@ async def verify_two_factor_code(
 
 
 @router.post("/2fa/backup-code")
-async def use_backup_code(
+def use_backup_code(
     request: TwoFactorVerifyRequest,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),

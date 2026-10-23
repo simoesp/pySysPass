@@ -444,8 +444,9 @@ R16 / #65 partial follow-up: audit-write and reset-mail failures are logged at E
 counted per worker; `GET /api/v1/security/operations` (admins) reports the counts and the
 scheduler state. The empty scheduler thread no longer starts, and the docs say plainly
 that backups and expiry notices are not automated. Sign-in is now a threadpool route, and
-audit writes run in the threadpool: in a test, a 1.5-second sign-in left another request
-answering in under a second. CI enforces a 75% coverage floor; measured coverage is 76%
+audit writes run in the threadpool. (Correction: the original concurrency test used
+`TestClient`, which gives each thread its own event loop, so it could not detect blocking.
+It was replaced in the third follow-up below.) CI enforces a 75% coverage floor; measured coverage is 76%
 (was 70.73%), and the password-reset service is at 81% (was 30%). New CI gates added on
 this branch: MySQL API/import/readiness tests, the PHP reverse round trip, image
 hardening, and the lock check. The SPA header check now retries connection resets during
@@ -490,3 +491,17 @@ Validation: 390 passed, 12 skipped on MySQL 8.0.46 (6 min 53 s) and on SQLite. T
 are the 2 external PHP fixtures plus 10 tests that need the PHP runtime or a dedicated
 MySQL URL; both run in CI. This is full-suite coverage on MySQL, not new endpoint coverage:
 routes without tests are still untested on either database.
+
+R16 / #65 third follow-up (event-loop blocking): 181 API handlers were `async def` but
+never awaited anything, so their synchronous database, bcrypt, Defuse, and file work ran
+on the event loop and stalled every other request. They are now plain `def` routes,
+which FastAPI runs in its threadpool. The three upload imports stay `async` to read the
+file, but run parsing, per-row encryption, and writes in the threadpool. A static test
+fails if an `async` route without an `await` is reintroduced.
+
+Validation: two tests serve the app with a real uvicorn server, sharing one event loop,
+and time a `/ping` while a 1.5-second sign-in or category listing is in flight. With the
+fix, `/ping` answers in under a second. With the route temporarily reverted to
+`async def`, both tests fail, so they detect blocking. Backend suites passed on SQLite and
+MySQL. Remaining: threadpool size (anyio default, 40 threads) bounds concurrent blocking
+requests per worker, and no load test has measured capacity.

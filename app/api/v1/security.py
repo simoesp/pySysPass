@@ -10,13 +10,13 @@ router = APIRouter()
 
 
 @router.get("/security/public-key")
-async def public_key():
+def public_key():
     """Return the RSA public key used for client-side password encryption."""
     return {"public_key": get_public_key_pem()}
 
 
 @router.get("/security/operations")
-async def operations_status(current_user=Depends(require_admin)):
+def operations_status(current_user=Depends(require_admin)):
     """Operational failures and background-job state for this worker process.
 
     Counters are per process and reset on restart; alert on the ERROR log

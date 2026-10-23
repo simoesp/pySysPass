@@ -33,7 +33,7 @@ def _safe_path(filename: str):
 
 
 @router.get("/")
-async def list_backups(current_user=Depends(require_permission('config_backup'))) -> List[dict]:
+def list_backups(current_user=Depends(require_permission('config_backup'))) -> List[dict]:
     """List all available backup archives."""
     return _svc().list_backups()
 
@@ -58,14 +58,14 @@ def create_backup(
 
 
 @router.get("/{filename}/download")
-async def download_backup(filename: str, current_user=Depends(require_permission('config_backup'))):
+def download_backup(filename: str, current_user=Depends(require_permission('config_backup'))):
     """Download a backup archive by filename."""
     path = _safe_path(filename)
     return FileResponse(path=str(path), media_type="application/zip", filename=filename)
 
 
 @router.post("/{filename}/restore")
-async def restore_backup(
+def restore_backup(
     filename: str,
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_backup')),
@@ -78,7 +78,7 @@ async def restore_backup(
 
 
 @router.delete("/{filename}")
-async def delete_backup(filename: str, current_user=Depends(require_permission('config_backup'))):
+def delete_backup(filename: str, current_user=Depends(require_permission('config_backup'))):
     """Delete a backup archive."""
     _safe_path(filename)
     _svc().delete_backup(filename)

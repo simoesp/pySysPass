@@ -39,7 +39,7 @@ def require_master_pass(current_user: dict):
 
 
 @router.get("/settings", response_model=AllSettings)
-async def get_all_settings(
+def get_all_settings(
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_general')),
 ):
@@ -48,7 +48,7 @@ async def get_all_settings(
 
 
 @router.get("/settings/general", response_model=GeneralSettings)
-async def get_general_settings(
+def get_general_settings(
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_general')),
 ):
@@ -56,7 +56,7 @@ async def get_general_settings(
 
 
 @router.put("/settings/general", response_model=GeneralSettings)
-async def save_general_settings(
+def save_general_settings(
     settings: GeneralSettings,
     request: Request,
     db: Session = Depends(get_db),
@@ -77,7 +77,7 @@ async def save_general_settings(
 
 
 @router.get("/settings/mail", response_model=MailSettings)
-async def get_mail_settings(
+def get_mail_settings(
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_general')),
 ):
@@ -85,7 +85,7 @@ async def get_mail_settings(
 
 
 @router.put("/settings/mail", response_model=MailSettings)
-async def save_mail_settings(
+def save_mail_settings(
     settings: MailSettings,
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_general')),
@@ -96,7 +96,7 @@ async def save_mail_settings(
 
 
 @router.get("/settings/ldap", response_model=LdapSettings)
-async def get_ldap_settings(
+def get_ldap_settings(
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_general')),
 ):
@@ -104,7 +104,7 @@ async def get_ldap_settings(
 
 
 @router.put("/settings/ldap", response_model=LdapSettings)
-async def save_ldap_settings(
+def save_ldap_settings(
     settings: LdapSettings,
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_general')),
@@ -115,7 +115,7 @@ async def save_ldap_settings(
 
 
 @router.get("/settings/accounts", response_model=AccountsSettings)
-async def get_accounts_settings(
+def get_accounts_settings(
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_general')),
 ):
@@ -123,7 +123,7 @@ async def get_accounts_settings(
 
 
 @router.put("/settings/accounts", response_model=AccountsSettings)
-async def save_accounts_settings(
+def save_accounts_settings(
     settings: AccountsSettings,
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_general')),
@@ -138,7 +138,7 @@ async def save_accounts_settings(
 
 
 @router.get("/settings/wiki", response_model=WikiSettings)
-async def get_wiki_settings(
+def get_wiki_settings(
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_general')),
 ):
@@ -146,7 +146,7 @@ async def get_wiki_settings(
 
 
 @router.put("/settings/wiki", response_model=WikiSettings)
-async def save_wiki_settings(
+def save_wiki_settings(
     settings: WikiSettings,
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_general')),
@@ -157,7 +157,7 @@ async def save_wiki_settings(
 
 
 @router.post("/settings/mail/test")
-async def send_test_email(
+def send_test_email(
     body: dict,
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_general')),
@@ -183,7 +183,7 @@ async def send_test_email(
 
 
 @router.get("/settings/two-factor")
-async def get_two_factor_settings(
+def get_two_factor_settings(
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_general')),
 ):
@@ -192,7 +192,7 @@ async def get_two_factor_settings(
 
 
 @router.put("/settings/two-factor")
-async def save_two_factor_settings(
+def save_two_factor_settings(
     body: dict,
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_general')),
@@ -206,7 +206,7 @@ async def save_two_factor_settings(
 
 
 @router.get("/settings/info", response_model=SystemInfo)
-async def get_system_info(
+def get_system_info(
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_general')),
 ):
@@ -214,7 +214,7 @@ async def get_system_info(
 
 
 @router.get("/settings/encryption", response_model=EncryptionStatus)
-async def get_encryption_status(
+def get_encryption_status(
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_encryption')),
 ):
@@ -240,7 +240,7 @@ async def get_encryption_status(
 
 
 @router.get("/settings/encryption/temp-master", response_model=TemporaryMasterPasswordStatus)
-async def get_temp_master_password_status(
+def get_temp_master_password_status(
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_encryption')),
 ):
@@ -248,7 +248,7 @@ async def get_temp_master_password_status(
 
 
 @router.post("/settings/encryption/temp-master", response_model=TemporaryMasterPasswordCreateResponse)
-async def create_temp_master_password(
+def create_temp_master_password(
     body: TemporaryMasterPasswordCreateRequest,
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_encryption')),
@@ -272,7 +272,7 @@ async def create_temp_master_password(
 
 
 @router.post("/settings/encryption/rekey")
-async def rekey_encryption(
+def rekey_encryption(
     body: RekeyRequest,
     db: Session = Depends(get_db),
     current_user=Depends(require_admin),

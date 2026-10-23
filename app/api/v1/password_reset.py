@@ -26,7 +26,7 @@ class VerifyResponse(BaseModel):
     "/password-reset/request", status_code=status.HTTP_200_OK,
     dependencies=[Depends(reject_during_maintenance)],
 )
-async def request_reset(body: ResetRequestBody, db: Session = Depends(get_db)):
+def request_reset(body: ResetRequestBody, db: Session = Depends(get_db)):
     """Send a password-reset email. Always returns 200 to avoid user enumeration."""
     PasswordResetService(db).request_reset(body.email)
     return {"detail": "If that email is registered you will receive a reset link."}
@@ -36,7 +36,7 @@ async def request_reset(body: ResetRequestBody, db: Session = Depends(get_db)):
     "/password-reset/verify/{token}", response_model=VerifyResponse,
     dependencies=[Depends(reject_during_maintenance)],
 )
-async def verify_token(token: str, db: Session = Depends(get_db)):
+def verify_token(token: str, db: Session = Depends(get_db)):
     """Check whether a reset token is valid without consuming it."""
     user = PasswordResetService(db).verify_token(token)
     if not user:
@@ -48,7 +48,7 @@ async def verify_token(token: str, db: Session = Depends(get_db)):
     "/password-reset/confirm", status_code=status.HTTP_200_OK,
     dependencies=[Depends(reject_during_maintenance)],
 )
-async def confirm_reset(body: ResetConfirmBody, db: Session = Depends(get_db)):
+def confirm_reset(body: ResetConfirmBody, db: Session = Depends(get_db)):
     """Set a new password using a valid reset token."""
     ok = PasswordResetService(db).confirm_reset(body.token, body.new_password)
     if not ok:

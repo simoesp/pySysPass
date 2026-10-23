@@ -209,6 +209,6 @@ def test_web_restore_is_disabled_without_touching_database():
 
     database = Mock()
     with pytest.raises(HTTPException) as error:
-        asyncio.run(restore_backup("sample.zip", db=database, current_user={"id": 1}))
+        restore_backup("sample.zip", db=database, current_user={"id": 1})
     assert error.value.status_code == 409
     assert database.mock_calls == []

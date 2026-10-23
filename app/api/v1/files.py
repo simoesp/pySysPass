@@ -18,7 +18,7 @@ router = APIRouter()
 file_access = require_any_permission("acc_files", account_admin=True)
 
 @router.get("/accounts/{account_id}/files", response_model=List[FileResponse])
-async def list_files(
+def list_files(
     account_id: int,
     db: Session = Depends(get_db),
     current_user = Depends(file_access)
@@ -34,7 +34,7 @@ async def list_files(
     return service.get_files(account_id, current_user["id"])
 
 @router.post("/accounts/{account_id}/files", response_model=FileUploadResponse, status_code=status.HTTP_201_CREATED)
-async def upload_file(
+def upload_file(
     account_id: int,
     file_data: FileCreate,
     db: Session = Depends(get_db),
@@ -94,7 +94,7 @@ async def upload_file(
     )
 
 @router.get("/accounts/{account_id}/files/count")
-async def get_file_count(
+def get_file_count(
     account_id: int,
     db: Session = Depends(get_db),
     current_user = Depends(file_access)
@@ -109,7 +109,7 @@ async def get_file_count(
     return {"account_id": account_id, "file_count": count}
 
 @router.get("/accounts/{account_id}/files/{file_id}")
-async def get_file(
+def get_file(
     account_id: int,
     file_id: int,
     db: Session = Depends(get_db),
@@ -139,7 +139,7 @@ async def get_file(
     )
 
 @router.get("/accounts/{account_id}/files/{file_id}/metadata", response_model=FileResponse)
-async def get_file_metadata(
+def get_file_metadata(
     account_id: int,
     file_id: int,
     db: Session = Depends(get_db),
@@ -158,7 +158,7 @@ async def get_file_metadata(
     return file
 
 @router.delete("/accounts/{account_id}/files/{file_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_file(
+def delete_file(
     account_id: int,
     file_id: int,
     db: Session = Depends(get_db),

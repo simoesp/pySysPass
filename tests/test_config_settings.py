@@ -1,4 +1,3 @@
-import asyncio
 from unittest.mock import Mock
 
 from fastapi import HTTPException
@@ -29,9 +28,7 @@ def test_encryption_status_supports_php_account_history_schema(monkeypatch):
     monkeypatch.setattr(config_settings.ConfigService, "get", lambda self, key: None)
 
     with Session(engine) as db:
-        result = asyncio.run(
-            config_settings.get_encryption_status(db=db, current_user={})
-        )
+        result = config_settings.get_encryption_status(db=db, current_user={})
 
     assert result.encrypted_accounts == 1
     assert result.encrypted_history == 1
@@ -40,10 +37,10 @@ def test_encryption_status_supports_php_account_history_schema(monkeypatch):
 def test_unsafe_rekey_cannot_read_or_modify_persisted_secrets():
     db = Mock()
     with pytest.raises(HTTPException) as error:
-        asyncio.run(config_settings.rekey_encryption(
+        config_settings.rekey_encryption(
             body=RekeyRequest(current_key="old-key", new_key="new-key", new_key_confirm="new-key"),
             db=db,
             current_user={"is_admin_app": True},
-        ))
+        )
     assert error.value.status_code == 409
     assert db.mock_calls == []

@@ -39,7 +39,9 @@ def _concurrent_writer(path, key, start):
 def test_concurrent_workers_preserve_each_update(tmp_path, monkeypatch):
     path = tmp_path / "runtime.json"
     monkeypatch.setattr(runtime_json_config.settings, "SYSPASS_RUNTIME_CONFIG_JSON_PATH", str(path))
-    context = multiprocessing.get_context("fork")
+    # spawn: the test process has live threadpool threads, and fork() with
+    # threads can deadlock the child.
+    context = multiprocessing.get_context("spawn")
     start = context.Event()
     keys = list(runtime_json_config.SECTION_KEYS)[:12]
     workers = [context.Process(target=_concurrent_writer, args=(str(path), key, start)) for key in keys]

@@ -33,7 +33,7 @@ class ItemPresetUpdate(BaseModel):
 
 
 @router.get("/item-presets", response_model=List[Dict])
-async def list_presets(
+def list_presets(
     preset_type: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
@@ -42,12 +42,12 @@ async def list_presets(
 
 
 @router.get("/item-presets/types")
-async def list_preset_types(current_user=Depends(get_current_user)):
+def list_preset_types(current_user=Depends(get_current_user)):
     return sorted(VALID_TYPES)
 
 
 @router.get("/item-presets/{preset_id}", response_model=Dict)
-async def get_preset(
+def get_preset(
     preset_id: int,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
@@ -59,7 +59,7 @@ async def get_preset(
 
 
 @router.get("/item-presets/context/{preset_type}", response_model=Optional[Dict])
-async def get_preset_for_context(
+def get_preset_for_context(
     preset_type: str,
     user_id: Optional[int] = None,
     user_group_id: Optional[int] = None,
@@ -73,7 +73,7 @@ async def get_preset_for_context(
 
 
 @router.post("/item-presets", status_code=status.HTTP_201_CREATED, response_model=Dict)
-async def create_preset(
+def create_preset(
     body: ItemPresetCreate,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
@@ -93,7 +93,7 @@ async def create_preset(
 
 
 @router.put("/item-presets/{preset_id}", response_model=Dict)
-async def update_preset(
+def update_preset(
     preset_id: int,
     body: ItemPresetUpdate,
     db: Session = Depends(get_db),
@@ -108,7 +108,7 @@ async def update_preset(
 
 
 @router.delete("/item-presets/{preset_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_preset(
+def delete_preset(
     preset_id: int,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
