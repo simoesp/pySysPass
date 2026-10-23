@@ -9,15 +9,16 @@ from urllib.request import urlopen
 
 def check(base_url: str) -> None:
     base_url = base_url.rstrip("/")
-    for attempt in range(20):
+    # nginx may accept and then reset connections while the container starts.
+    for attempt in range(60):
         try:
             with urlopen(base_url + "/", timeout=2) as response:
                 html = response.read().decode()
             break
-        except URLError:
-            if attempt == 19:
+        except (URLError, ConnectionError):
+            if attempt == 59:
                 raise
-            time.sleep(0.25)
+            time.sleep(0.5)
     asset = re.search(r'(?:src|href)="(/assets/[^"<>]+)"', html)
     assert asset is not None, "Built application asset not found"
     for path in ("/", "/index.html", "/login", asset.group(1)):

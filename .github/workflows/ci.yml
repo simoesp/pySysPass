@@ -35,7 +35,8 @@ jobs:
       - run: pip install --require-hashes -r requirements.lock
       - run: pip install -r requirements-dev.txt
       - run: python scripts/check-requirements-lock.py
-      - run: python -m pytest tests/ -q
+      # Floor just under the measured 76% so coverage cannot silently regress.
+      - run: python -m pytest tests/ -q --cov=app --cov-report=term --cov-fail-under=75
 
   frontend-build:
     name: Frontend tests + build (vitest / vite)

@@ -439,3 +439,18 @@ Limitations: there is no online or zero-downtime rotation; `ENCRYPTION_KEY` rota
 (legacy rows, 2FA state, session claims) is still unsupported; PHP's per-run task progress
 UI and "hash only" option are not offered; the rehearsal used a small dataset, so
 large-vault duration is unmeasured.
+
+R16 / #65 partial follow-up: audit-write and reset-mail failures are logged at ERROR and
+counted per worker; `GET /api/v1/security/operations` (admins) reports the counts and the
+scheduler state. The empty scheduler thread no longer starts, and the docs say plainly
+that backups and expiry notices are not automated. Sign-in is now a threadpool route, and
+audit writes run in the threadpool: in a test, a 1.5-second sign-in left another request
+answering in under a second. CI enforces a 75% coverage floor; measured coverage is 76%
+(was 70.73%), and the password-reset service is at 81% (was 30%). New CI gates added on
+this branch: MySQL API/import/readiness tests, the PHP reverse round trip, image
+hardening, and the lock check. The SPA header check now retries connection resets during
+nginx start-up (a CI flake seen on 02a198c).
+
+Still open for #65: no load or failure-budget test; no browser acceptance suite; no
+full-API MySQL suite; many async routes still do synchronous database work; alerting
+depends on external log monitoring; the two external PHP fixture skips remain.

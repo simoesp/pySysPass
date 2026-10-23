@@ -125,6 +125,25 @@ docker compose -f podman-compose.yml up -d
 Bind mounts need the same ownership on the host (`chown -R 10001:10001`), or
 `--userns`/`:U` mapping with rootless Podman.
 
+### Monitoring and scheduled work
+
+- Alert on backend log lines at `ERROR` level. Failures that must not break a
+  request are logged there instead of being swallowed: audit event writes
+  (`Audit event write failed`) and password-reset mail (`Password reset e-mail
+  could not be sent`; the API response stays the same to avoid revealing
+  accounts). `GET /api/v1/security/operations` (application admins) shows this
+  worker's failure counts since start, and whether a scheduler is running.
+- Nothing is scheduled by default: no automated backups and no password-expiry
+  notices. The scheduler thread starts only when jobs are registered. Run
+  backups from the host scheduler, for example a daily cron entry calling
+  `POST /api/v1/backup/create` or running the backup in the backend container,
+  and copy archives off the host.
+- Probe `/health/ready` for readiness and `/health` for liveness.
+- Sign-in and the audit middleware run blocking work (bcrypt, Defuse key
+  derivation, database writes) in the threadpool. Many other routes still do
+  synchronous database work on the event loop, so size workers for peak load;
+  no load test has established capacity.
+
 ### Reproducible builds
 
 The image copies an explicit file allowlist (see `.dockerignore`); `.env*`,

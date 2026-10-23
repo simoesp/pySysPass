@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
 from fastapi.security import HTTPBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 import secrets
@@ -139,7 +139,16 @@ async def register(user: UserCreate, db: Session = Depends(get_db)):
     )
 
 @router.post("/login", response_model=Token)
-async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+def login(
+    request: Request,
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    otp: str = Form(""),
+    mpass: str = Form(""),
+    oldpass: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    # A plain (sync) route: FastAPI runs it in the threadpool, so bcrypt and
+    # Defuse key derivation do not block the event loop for other requests.
     ip = _client_ip(request)
     track = TrackService(db)
     elog = EventLogService(db)
@@ -181,14 +190,12 @@ async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends
     # a non-admin account exists while maintenance is on.
     enforce_maintenance(db, user)
 
-    login_form = await request.form()
-
     # PHP Authenticator parity: when the global 2FA mode is not disabled,
     # enrolled users must supply a TOTP (or backup) code to log in.
     if TwoFactorConfig(db).get_mode() != "disabled":
         tf_store = TwoFactorStore(db, get_encryption_service())
         if tf_store.is_enabled(user.id):
-            otp = (login_form.get("otp") or "").strip()
+            otp = (otp or "").strip()
             if not otp:
                 raise HTTPException(
                     status_code=428,
@@ -222,8 +229,8 @@ async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends
                     },
                 )
 
-    supplied_master_pass = _decode_secret(login_form.get("mpass"), "master password")
-    old_password = _decode_secret(login_form.get("oldpass"), "previous password")
+    supplied_master_pass = _decode_secret(mpass or None, "master password")
+    old_password = _decode_secret(oldpass or None, "previous password")
     master_pass = decrypt_user_master_pass(user, plain_password)
     # PHP UserPassService::loadUserMPass(): a per-user copy older than the
     # last master password change (MPASS_CHANGED) or one that no longer

@@ -1,10 +1,12 @@
 """Self-service password reset (request → email → confirm)."""
 import hashlib
+import logging
 import secrets
 import time
 from typing import Optional
 from sqlalchemy.orm import Session
 
+from app.core.operations import record_failure
 from app.models.account import User, UserPassRecover
 from app.services.auth_service import set_user_login_password
 from app.services.config_service import ConfigService
@@ -13,6 +15,8 @@ from app.services.email_service import EmailService
 # Tokens expire after 1 hour
 TOKEN_TTL_SECS = 3600
 
+
+logger = logging.getLogger(__name__)
 
 class PasswordResetService:
     def __init__(self, db: Session):
@@ -82,7 +86,10 @@ class PasswordResetService:
                     username=user.username,
                 )
             except Exception:
-                pass  # log in production; don't fail the request
+                # Same response either way (no account enumeration), but the
+                # operator must learn that reset mail is not being delivered.
+                logger.exception("Password reset e-mail could not be sent")
+                record_failure("password_reset_email")
 
         return True
 

@@ -16,7 +16,9 @@ from app.api.v1 import (
 from app.services.readiness_service import run_readiness_checks
 from app.services.runtime_policy import get_policy
 from app.services.task_service import task_service
+from app.core.operations import record_failure
 from contextlib import asynccontextmanager
+import logging
 import re
 
 
@@ -57,6 +59,9 @@ _AUDIT_ROUTES: list[tuple[str, re.Pattern, str, str]] = [
 ]
 
 
+logger = logging.getLogger(__name__)
+
+
 def _resolve_audit(method: str, path: str):
     for m, pattern, action, level in _AUDIT_ROUTES:
         if method == m and pattern.match(path):
@@ -87,7 +92,10 @@ def _get_user_from_request(request: Request):
 async def lifespan(application: FastAPI):
     validate_production_settings(settings)
     bootstrap_database_on_startup()
-    task_service.start_scheduler()
+    # No jobs are registered by default: backups and expiry notices are not
+    # automated (docs/installation.md). Do not run an empty scheduler thread.
+    if task_service.tasks:
+        task_service.start_scheduler()
     yield
     task_service.stop_scheduler()
 
@@ -108,14 +116,30 @@ app.add_middleware(
 )
 
 
+def _write_audit_event(action, level, description, user_id, username, ip) -> None:
+    from app.db.base import SessionLocal
+    from app.services.security_log_service import EventLogService
+
+    db = SessionLocal()
+    try:
+        EventLogService(db).log_event(
+            action=action,
+            description=description,
+            user_id=user_id,
+            login=username or "",
+            ip=ip,
+            level=level,
+        )
+    finally:
+        db.close()
+
+
 @app.middleware("http")
 async def audit_log_middleware(request: Request, call_next):
     response = await call_next(request)
     action, level = _resolve_audit(request.method, request.url.path)
     if action and 200 <= response.status_code < 300:
         try:
-            from app.db.base import SessionLocal
-            from app.services.security_log_service import EventLogService
             user_id, username = _get_user_from_request(request)
             ip = _get_ip(request)
             description = f"{request.method} {request.url.path}"
@@ -124,20 +148,12 @@ async def audit_log_middleware(request: Request, call_next):
             acc_match = re.match(r"^/api/v1/accounts/(\d+)", request.url.path)
             if acc_match:
                 description += f" [acc:{acc_match.group(1)}]"
-            db = SessionLocal()
-            try:
-                EventLogService(db).log_event(
-                    action=action,
-                    description=description,
-                    user_id=user_id,
-                    login=username or "",
-                    ip=ip,
-                    level=level,
-                )
-            finally:
-                db.close()
+            # Synchronous DB work runs in the threadpool, not on the event loop.
+            await run_in_threadpool(_write_audit_event, action, level, description, user_id, username, ip)
         except Exception:
-            pass  # never let audit logging break a request
+            # Never let audit logging break a request, but never hide it either.
+            logger.exception("Audit event write failed for %s %s", request.method, request.url.path)
+            record_failure("audit_log_write")
     return response
 
 MAX_REQUEST_BODY_BYTES = 24 * 1024 * 1024  # matches nginx client_max_body_size
