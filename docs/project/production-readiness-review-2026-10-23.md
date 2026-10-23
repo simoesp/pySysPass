@@ -267,3 +267,21 @@ CI's MySQL job now runs them. Frontend tests (22) and build passed; lint has no
 errors (523 existing warnings). Ruff and Bandit passed. Remaining limitations: CRUD
 coverage on MySQL is limited to the account-reference paths above, not the full API;
 the remaining `User`/`UserGroup`/`UserProfile` nullability exceptions are unchanged.
+
+R13 / #62 follow-up: liveness and readiness are separate. `/health` and `/health/live`
+still answer 200 while the process serves requests. `/health/ready` returns 503
+unless the effective production configuration validates, the runtime JSON config
+parses, the database answers `SELECT 1`, every canonical table and both account views
+exist, and the data, runtime-config, and backup directories are writable. Each check
+has a 3-second timeout and runs in a dedicated four-thread pool, so a hung dependency
+fails the probe instead of blocking request threads. Responses contain only check
+names and generic reasons. All three stacks' backend health checks now use
+`/health/ready` (12-second container timeout), so dependents wait for real readiness.
+
+Validation: 337 backend tests passed, 8 skipped (the two external PHP fixtures plus
+six MySQL tests that need a server). The six MySQL tests passed on disposable MySQL
+8.0.46: an empty database, a bootstrapped one, a dropped view, and a refused
+connection. Ruff and Bandit passed; the three Compose files parsed. Limitations: the
+schema check confirms canonical tables and views exist; it does not compare column
+definitions, migration revision, or encrypted data. A hung database connection may
+hold a pool thread until the driver's own connect timeout.

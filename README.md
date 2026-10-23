@@ -141,7 +141,7 @@ This starts:
 
 - Frontend: `http://localhost:8080`
 - API: `http://localhost:8080/api/v1/` (individual endpoints)
-- Health check: `http://localhost:8080/health`
+- Health check: `http://localhost:8080/health/ready` (readiness; `/health` is liveness only)
 - Graphify report: `http://localhost:8090`
 
 ### First-run setup

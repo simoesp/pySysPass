@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from app.core.config import settings, validate_production_settings
 from app.db.bootstrap import bootstrap_database_on_startup
+from app.db import base as db_base
 from app.db.base import SchemaMutationError
 from app.api.v1 import (
     accounts, auth, categories, clients, users, two_factor, tags, history,
@@ -11,6 +12,7 @@ from app.api.v1 import (
     config_settings, custom_fields, account_sharing, import_export, auth_tokens,
     security_logs, password_reset, ldap, item_presets, backup, plugins,
 )
+from app.services.readiness_service import run_readiness_checks
 from app.services.task_service import task_service
 from contextlib import asynccontextmanager
 import re
@@ -179,5 +181,17 @@ async def root():
     return {"message": "sysPass Python API", "version": "1.0.0"}
 
 @app.get("/health")
+@app.get("/health/live")
 async def health():
+    """Liveness: the process is serving requests. Says nothing about readiness."""
     return {"status": "healthy"}
+
+
+@app.get("/health/ready")
+async def readiness():
+    """Readiness: configuration, database, canonical schema, and storage."""
+    result = await run_readiness_checks(db_base.engine)
+    return JSONResponse(
+        status_code=200 if result["ready"] else 503,
+        content={"status": "ready" if result["ready"] else "not_ready", "checks": result["checks"]},
+    )

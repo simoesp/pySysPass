@@ -139,10 +139,10 @@ jobs:
           PY
       # API/import behavior that SQLite cannot prove (NOT NULL FKs, strict
       # column limits). Uses its own disposable database on this server.
-      - name: Canonical MySQL account and import tests
+      - name: Canonical MySQL account, import, and readiness tests
         env:
           PYSYSPASS_MYSQL_TEST_URL: "mysql+pymysql://root:root@127.0.0.1:3306/"
-        run: python -m pytest -q -rs tests/test_mysql_account_references.py
+        run: python -m pytest -q -rs tests/test_mysql_account_references.py tests/test_mysql_readiness.py
       - name: Build recovery container
         run: docker build -t pysyspass-recovery:ci .
       - name: Rehearse database and mounted runtime recovery

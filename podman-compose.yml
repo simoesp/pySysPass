@@ -50,9 +50,9 @@ services:
       - runtime_data:/app/data
       - backup_data:/app/backups
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=10)"]
       interval: 15s
-      timeout: 5s
+      timeout: 12s
       retries: 10
     depends_on:
       db:

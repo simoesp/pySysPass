@@ -14,7 +14,7 @@ This document describes the current `pySysPass` HTTP API as implemented by the F
 ### Public endpoints
 
 - `GET /`
-- `GET /health`
+- `GET /health`, `GET /health/live`, `GET /health/ready`
 - `POST /api/v1/auth/register`
 - `POST /api/v1/auth/login`
 - Password-reset endpoints
@@ -1045,8 +1045,23 @@ Response entries: `id`, `action` (`account.view` / `account.view.pass` /
 
 ## Health
 
-`GET /health` (no `/api/v1` prefix, unauthenticated) returns
-`{ "status": "healthy" }`; used by the compose healthchecks.
+All health endpoints are unauthenticated and have no `/api/v1` prefix.
+
+- `GET /health` and `GET /health/live` — liveness. Always return
+  `{ "status": "healthy" }` while the process serves requests; they do not
+  check dependencies.
+- `GET /health/ready` — readiness, used by the backend container health checks.
+  Returns 200 `{ "status": "ready", "checks": {...} }` only when the effective
+  production configuration is valid and the runtime JSON config parses, the
+  database answers `SELECT 1`, every canonical sysPass table and both account
+  views exist, and the data, runtime-config, and backup directories are
+  writable. Otherwise it returns 503 with `"status": "not_ready"`. Each check
+  has a 3-second timeout (the schema check runs only after the database check
+  passes). Results contain only fixed check names and generic reasons such as
+  `database unreachable`; details go to the server log.
+
+The schema check confirms the canonical tables and views are present. It does
+not compare column definitions or verify encrypted data.
 
 ## Recommended Usage
 

@@ -54,7 +54,7 @@ Services and published ports:
 | --- | --- | --- |
 | `frontend` | http://localhost:8080 | Web UI |
 | API | http://localhost:8080/api/v1/ | REST endpoints through nginx; backend is private |
-| Health check | http://localhost:8080/health | Liveness probe |
+| Health check | http://localhost:8080/health/ready | Readiness probe (`/health` is liveness only) |
 | `db` | localhost:3306 | MySQL 8 |
 | `graphify` | http://localhost:8090 | Static knowledge-graph report |
 
@@ -63,7 +63,7 @@ creates the full sysPass-compatible schema automatically on first boot. Wait for
 the backend health check to pass before continuing:
 
 ```bash
-curl -fsS http://localhost:8080/health && echo " backend up"
+curl -fsS http://localhost:8080/health/ready && echo " backend ready"
 ```
 
 > **Change the defaults.** `podman-compose.yml` ships development secrets
