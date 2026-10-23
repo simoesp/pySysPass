@@ -1,14 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
-from datetime import timedelta
 import secrets
+import time
 from app.db.base import get_db
 from app.api.deps import get_current_user
 from app.schemas.install import InstallRequest, InstallResponse, InstallStatusResponse
 from app.schemas.user import UserCreate, UserResponse, Token
 from app.services.auth_service import (
-    get_password_hash, verify_password, create_access_token,
+    get_password_hash, verify_password, issue_session_token,
     decrypt_user_master_pass, get_master_password_hash_row,
     finalize_user_master_pass, migrate_user_master_pass,
     verify_master_password_hash, store_user_master_pass,
@@ -22,6 +22,7 @@ from app.models.account import Config, User, UserGroup
 from app.core.security import get_encryption_service
 from app.core.rsa_service import maybe_decrypt
 from app.services.temporary_master_password_service import TemporaryMasterPasswordService
+from app.services.session_service import MAX_SESSION_SECONDS, resolve_session_timeout, session_store
 
 
 def _client_ip(request: Request) -> str:
@@ -272,12 +273,8 @@ async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends
                 },
             )
 
-    access_token = create_access_token(
-        data={"user_id": user.id, "username": user.username},
-        expires_delta=timedelta(hours=24),
-        master_pass=master_pass,
-        is_admin_app=bool(user.isAdminApp),
-        is_admin_acc=bool(user.isAdminAcc),
+    access_token = issue_session_token(
+        user, master_pass=master_pass, timeout_seconds=resolve_session_timeout(db),
     )
     elog.log_event("auth.login.success", f"User '{user.username}' logged in from {ip}",
                    user_id=user.id, login=user.username, ip=ip, level="INFO")
@@ -307,3 +304,41 @@ async def get_current_user_info(
         created_at=user.dateCreate,
         permissions=permissions,
     )
+
+
+def _require_session(current_user: dict) -> dict:
+    session = current_user.get("session")
+    if not session:
+        # sysPass API tokens are managed via /auth-tokens, not sessions.
+        raise HTTPException(status_code=400, detail="Not a browser session token")
+    return session
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout(current_user: dict = Depends(get_current_user)):
+    """Revoke the presented session token, like PHP destroying its session."""
+    session = _require_session(current_user)
+    session_store.revoke_token(session["jti"], session["exp"] or time.time() + MAX_SESSION_SECONDS)
+    return None
+
+
+@router.post("/refresh", response_model=Token)
+async def refresh_session(current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Extend an active session by one inactivity window.
+
+    The SPA calls this only after user input, so an idle browser still times
+    out. The old token is revoked; the session cannot outlive
+    MAX_SESSION_SECONDS from the original login.
+    """
+    session = _require_session(current_user)
+    if time.time() >= float(session["auth_time"]) + MAX_SESSION_SECONDS:
+        raise HTTPException(status_code=401, detail="Session expired or revoked")
+    user = db.query(User).filter(User.id == current_user["id"]).one()
+    token = issue_session_token(
+        user,
+        master_pass=current_user.get("master_pass"),
+        timeout_seconds=resolve_session_timeout(db),
+        auth_time=session["auth_time"],
+    )
+    session_store.revoke_token(session["jti"], session["exp"] or time.time() + MAX_SESSION_SECONDS)
+    return {"access_token": token, "token_type": "bearer"}  # nosec B105

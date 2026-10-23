@@ -43,6 +43,16 @@ def _bootstrap_test_fixtures(db) -> UserGroup:
     return group
 
 
+@pytest.fixture(autouse=True)
+def isolated_session_store(tmp_path, monkeypatch):
+    """Keep session revocation state out of the checkout's data/ directory."""
+    from app.services.session_service import session_store
+
+    monkeypatch.setattr(session_store, "path", tmp_path / "sessions.json")
+    monkeypatch.setattr(session_store, "_cache", None)
+    return session_store
+
+
 @pytest.fixture(scope="function")
 def db_session():
     # Mapped PHP views must not be materialized as tables. Tests should fail

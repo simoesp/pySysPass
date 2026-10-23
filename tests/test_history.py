@@ -120,7 +120,7 @@ def test_history_api_returns_snapshots_to_shared_users(
     from app.api.v1 import history as history_api
     from app.db.base import get_db
     from app.models.account import User
-    from app.services.auth_service import create_access_token, get_password_hash
+    from app.services.auth_service import issue_session_token, get_password_hash
 
     viewer = User(
         username="history-viewer",
@@ -155,7 +155,7 @@ def test_history_api_returns_snapshots_to_shared_users(
         yield db_session
 
     app.dependency_overrides[get_db] = override_get_db
-    token = create_access_token({"user_id": viewer.id, "username": viewer.username})
+    token = issue_session_token(viewer)
     response = TestClient(app).get(
         f"/api/v1/accounts/{created.id}/history",
         headers={"Authorization": f"Bearer {token}"},

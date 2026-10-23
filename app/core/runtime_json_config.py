@@ -118,8 +118,8 @@ def load_runtime_json_config() -> dict:
 
 
 @contextmanager
-def _write_lock(path: Path):
-    """Serialize read/modify/write across local worker processes."""
+def locked_path(path: Path):
+    """Serialize read/modify/write of ``path`` across local worker processes."""
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     descriptor = os.open(str(path) + ".lock", os.O_CREAT | os.O_RDWR, 0o600)
     try:
@@ -129,8 +129,8 @@ def _write_lock(path: Path):
         os.close(descriptor)
 
 
-def _write_document(path: Path, document: dict) -> None:
-    payload = json.dumps(_ensure_sections(document), indent=2, sort_keys=True) + "\n"
+def write_text_atomically(path: Path, payload: str) -> None:
+    """Replace ``path`` with a fsynced 0600 file; readers never see partial data."""
     descriptor, name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     temporary = Path(name)
     try:
@@ -148,10 +148,14 @@ def _write_document(path: Path, document: dict) -> None:
         temporary.unlink(missing_ok=True)
 
 
+def _write_document(path: Path, document: dict) -> None:
+    write_text_atomically(path, json.dumps(_ensure_sections(document), indent=2, sort_keys=True) + "\n")
+
+
 def save_runtime_json_config(document: dict) -> None:
     """Atomically replace the document; use set_runtime_config_values for key updates."""
     path = _config_path()
-    with _write_lock(path):
+    with locked_path(path):
         _write_document(path, document)
 
 
@@ -173,7 +177,7 @@ def set_runtime_config_values(values: dict[str, Optional[str]]) -> set[str]:
     if not recognized:
         return set()
     path = _config_path()
-    with _write_lock(path):
+    with locked_path(path):
         document = load_runtime_json_config()
         for parameter in recognized:
             section, key = SECTION_KEYS[parameter]

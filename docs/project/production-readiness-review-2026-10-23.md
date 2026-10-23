@@ -316,3 +316,32 @@ change in `docs/installation.md`; until then readiness fails closed. Limitations
 frontend nginx master still starts as root; Dependabot does not regenerate
 `requirements.lock` (CI fails until it is refreshed); `Dockerfile.security` was not
 updated and is not a deployment artifact; no container OS vulnerability scan was run.
+
+R7 / #51 follow-up: session tokens now carry a token ID, issue time, original login
+time, and `sfp`, an HMAC of the user's current `User.pass`. Authentication rejects a
+token whose fingerprint no longer matches, so a self-service reset, an administrator
+change, or a password changed by sysPass PHP ends existing sessions. `POST /auth/logout`
+revokes the presented token. Revocations live in `data/sessions.json` (locked, atomic,
+mode 0600, pruned at expiry; deployment state, no PHP schema change). Tokens expire
+after the configured `session_timeout` (default 300 s, clamped to 60–86,400 s) instead
+of 24 hours. `POST /auth/refresh` renews one window and revokes the old token; the SPA
+calls it only after user input, so polling does not keep idle sessions alive. No session
+outlives 24 hours from login. Enabling or disabling 2FA revokes the user's other sessions;
+own-password changes and 2FA changes return a replacement token for the acting
+browser. Tokens issued before this change lack these claims and are rejected. A
+`SECRET_KEY` change invalidates all sessions; per-request permission rechecks are
+unchanged.
+
+Validation: 13 new session tests cover timeout configuration and clamping, expired and
+legacy tokens, logout of one of two sessions, refresh rotation and vault retention, the
+24-hour cap, reset/admin/PHP-side password changes, self-service rotation, 2FA enable
+and disable, API-token refusal, cross-instance revocation, pruning, file mode, and
+corrupt-state recovery. Backend suite: 350 passed, 8 skipped (two external PHP fixtures;
+six MySQL tests, which passed separately on MySQL 8.0.46). Frontend: 24 tests passed,
+build passed, lint 0 errors (523 existing warnings). Ruff and Bandit passed.
+Limitations: PHP's per-user `SessionTimeout` item presets are not applied; revocation is
+shared only by backends that share `/app/data`; an ENCRYPTION_KEY change leaves sessions
+valid without a readable vault key. Separate observation for follow-up: the session
+token embeds the user's master password encrypted with unauthenticated AES-CTR under
+`ENCRYPTION_KEY`, and browsers keep the token in `localStorage`, so token theft plus
+key disclosure exposes the master password.

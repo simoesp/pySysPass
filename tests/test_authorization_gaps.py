@@ -13,7 +13,7 @@ from app.db.base import get_db
 from app.models.account import AccountToUser, User, UserGroup, UserProfile
 from tests.account_refs import account_create
 from app.services.account_service import AccountService
-from app.services.auth_service import create_access_token
+from app.services.auth_service import issue_session_token
 from app.services.file_service import FileService
 from app.services.public_link_service import PublicLinkService
 
@@ -30,7 +30,8 @@ def gap_client(db_session):
 
 
 def _headers(user, **claims):
-    token = create_access_token({'user_id': user.id, 'username': user.username}, **claims)
+    # Admin scope comes from the User row; claims only document intent.
+    token = issue_session_token(user)
     return {'Authorization': 'Bearer ' + token}
 
 

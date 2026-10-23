@@ -6,6 +6,7 @@ from app.core.security import get_encryption_service
 from app.services.user_service import UserService
 from app.services.two_factor_service import TwoFactorConfig, TwoFactorService, TwoFactorStore
 from app.api.deps import get_current_user
+from app.services.session_service import rotate_user_sessions
 
 router = APIRouter()
 
@@ -94,10 +95,12 @@ async def enable_two_factor(
 
     backup_codes = TwoFactorService.generate_backup_codes(8)
     store.enable(user.id, backup_codes)
+    # Sessions opened without a second factor must not outlive enrollment.
     return {
         "message": "2FA enabled successfully",
         "backup_codes": backup_codes,
         "warning": "Save these backup codes in a safe place. They cannot be shown again.",
+        "access_token": rotate_user_sessions(db, user, current_user),
     }
 
 
@@ -117,7 +120,10 @@ async def disable_two_factor(
         raise HTTPException(status_code=401, detail="Invalid password")
 
     store.disable(user.id)
-    return {"message": "2FA disabled successfully"}
+    return {
+        "message": "2FA disabled successfully",
+        "access_token": rotate_user_sessions(db, user, current_user),
+    }
 
 
 @router.post("/2fa/verify")

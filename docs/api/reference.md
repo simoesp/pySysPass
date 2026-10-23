@@ -17,6 +17,7 @@ This document describes the current `pySysPass` HTTP API as implemented by the F
 - `GET /health`, `GET /health/live`, `GET /health/ready`
 - `POST /api/v1/auth/register`
 - `POST /api/v1/auth/login`
+- `POST /api/v1/auth/refresh`, `POST /api/v1/auth/logout`
 - Password-reset endpoints
 - `GET /api/v1/security/public-key`
 - `GET /api/v1/public-links/{hash}/access`
@@ -136,6 +137,34 @@ Successful response:
   "token_type": "bearer"
 }
 ```
+
+### Sessions, refresh, and logout
+
+Session tokens follow sysPass PHP session semantics:
+
+- They expire after the `session_timeout` setting (seconds of inactivity;
+  default 300, clamped to 60–86400). `POST /api/v1/auth/refresh` with a valid
+  session token returns a new token for one more window and revokes the old
+  one. The web UI refreshes only after real user input, so an idle browser
+  times out even while it polls. No session lasts more than 24 hours after
+  login.
+- `POST /api/v1/auth/logout` (204) revokes the presented token server-side.
+  A copied bearer stops working.
+- Changing or resetting a user's password, whether in pySysPass or in sysPass
+  PHP, invalidates every token issued before the change. Enabling or disabling
+  2FA revokes the user's other sessions. Those self-service responses
+  (`POST /users/{id}/password` for your own account, `POST /2fa/enable`,
+  `POST /2fa/disable`) include an `access_token` that replaces the caller's
+  token.
+- Changing `SECRET_KEY` invalidates all tokens. Tokens issued before this
+  change (without session claims) are rejected; users sign in again.
+- Revoked token IDs live in `data/sessions.json` until they expire. This is
+  deployment state, not PHP data. Backends that share it must share `/app/data`.
+  Deleting it forgets only revocations of tokens that have not yet expired.
+
+Per-user `SessionTimeout` item presets are not applied yet. PHP stores them as
+serialized objects with an address/mask condition, and pySysPass does not read
+that format.
 
 Possible special error flows:
 

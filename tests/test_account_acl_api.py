@@ -6,7 +6,7 @@ from app.db.base import get_db
 from app.models.account import User, UserGroup
 from tests.account_refs import account_create
 from app.services.account_service import AccountService
-from app.services.auth_service import create_access_token, get_password_hash
+from app.services.auth_service import issue_session_token, get_password_hash
 
 
 def _make_client(db_session):
@@ -23,8 +23,8 @@ def _make_client(db_session):
     return app, TestClient(app)
 
 
-def _auth_headers(user_id: int, username: str):
-    token = create_access_token({"user_id": user_id, "username": username})
+def _auth_headers(user):
+    token = issue_session_token(user)
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -67,7 +67,7 @@ def test_accounts_api_shared_user_view_only_cannot_update(db_session, encryption
     )
 
     app, client = _make_client(db_session)
-    headers = _auth_headers(viewer.id, viewer.username)
+    headers = _auth_headers(viewer)
 
     fetch = client.get(f"/api/v1/accounts/{account.id}", headers=headers)
     assert fetch.status_code == 200
@@ -93,8 +93,8 @@ def test_accounts_api_owner_can_grant_and_revoke_user_acl(db_session, encryption
     )
 
     app, client = _make_client(db_session)
-    owner_headers = _auth_headers(test_user.id, test_user.username)
-    viewer_headers = _auth_headers(viewer.id, viewer.username)
+    owner_headers = _auth_headers(test_user)
+    viewer_headers = _auth_headers(viewer)
 
     before = client.get(f"/api/v1/accounts/{account.id}", headers=viewer_headers)
     assert before.status_code == 404
@@ -132,7 +132,7 @@ def test_accounts_api_non_owner_cannot_manage_user_acl(db_session, encryption_se
     )
 
     app, client = _make_client(db_session)
-    outsider_headers = _auth_headers(outsider.id, outsider.username)
+    outsider_headers = _auth_headers(outsider)
 
     grant = client.put(
         f"/api/v1/accounts/{account.id}/users/{target.id}",
@@ -155,8 +155,8 @@ def test_accounts_api_group_acl_grant_allows_group_member_visibility(db_session,
     )
 
     app, client = _make_client(db_session)
-    owner_headers = _auth_headers(test_user.id, test_user.username)
-    member_headers = _auth_headers(member.id, member.username)
+    owner_headers = _auth_headers(test_user)
+    member_headers = _auth_headers(member)
 
     before = client.get(f"/api/v1/accounts/{account.id}", headers=member_headers)
     assert before.status_code == 404

@@ -151,6 +151,39 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None,
     return encoded_jwt
 
 
+def issue_session_token(
+    user: User,
+    *,
+    master_pass: Optional[str] = None,
+    timeout_seconds: Optional[int] = None,
+    auth_time: Optional[float] = None,
+) -> str:
+    """Mint a revocable, inactivity-limited session token (see session_service)."""
+    from app.services.session_service import (
+        DEFAULT_SESSION_TIMEOUT, MAX_SESSION_SECONDS, new_session_id, session_fingerprint,
+    )
+
+    now = time()
+    started = now if auth_time is None else float(auth_time)
+    lifetime = min(timeout_seconds or DEFAULT_SESSION_TIMEOUT, max(0.0, started + MAX_SESSION_SECONDS - now))
+    data = {
+        "user_id": user.id,
+        "username": user.username,
+        # Float timestamps keep tokens minted right after a revocation valid.
+        "iat": now,
+        "auth_time": started,
+        "jti": new_session_id(),
+        "sfp": session_fingerprint(user),
+    }
+    return create_access_token(
+        data,
+        expires_delta=timedelta(seconds=lifetime),
+        master_pass=master_pass,
+        is_admin_app=bool(user.isAdminApp),
+        is_admin_acc=bool(user.isAdminAcc),
+    )
+
+
 def decode_token(token: str) -> Optional[dict]:
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])

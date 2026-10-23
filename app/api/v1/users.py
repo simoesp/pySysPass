@@ -10,6 +10,7 @@ from app.services.user_profile_service import UserProfileService
 from app.services.auth_service import verify_password
 from app.models.account import User
 from app.api.deps import get_current_user, require_permission
+from app.services.session_service import rotate_user_sessions
 
 
 class PasswordChangeRequest(BaseModel):
@@ -131,4 +132,10 @@ async def change_password(
     updated = service.update_user_password(user_id, body.new_password)
     if not updated:
         raise HTTPException(status_code=404, detail="User not found")
-    return {"message": "Password updated successfully"}
+    # The changed hash already invalidates older tokens (credential
+    # fingerprint); a self-service change keeps the acting session alive.
+    user = db.query(User).filter(User.id == user_id).first()
+    return {
+        "message": "Password updated successfully",
+        "access_token": rotate_user_sessions(db, user, current_user) if is_self else None,
+    }

@@ -1,10 +1,13 @@
 """Centralized FastAPI dependencies for auth and role checks."""
+import hmac
+
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
 from app.db.base import get_db
 from app.services.auth_service import decode_token
+from app.services.session_service import session_fingerprint, session_store
 from app.models.account import User
 
 security = HTTPBearer()
@@ -111,6 +114,16 @@ def get_current_user(
     user = db.query(User).filter(User.id == user_id).first()
     if user is None or not user.isUserEnabled:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+    # Sessions end on logout, credential change, or explicit revocation, not
+    # only at expiry (sysPass PHP destroys the server-side session).
+    fingerprint = payload.get("sfp")
+    if (
+        not isinstance(fingerprint, str)
+        or not payload.get("jti")
+        or not hmac.compare_digest(fingerprint, session_fingerprint(user))
+        or session_store.is_revoked(payload)
+    ):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired or revoked")
     return {
         "id": user.id,
         "username": user.username,
@@ -118,6 +131,11 @@ def get_current_user(
         "is_admin": bool(user.isAdminApp),
         "is_admin_app": bool(user.isAdminApp),
         "is_admin_acc": bool(user.isAdminAcc),
+        "session": {
+            "jti": payload["jti"],
+            "exp": payload.get("exp"),
+            "auth_time": payload.get("auth_time", payload.get("iat")),
+        },
     }
 
 

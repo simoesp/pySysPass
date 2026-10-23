@@ -107,6 +107,14 @@ Compatibility should be treated as successful only when:
   ACL-relevant rows for all 100 accounts and ten users. CI reconstructs the
   corpus without MySQL or secret payloads and checks both the secure default
   and PHP's optional full-group-access behavior.
+- ✅ Sessions follow PHP's inactivity timeout (`session_timeout`, default 300
+  seconds, from runtime JSON or the `Config` table; PHP's `config.xml`
+  `sessionTimeout` is not read) and end on logout.
+  Tokens bind to an HMAC of `User.pass`, so a password changed by sysPass PHP
+  also ends pySysPass sessions. Revocation state lives in `data/sessions.json`,
+  not in PHP tables.
+- PHP's per-user `SessionTimeout` item presets (serialized objects with
+  address/mask) are not applied; only the global timeout is.
 - Confirm user-group membership behavior matches PHP tables exactly.
 - Compare admin, account-admin, disabled-user, and forced-password-change behavior with upstream sysPass flows.
 

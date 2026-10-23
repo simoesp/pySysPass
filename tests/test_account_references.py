@@ -14,7 +14,7 @@ from app.api.v1 import accounts, categories, clients
 from app.db.base import get_db
 from app.models.account import Account, AccountHistory, Category, Client, Tag
 from app.schemas.user_profile import ProfilePermissions
-from app.services.auth_service import create_access_token
+from app.services.auth_service import issue_session_token
 from app.services.category_service import make_item_hash
 from app.services.import_export_service import (
     CsvImportService,
@@ -41,7 +41,7 @@ def _headers(db_session, user):
         {key: True for key in ProfilePermissions.model_fields}
     ).encode("utf-8")
     db_session.commit()
-    token = create_access_token({"user_id": user.id, "username": user.username})
+    token = issue_session_token(user)
     return {"Authorization": f"Bearer {token}"}
 
 

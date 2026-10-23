@@ -26,7 +26,7 @@ from app.db.base import get_db
 from app.db.bootstrap import bootstrap_database
 from app.models.account import Account, Category, Client, User, UserGroup, UserProfile
 from app.schemas.user_profile import ProfilePermissions
-from app.services.auth_service import create_access_token, get_password_hash
+from app.services.auth_service import issue_session_token, get_password_hash
 from app.services.category_service import make_item_hash
 from app.services.import_export_service import CsvImportService
 
@@ -100,7 +100,7 @@ def _api(session):
 
 
 def _headers(user):
-    token = create_access_token({"user_id": user.id, "username": user.username})
+    token = issue_session_token(user)
     return {"Authorization": f"Bearer {token}"}
 
 

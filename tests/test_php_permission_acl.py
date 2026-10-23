@@ -12,7 +12,7 @@ from app.schemas.user_profile import ProfilePermissions
 from app.models.account import User, UserGroup
 from app.models.custom_field import CustomFieldDef, CustomFieldType, CustomFieldValue
 from app.services.account_service import AccountService
-from app.services.auth_service import create_access_token, decode_token, get_password_hash
+from app.services.auth_service import issue_session_token, decode_token, get_password_hash
 
 
 def _client(db_session):
@@ -40,11 +40,8 @@ def _set_permissions(db_session, user, **grants):
 
 
 def _headers(user, *, is_admin_app=False, is_admin_acc=False):
-    token = create_access_token(
-        {"user_id": user.id, "username": user.username},
-        is_admin_app=is_admin_app,
-        is_admin_acc=is_admin_acc,
-    )
+    # Admin scope comes from the User row; the flags only document intent.
+    token = issue_session_token(user)
     return {"Authorization": f"Bearer {token}"}
 
 

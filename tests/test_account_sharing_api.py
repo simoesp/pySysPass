@@ -6,7 +6,7 @@ from app.db.base import get_db
 from app.models.account import User, UserGroup, UserToUserGroup
 from tests.account_refs import account_create
 from app.services.account_service import AccountService
-from app.services.auth_service import create_access_token, get_password_hash
+from app.services.auth_service import issue_session_token, get_password_hash
 
 
 def _make_client(db_session):
@@ -23,8 +23,8 @@ def _make_client(db_session):
     return app, TestClient(app)
 
 
-def _auth_headers(user_id: int, username: str, is_admin: bool = False):
-    token = create_access_token({"user_id": user_id, "username": username}, is_admin=is_admin)
+def _auth_headers(user):
+    token = issue_session_token(user)
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -78,7 +78,7 @@ def test_account_sharing_api_only_owner_can_share_account(db_session, encryption
     )
 
     app, client = _make_client(db_session)
-    headers = _auth_headers(outsider.id, outsider.username)
+    headers = _auth_headers(outsider)
     response = client.post(
         f"/api/v1/accounts/{account.id}/share/users",
         params={"user_id": target.id, "is_edit": "true"},
@@ -105,7 +105,7 @@ def test_account_sharing_api_owner_can_list_shared_users(db_session, encryption_
     )
 
     app, client = _make_client(db_session)
-    owner_headers = _auth_headers(test_user.id, test_user.username)
+    owner_headers = _auth_headers(test_user)
     response = client.get(f"/api/v1/accounts/{account.id}/share/users", headers=owner_headers)
 
     assert response.status_code == 200
@@ -134,7 +134,7 @@ def test_account_sharing_api_non_owner_cannot_list_shared_users(db_session, encr
     )
 
     app, client = _make_client(db_session)
-    outsider_headers = _auth_headers(outsider.id, outsider.username)
+    outsider_headers = _auth_headers(outsider)
     response = client.get(f"/api/v1/accounts/{account.id}/share/users", headers=outsider_headers)
 
     assert response.status_code == 403
@@ -162,12 +162,12 @@ def test_account_sharing_api_user_shared_accounts_are_self_only(db_session, encr
 
     app, client = _make_client(db_session)
 
-    self_headers = _auth_headers(target.id, target.username)
+    self_headers = _auth_headers(target)
     self_response = client.get(f"/api/v1/accounts/users/{target.id}/shared-accounts", headers=self_headers)
     assert self_response.status_code == 200
     assert len(self_response.json()) == 1
 
-    viewer_headers = _auth_headers(viewer.id, viewer.username)
+    viewer_headers = _auth_headers(viewer)
     blocked = client.get(f"/api/v1/accounts/users/{target.id}/shared-accounts", headers=viewer_headers)
     assert blocked.status_code == 403
 
@@ -197,12 +197,12 @@ def test_account_sharing_api_group_accounts_require_membership(db_session, encry
 
     app, client = _make_client(db_session)
 
-    member_headers = _auth_headers(member.id, member.username)
+    member_headers = _auth_headers(member)
     member_response = client.get(f"/api/v1/accounts/user-groups/{shared_group.id}/accounts", headers=member_headers)
     assert member_response.status_code == 200
     assert len(member_response.json()) == 1
 
-    outsider_headers = _auth_headers(outsider.id, outsider.username)
+    outsider_headers = _auth_headers(outsider)
     outsider_response = client.get(f"/api/v1/accounts/user-groups/{shared_group.id}/accounts", headers=outsider_headers)
     assert outsider_response.status_code == 403
 
