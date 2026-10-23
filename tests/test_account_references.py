@@ -21,7 +21,7 @@ from app.services.import_export_service import (
     KeePassImportService,
     XmlImportService,
 )
-from tests.account_refs import TEST_CATEGORY_ID, TEST_CLIENT_ID
+from tests.account_refs import TEST_CATEGORY_ID, TEST_CLIENT_ID, TEST_MASTER_PASSWORD
 
 
 def _client(db_session):
@@ -41,7 +41,7 @@ def _headers(db_session, user):
         {key: True for key in ProfilePermissions.model_fields}
     ).encode("utf-8")
     db_session.commit()
-    token = issue_session_token(user)
+    token = issue_session_token(user, master_pass=TEST_MASTER_PASSWORD)
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -168,7 +168,7 @@ def test_category_referenced_only_by_history_cannot_be_deleted(db_session, test_
 
 
 def test_csv_import_rejects_rows_without_client_or_category(db_session, encryption_service, test_user):
-    importer = CsvImportService(db_session, encryption_service, test_user.id)
+    importer = CsvImportService(db_session, encryption_service, test_user.id, master_password=TEST_MASTER_PASSWORD)
     rows = importer.parse_csv(
         "name,client,category,password\n"
         "complete,Acme,Servers,secret\n"
@@ -183,7 +183,9 @@ def test_csv_import_rejects_rows_without_client_or_category(db_session, encrypti
 
 
 def test_xml_import_rejects_accounts_without_client_or_category(db_session, encryption_service, test_user):
-    importer = XmlImportService(db_session, encryption_service, test_user.id)
+    importer = XmlImportService(
+        db_session, encryption_service, test_user.id, current_master_password=TEST_MASTER_PASSWORD
+    )
     stats = importer.import_accounts([
         {"name": "no-refs", "pass": "secret"},
         {"name": "complete", "pass": "secret", "client": "Acme", "category": "Servers"},
@@ -200,7 +202,7 @@ def test_keepass_import_matches_php_client_and_category_mapping(db_session, encr
     <Entry><String><Key>Title</Key><Value>nested entry</Value></String></Entry>
   </Group>
 </Group></Root></KeePassFile>"""
-    importer = KeePassImportService(db_session, encryption_service, test_user.id)
+    importer = KeePassImportService(db_session, encryption_service, test_user.id, master_password=TEST_MASTER_PASSWORD)
     stats = importer.import_accounts(importer.parse_keepass(xml))
     assert stats == {"success": 2, "failed": 0, "skipped": 0}
 

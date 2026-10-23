@@ -2,7 +2,7 @@
 import pytest
 
 from app.models.account import EventLog, User
-from tests.account_refs import account_create
+from tests.account_refs import account_create, TEST_MASTER_PASSWORD
 from app.services.account_service import AccountService
 from app.services.account_audit_service import AccountAuditService, account_marker
 from app.services.auth_service import get_password_hash
@@ -10,7 +10,7 @@ from app.services.auth_service import get_password_hash
 
 def _account(db_session, encryption_service, user, title="Secret"):
     return AccountService(db_session, encryption_service).create_account(
-        account_create(title=title, password="pass", is_public=True), user.id,
+        account_create(title=title, password="pass", is_public=True), user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
 
@@ -86,7 +86,7 @@ def test_audit_endpoint_records_and_gates_access(db_session, encryption_service,
     # password, then reads the audit
     app.dependency_overrides[get_current_user] = lambda: {
         "id": test_user.id, "username": test_user.username,
-        "is_admin": True, "is_admin_app": True, "is_admin_acc": True, "master_pass": None,
+        "is_admin": True, "is_admin_app": True, "is_admin_acc": True, "master_pass": TEST_MASTER_PASSWORD,
     }
     client = TestClient(app)
     assert client.get(f"/api/v1/accounts/{a.id}/password").status_code == 200

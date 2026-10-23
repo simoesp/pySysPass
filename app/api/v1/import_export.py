@@ -9,6 +9,7 @@ from app.db.base import get_db
 from app.core.security import get_encryption_service
 from app.api.deps import require_permission
 from app.models.account import User
+from app.services.auth_service import get_master_password_hash_row, verify_master_password_hash
 from app.services.import_export_service import (
     CsvImportService,
     XmlImportService,
@@ -24,6 +25,25 @@ class KdbxExportRequest(BaseModel):
     export_password: str = Field(min_length=12, max_length=1024)
     export_password_confirm: str = Field(min_length=12, max_length=1024)
     account_ids: Optional[list[int]] = None
+
+
+def _import_master_password(db: Session, current_user: dict, supplied: str = "") -> str:
+    """Vault key used to store imported passwords in the PHP Defuse format."""
+    master = current_user.get("master_pass")
+    if supplied and supplied != master:
+        row = get_master_password_hash_row(db)
+        if not verify_master_password_hash(supplied, row.value if row else None):
+            raise HTTPException(status_code=400, detail="current_master_password does not match the vault")
+        master = supplied
+    if not master:
+        raise HTTPException(
+            status_code=428,
+            detail={
+                "code": "MASTER_PASSWORD_REQUIRED",
+                "message": "Sign in with an unlocked vault to import account passwords",
+            },
+        )
+    return master
 
 
 @router.post("/import/csv")
@@ -42,7 +62,9 @@ async def import_csv(
         content_str = content.decode('utf-8')
     except UnicodeDecodeError:
         raise HTTPException(status_code=400, detail="File must be UTF-8 encoded")
-    service = CsvImportService(db, get_encryption_service(), user_id)
+    service = CsvImportService(
+        db, get_encryption_service(), user_id, master_password=_import_master_password(db, current_user)
+    )
     try:
         data = service.parse_csv(content_str, delimiter=delimiter)
         stats = service.import_accounts(data)
@@ -76,7 +98,7 @@ async def import_xml(
         user_id,
         export_password=export_password,
         import_master_password=import_master_password,
-        current_master_password=current_master_password,
+        current_master_password=_import_master_password(db, current_user, current_master_password),
     )
     try:
         data = service.parse_xml(content_str)
@@ -102,7 +124,9 @@ async def import_keepass(
         content_str = content.decode('utf-8')
     except UnicodeDecodeError:
         raise HTTPException(status_code=400, detail="File must be UTF-8 encoded")
-    service = KeePassImportService(db, get_encryption_service(), user_id)
+    service = KeePassImportService(
+        db, get_encryption_service(), user_id, master_password=_import_master_password(db, current_user)
+    )
     try:
         data = service.parse_keepass(content_str)
         stats = service.import_accounts(data)

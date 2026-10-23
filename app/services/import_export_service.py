@@ -29,6 +29,7 @@ from app.core.defuse_compat import (
 )
 from app.core.syspass_runtime_config import get_password_salt
 from app.services.auth_service import get_password_hash
+from app.services.account_service import VaultRequiredError
 from app.services.category_service import make_item_hash
 
 logger = logging.getLogger(__name__)
@@ -37,17 +38,28 @@ logger = logging.getLogger(__name__)
 class ImportService:
     """Base import service with common functionality"""
 
-    def __init__(self, db: Session, encryption_service: EncryptionService, user_id: int):
+    def __init__(
+        self,
+        db: Session,
+        encryption_service: EncryptionService,
+        user_id: int,
+        master_password: Optional[str] = None,
+    ):
         self.db = db
         self.encryption = encryption_service
         self.user_id = user_id
+        # Vault master password: plaintext rows are stored as PHP Crypt::encrypt()
+        # ciphertext under it, never in a Python-only format.
+        self.master_password = master_password or ""
         self.imported_accounts = []
         self.errors = []
 
     def _encrypt_password(self, password: str) -> tuple:
-        """Encrypt password using the encryption service"""
-        encrypted = self.encryption.encrypt(password)
-        return encrypted, b""  # Empty key identifies the Python AES fallback.
+        """Encrypt like sysPass PHP ImportBase::addAccount() (Defuse, master key)."""
+        if not self.master_password:
+            raise VaultRequiredError("Master password required to import account passwords")
+        pass_hex, key_hex = encrypt_account_pass(password or "", self.master_password)
+        return pass_hex.encode(), key_hex.encode()
 
     def _user_group_id(self) -> int:
         user = self.db.get(User, self.user_id)
@@ -206,7 +218,7 @@ class XmlImportService(ImportService):
         import_master_password: Optional[str] = None,
         current_master_password: Optional[str] = None,
     ):
-        super().__init__(db, encryption_service, user_id)
+        super().__init__(db, encryption_service, user_id, master_password=current_master_password)
         self.export_password = export_password or ""
         self.import_master_password = import_master_password or ""
         self.current_master_password = current_master_password or ""

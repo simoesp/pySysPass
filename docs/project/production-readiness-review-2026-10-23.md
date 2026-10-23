@@ -377,3 +377,31 @@ returned 413 for a 25 MiB API body, forwarded a 2 MiB body, and passed the heade
 Ruff and Bandit passed. Limitations: other workers see setting changes within two
 seconds; extension checks do not inspect content (PHP checks MIME); maintenance does
 not stop external PHP writers; configuring real TLS remains a deployment task.
+
+R5 / #56 follow-up: pySysPass no longer writes Python-only credential formats.
+Account create, password change, and copy, plus CSV/KeePass/XML imports, encrypt with
+Defuse under the vault master password, as PHP `Crypt::encrypt()` does. Without an
+unlocked vault (API tokens, or sessions whose vault could not be opened) these writes,
+password reads, and imports return `428 MASTER_PASSWORD_REQUIRED` instead of falling
+back. Native rows are never handed to the legacy decryptor; previously such a read
+raised a 500. A supplied XML target master must match `masterPwd`. Public links are
+created natively: a PHP-serialized `Vault` over the `AccountExtData` snapshot that
+`getDataForLink()` yields, keyed by `PublicLinkKey`, with PHP's 30-byte hex hash and
+`publinks_max_time` lifetime. Creation honours `publinks_enabled` like the PHP UI.
+Access passwords on new links are rejected because PHP has no such field. Legacy
+Python rows and links remain readable and are not rewritten. Failed decryptions no
+longer increment `countDecrypt`.
+
+Validation: re-serializing the PHP-authored fixture reproduced both the outer Vault and
+the inner AccountExtData bytes exactly. In `php:8.2-cli` with upstream sysPass
+`9d0e169` and Defuse v2.4.0, PHP's `Crypt::decrypt`, `Vault::getData`, `PublicLinkKey`,
+and `Util::unserialize` decoded all seven Python credential writes (API create, update,
+copy, whitespace password, CSV, KeePass, XML) and a Python-created link with exact
+field values. As a negative control, the same PHP code rejected the previous Python
+formats (`BadFormatException`; link data not a Vault). This round trip is now the CI job
+"PHP reads Python writes". Backend: 370 passed, 9 skipped (two external fixtures; six
+MySQL and one PHP test that need their runtimes, all passing separately). Frontend tests
+and build passed. Ruff and Bandit passed. Remaining: built-in 2FA state still uses a
+Python format in the PHP `Authenticator` plugin row; the round trip uses PHP's class
+library, not the PHP web UI; PHP API-token vaults (`AuthToken.vault`) are not read, so
+token callers cannot write credentials; link refresh is not implemented.

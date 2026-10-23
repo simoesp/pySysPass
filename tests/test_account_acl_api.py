@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 from app.api.v1 import accounts
 from app.db.base import get_db
 from app.models.account import User, UserGroup
-from tests.account_refs import account_create
+from tests.account_refs import account_create, TEST_MASTER_PASSWORD
 from app.services.account_service import AccountService
 from app.services.auth_service import issue_session_token, get_password_hash
 
@@ -24,7 +24,7 @@ def _make_client(db_session):
 
 
 def _auth_headers(user):
-    token = issue_session_token(user)
+    token = issue_session_token(user, master_pass=TEST_MASTER_PASSWORD)
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -63,7 +63,7 @@ def test_accounts_api_shared_user_view_only_cannot_update(db_session, encryption
             is_public=True,
             shared_users=[{"user_id": viewer.id, "is_edit": False}],
         ),
-        test_user.id,
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     app, client = _make_client(db_session)
@@ -89,7 +89,7 @@ def test_accounts_api_owner_can_grant_and_revoke_user_acl(db_session, encryption
     service = AccountService(db_session, encryption_service)
     account = service.create_account(
         account_create(title="ACL Route", password="secret123", is_public=True),
-        test_user.id,
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     app, client = _make_client(db_session)
@@ -128,7 +128,7 @@ def test_accounts_api_non_owner_cannot_manage_user_acl(db_session, encryption_se
     service = AccountService(db_session, encryption_service)
     account = service.create_account(
         account_create(title="Owner Only ACL", password="secret123", is_public=True),
-        test_user.id,
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     app, client = _make_client(db_session)
@@ -151,7 +151,7 @@ def test_accounts_api_group_acl_grant_allows_group_member_visibility(db_session,
     service = AccountService(db_session, encryption_service)
     account = service.create_account(
         account_create(title="Group ACL API", password="secret123", is_public=True),
-        test_user.id,
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     app, client = _make_client(db_session)

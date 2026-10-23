@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 from app.api.v1 import account_sharing
 from app.db.base import get_db
 from app.models.account import User, UserGroup, UserToUserGroup
-from tests.account_refs import account_create
+from tests.account_refs import account_create, TEST_MASTER_PASSWORD
 from app.services.account_service import AccountService
 from app.services.auth_service import issue_session_token, get_password_hash
 
@@ -24,7 +24,7 @@ def _make_client(db_session):
 
 
 def _auth_headers(user):
-    token = issue_session_token(user)
+    token = issue_session_token(user, master_pass=TEST_MASTER_PASSWORD)
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -57,7 +57,7 @@ def test_account_sharing_api_requires_authentication(db_session, encryption_serv
     target = _make_user(db_session, "share-target", target_group.id)
     account = AccountService(db_session, encryption_service).create_account(
         account_create(title="Protected Sharing", password="secret123", is_public=True),
-        test_user.id,
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     app, client = _make_client(db_session)
@@ -74,7 +74,7 @@ def test_account_sharing_api_only_owner_can_share_account(db_session, encryption
     target = _make_user(db_session, "target-share", other_group.id)
     account = AccountService(db_session, encryption_service).create_account(
         account_create(title="Owner Controlled", password="secret123", is_public=True),
-        test_user.id,
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     app, client = _make_client(db_session)
@@ -101,7 +101,7 @@ def test_account_sharing_api_owner_can_list_shared_users(db_session, encryption_
             is_public=True,
             shared_users=[{"user_id": target.id, "is_edit": True}],
         ),
-        test_user.id,
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     app, client = _make_client(db_session)
@@ -130,7 +130,7 @@ def test_account_sharing_api_non_owner_cannot_list_shared_users(db_session, encr
             is_public=True,
             shared_users=[{"user_id": target.id, "is_edit": False}],
         ),
-        test_user.id,
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     app, client = _make_client(db_session)
@@ -156,7 +156,7 @@ def test_account_sharing_api_user_shared_accounts_are_self_only(db_session, encr
             is_public=True,
             shared_users=[{"user_id": target.id, "is_edit": False}],
         ),
-        owner.id,
+        owner.id, master_pass=TEST_MASTER_PASSWORD
     )
     assert account.id is not None
 
@@ -191,7 +191,7 @@ def test_account_sharing_api_group_accounts_require_membership(db_session, encry
             is_public=True,
             shared_groups=[{"group_id": shared_group.id, "is_edit": False}],
         ),
-        test_user.id,
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
     assert account.id is not None
 

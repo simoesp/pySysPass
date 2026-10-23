@@ -10,12 +10,24 @@ from fastapi.testclient import TestClient
 
 from app.api.v1 import accounts, auth, files, item_presets, notifications, public_links, two_factor, users
 from app.db.base import get_db
-from app.models.account import AccountToUser, User, UserGroup, UserProfile
-from tests.account_refs import account_create
+from app.models.account import AccountToUser, Config, User, UserGroup, UserProfile
+from tests.account_refs import account_create, TEST_MASTER_PASSWORD
 from app.services.account_service import AccountService
 from app.services.auth_service import issue_session_token
 from app.services.file_service import FileService
 from app.services.public_link_service import PublicLinkService
+
+
+@pytest.fixture(autouse=True)
+def public_links_enabled(db_session, tmp_path, monkeypatch):
+    # sysPass ships with public links disabled and needs a password salt.
+    monkeypatch.setattr(
+        "app.core.runtime_json_config.settings.SYSPASS_RUNTIME_CONFIG_JSON_PATH", str(tmp_path / "rt.json")
+    )
+    monkeypatch.setattr("app.core.syspass_runtime_config.load_syspass_runtime_config",
+                        lambda: {"passwordSalt": "authorization-gap-salt"})
+    db_session.add(Config(parameter="publinks_enabled", value="true"))
+    db_session.commit()
 
 
 @pytest.fixture
@@ -31,7 +43,7 @@ def gap_client(db_session):
 
 def _headers(user, **claims):
     # Admin scope comes from the User row; claims only document intent.
-    token = issue_session_token(user)
+    token = issue_session_token(user, master_pass=TEST_MASTER_PASSWORD)
     return {'Authorization': 'Bearer ' + token}
 
 
@@ -65,7 +77,8 @@ def test_admin_claim_does_not_survive_demotion(gap_client, db_session, test_user
 
 def _account(db_session, encryption_service, user):
     return AccountService(db_session, encryption_service).create_account(
-        account_create(title='Authorization regression', password='test-only', is_public=True), user.id)
+        account_create(title='Authorization regression', password='test-only', is_public=True),
+        user.id, master_pass=TEST_MASTER_PASSWORD)
 
 
 def test_php_profile_denies_files_and_link_creation(gap_client, db_session, encryption_service, test_user):
@@ -117,7 +130,7 @@ def test_nested_resources_must_belong_to_url_account(gap_client, db_session, enc
     first = _account(db_session, encryption_service, test_user)
     second = _account(db_session, encryption_service, test_user)
     file = FileService(db_session).create_file(second.id, 'sample.txt', 'text/plain', 4, b'test', 'txt')
-    link = PublicLinkService(db_session).create_public_link(second.id, test_user.id)
+    link = PublicLinkService(db_session).create_public_link(second.id, test_user.id, master_pass=TEST_MASTER_PASSWORD)
     headers = _headers(test_user)
     for suffix in (f'files/{file.id}', f'files/{file.id}/metadata', f'public-links/{link.id}'):
         assert gap_client.get(f'/api/v1/accounts/{first.id}/{suffix}', headers=headers).status_code == 404

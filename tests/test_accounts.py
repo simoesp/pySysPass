@@ -1,7 +1,8 @@
 import pytest
+from app.models.account import Account
 from app.schemas.account import AccountUpdate
-from tests.account_refs import account_create
-from app.services.account_service import AccountService
+from tests.account_refs import account_create, TEST_MASTER_PASSWORD
+from app.services.account_service import AccountService, VaultRequiredError
 from app.core.security import EncryptionService
 
 @pytest.mark.asyncio
@@ -15,7 +16,7 @@ async def test_create_account(db_session, encryption_service, test_user):
         url="https://example.com"
     )
 
-    account = service.create_account(account_data, test_user.id)
+    account = service.create_account(account_data, test_user.id, master_pass=TEST_MASTER_PASSWORD)
 
     assert account.id is not None
     assert account.title == "Test Account"
@@ -33,7 +34,7 @@ async def test_get_accounts(db_session, encryption_service, test_user):
             title=f"Account {i}",
             password="secret123"
         )
-        service.create_account(account_data, test_user.id)
+        service.create_account(account_data, test_user.id, master_pass=TEST_MASTER_PASSWORD)
 
     accounts = service.get_accounts(test_user.id)
 
@@ -47,11 +48,16 @@ async def test_get_decrypted_password(db_session, encryption_service, test_user)
         title="Secret Account",
         password="my-secret-password"
     )
-    account = service.create_account(account_data, test_user.id)
+    account = service.create_account(account_data, test_user.id, master_pass=TEST_MASTER_PASSWORD)
 
-    decrypted = service.get_decrypted_password(account.id)
-
-    assert decrypted == "my-secret-password"
+    assert service.get_decrypted_password(account.id, master_pass=TEST_MASTER_PASSWORD) == "my-secret-password"
+    stored = db_session.get(Account, account.id)
+    assert stored.key.startswith(b"def10000")  # native Defuse, not a Python format
+    with pytest.raises(VaultRequiredError):
+        service.get_decrypted_password(account.id)
+    assert service.get_decrypted_password(account.id, master_pass="wrong-master") is None
+    db_session.refresh(stored)
+    assert stored.countDecrypt == 1  # failed decryptions are not counted
 
 @pytest.mark.asyncio
 async def test_update_account(db_session, encryption_service, test_user):
@@ -59,10 +65,10 @@ async def test_update_account(db_session, encryption_service, test_user):
 
     service = AccountService(db_session, encryption_service)
     account_data = account_create(title="Original", password="pass1")
-    account = service.create_account(account_data, test_user.id)
+    account = service.create_account(account_data, test_user.id, master_pass=TEST_MASTER_PASSWORD)
 
     update_data = AccountUpdate(title="Updated Title", is_favorite=True)
-    updated = service.update_account(account.id, update_data, test_user.id)
+    updated = service.update_account(account.id, update_data, test_user.id, master_pass=TEST_MASTER_PASSWORD)
 
     assert updated.title == "Updated Title"
     assert updated.is_favorite
@@ -71,7 +77,7 @@ async def test_update_account(db_session, encryption_service, test_user):
 async def test_delete_account(db_session, encryption_service, test_user):
     service = AccountService(db_session, encryption_service)
     account_data = account_create(title="To Delete", password="pass1")
-    account = service.create_account(account_data, test_user.id)
+    account = service.create_account(account_data, test_user.id, master_pass=TEST_MASTER_PASSWORD)
 
     result = service.delete_account(account.id, test_user.id)
 
@@ -83,9 +89,18 @@ async def test_search_accounts(db_session, encryption_service, test_user):
     service = AccountService(db_session, encryption_service)
 
     # Create accounts
-    service.create_account(account_create(title="GitHub Account", login="github_user", password="pass"), test_user.id)
-    service.create_account(account_create(title="GitLab Account", login="gitlab_user", password="pass"), test_user.id)
-    service.create_account(account_create(title="Other Account", login="other_user", password="pass"), test_user.id)
+    service.create_account(
+        account_create(title="GitHub Account", login="github_user", password="pass"),
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
+    )
+    service.create_account(
+        account_create(title="GitLab Account", login="gitlab_user", password="pass"),
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
+    )
+    service.create_account(
+        account_create(title="Other Account", login="other_user", password="pass"),
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
+    )
 
     # Search
     results = service.search_accounts(test_user.id, "GitHub")
@@ -112,12 +127,14 @@ async def test_account_access_is_scoped_to_owner(db_session, encryption_service,
     service = AccountService(db_session, encryption_service)
     account = service.create_account(
         account_create(title="Private Account", password="secret123"),
-        test_user.id,
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     assert service.get_account(account.id, other_user.id) is None
     assert service.get_decrypted_password(account.id, other_user.id) is None
-    assert service.update_account(account.id, AccountUpdate(title="Stolen"), other_user.id) is None
+    assert service.update_account(
+        account.id, AccountUpdate(title="Stolen"), other_user.id, master_pass=TEST_MASTER_PASSWORD
+    ) is None
     assert service.delete_account(account.id, other_user.id) is False
     assert service.get_account(account.id, test_user.id) is not None
 
@@ -143,7 +160,9 @@ async def test_get_accounts_pagination(db_session, encryption_service, test_user
     service = AccountService(db_session, encryption_service)
 
     for i in range(5):
-        service.create_account(account_create(title=f"Account {i}", password="pass"), test_user.id)
+        service.create_account(
+            account_create(title=f"Account {i}", password="pass"), test_user.id, master_pass=TEST_MASTER_PASSWORD
+        )
 
     all_accounts = service.get_accounts(test_user.id)
     assert len(all_accounts) == 5
@@ -186,17 +205,17 @@ async def test_get_accounts_filters_and_count(db_session, encryption_service, te
     github = service.create_account(
         account_create(title="GitHub", login="gh_user", password="pass",
                       category_id=1, client_id=1),
-        test_user.id,
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
     service.create_account(
         account_create(title="GitLab", login="gl_user", password="pass",
                       category_id=2, client_id=1),
-        test_user.id,
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
     service.create_account(
         account_create(title="Mail", login="mail_user", password="pass",
                       category_id=2, client_id=2),
-        test_user.id,
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
     db_session.add(AccountToTag(accountId=github.id, tagId=tag.id))
     db_session.commit()
@@ -236,7 +255,9 @@ async def test_count_accounts_is_scoped_to_user(db_session, encryption_service, 
     db_session.refresh(other_user)
 
     service = AccountService(db_session, encryption_service)
-    service.create_account(account_create(title="Mine", password="pass"), test_user.id)
+    service.create_account(
+        account_create(title="Mine", password="pass"), test_user.id, master_pass=TEST_MASTER_PASSWORD
+    )
 
     assert service.count_accounts(test_user.id) == 1
     assert service.count_accounts(other_user.id) == 0

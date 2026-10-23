@@ -1,6 +1,6 @@
 from app.models.account import AccountToUser, AccountToUserGroup, Config, User, UserGroup, UserToUserGroup
 from app.schemas.account import AccountUpdate
-from tests.account_refs import account_create
+from tests.account_refs import account_create, TEST_MASTER_PASSWORD
 from app.services.account_service import AccountService
 from app.services.auth_service import get_password_hash
 
@@ -38,7 +38,7 @@ def test_shared_user_can_view_and_edit_when_acl_allows(db_session, encryption_se
             is_public=True,
             shared_users=[{"user_id": viewer.id, "is_edit": True}],
         ),
-        test_user.id,
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     visible = service.get_account(account["id"], viewer.id)
@@ -46,7 +46,9 @@ def test_shared_user_can_view_and_edit_when_acl_allows(db_session, encryption_se
     assert visible["can_edit"] is True
     assert visible["shared_users"][0].user_id == viewer.id
 
-    updated = service.update_account(account["id"], AccountUpdate(title="Edited by viewer"), viewer.id)
+    updated = service.update_account(
+        account["id"], AccountUpdate(title="Edited by viewer"), viewer.id, master_pass=TEST_MASTER_PASSWORD
+    )
     assert updated is not None
     assert updated["title"] == "Edited by viewer"
 
@@ -67,7 +69,7 @@ def test_secondary_group_share_requires_php_full_group_access(db_session, encryp
             is_public=True,
             shared_groups=[{"group_id": shared_group.id, "is_edit": True}],
         ),
-        test_user.id,
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     assert service.get_account(account["id"], member.id) is None
@@ -93,7 +95,7 @@ def test_owner_flags_and_pass_date_change_round_trip(db_session, encryption_serv
             other_user_group_edit=True,
             pass_date_change=1893456000,
         ),
-        test_user.id,
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     fetched = service.get_account(account["id"], test_user.id)
@@ -115,14 +117,16 @@ def test_shared_user_with_view_access_cannot_edit(db_session, encryption_service
             is_public=True,
             shared_users=[{"user_id": viewer.id, "is_edit": False}],
         ),
-        test_user.id,
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     visible = service.get_account(account["id"], viewer.id)
     assert visible is not None
     assert visible["can_edit"] is False
 
-    updated = service.update_account(account["id"], AccountUpdate(title="Should not change"), viewer.id)
+    updated = service.update_account(
+        account["id"], AccountUpdate(title="Should not change"), viewer.id, master_pass=TEST_MASTER_PASSWORD
+    )
     assert updated is None
 
 
@@ -133,7 +137,7 @@ def test_remove_user_access_revokes_visibility_for_unrelated_user(db_session, en
 
     account = service.create_account(
         account_create(title="Temporary Share", password="secret123", is_public=True),
-        test_user.id,
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     assert service.set_user_access(account["id"], test_user.id, outsider.id, False) is True
@@ -153,14 +157,16 @@ def test_primary_group_member_can_edit_like_php_acl(db_session, encryption_servi
             password="secret123",
             is_public=True,
         ),
-        test_user.id,
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     visible = service.get_account(account["id"], teammate.id)
     assert visible is not None
     assert visible["can_edit"] is True
 
-    updated = service.update_account(account["id"], AccountUpdate(title="Edited by teammate"), teammate.id)
+    updated = service.update_account(
+        account["id"], AccountUpdate(title="Edited by teammate"), teammate.id, master_pass=TEST_MASTER_PASSWORD
+    )
     assert updated is not None
     assert updated["title"] == "Edited by teammate"
 
@@ -174,11 +180,11 @@ def test_admin_sees_and_edits_all_accounts_like_php(db_session, encryption_servi
     service = AccountService(db_session, encryption_service)
     account = service.create_account(
         account_create(title="Unshared Account", password="secret123", is_public=True),
-        test_user.id,
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
     private = service.create_account(
         account_create(title="Private Account", password="secret123", is_public=False),
-        test_user.id,
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     listed_ids = {a["id"] for a in service.get_accounts(admin.id)}
@@ -193,7 +199,9 @@ def test_admin_sees_and_edits_all_accounts_like_php(db_session, encryption_servi
     # ...but object-level ACL (compileAccountAccess) grants direct access.
     assert service.get_account(private["id"], admin.id) is not None
 
-    updated = service.update_account(account["id"], AccountUpdate(title="Edited by admin"), admin.id)
+    updated = service.update_account(
+        account["id"], AccountUpdate(title="Edited by admin"), admin.id, master_pass=TEST_MASTER_PASSWORD
+    )
     assert updated is not None
     assert updated["title"] == "Edited by admin"
 
@@ -205,7 +213,7 @@ def test_group_access_grant_and_revoke_controls_visibility(db_session, encryptio
     service = AccountService(db_session, encryption_service)
     account = service.create_account(
         account_create(title="Group Grant", password="secret123", is_public=True),
-        test_user.id,
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     assert service.get_account(account["id"], member.id) is None
@@ -226,7 +234,8 @@ def test_global_search_permission_widens_visibility(db_session, encryption_servi
 
     service = AccountService(db_session, encryption_service)
     service.create_account(
-        account_create(title="Owner Only", password="pass", is_public=True), test_user.id,
+        account_create(title="Owner Only", password="pass", is_public=True),
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     profile = UserProfileService(db_session).create_user_profile(UserProfileCreate(
@@ -259,7 +268,7 @@ def test_view_only_user_share_short_circuits_group_edit(db_session, encryption_s
 
     service = AccountService(db_session, encryption_service)
     account = service.create_account(
-        account_create(title="Shared", password="pass", is_public=True), test_user.id,
+        account_create(title="Shared", password="pass", is_public=True), test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
     acc_row = db_session.query(Account).filter(Account.id == account.id).first()
 

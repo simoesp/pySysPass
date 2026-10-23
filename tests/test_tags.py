@@ -2,6 +2,7 @@ import pytest
 from app.schemas.tag import TagCreate, TagUpdate
 from app.services.tag_service import TagService
 from app.models.account import Tag, AccountToTag
+from tests.account_refs import TEST_MASTER_PASSWORD
 
 @pytest.mark.asyncio
 async def test_create_tag(db_session, test_user):
@@ -78,7 +79,7 @@ async def test_add_tag_to_account(db_session, encryption_service, test_user):
 
     account = account_service.create_account(
         account_create(title="Test Account", password="secret"),
-        test_user.id
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     tag = tag_service.create_tag(TagCreate(name="Important"), test_user.id)
@@ -106,7 +107,7 @@ async def test_remove_tag_from_account(db_session, encryption_service, test_user
 
     account = account_service.create_account(
         account_create(title="Test Account", password="secret"),
-        test_user.id
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     tag = tag_service.create_tag(TagCreate(name="Test Tag"), test_user.id)
@@ -135,7 +136,7 @@ async def test_get_account_tags(db_session, encryption_service, test_user):
 
     account = account_service.create_account(
         account_create(title="Test Account", password="secret"),
-        test_user.id
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     # Add multiple tags
@@ -158,7 +159,7 @@ async def test_cannot_add_duplicate_tag_to_account(db_session, encryption_servic
 
     account = account_service.create_account(
         account_create(title="Test Account", password="secret"),
-        test_user.id
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     tag = tag_service.create_tag(TagCreate(name="Test Tag"), test_user.id)
@@ -183,17 +184,17 @@ async def test_search_accounts_by_tag(db_session, encryption_service, test_user)
     # Create accounts
     account1 = account_service.create_account(
         account_create(title="GitHub Account", password="secret"),
-        test_user.id
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     account2 = account_service.create_account(
         account_create(title="GitLab Account", password="secret"),
-        test_user.id
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     account3 = account_service.create_account(
         account_create(title="Other Account", password="secret"),
-        test_user.id
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     # Create "Work" tag and apply to first two accounts

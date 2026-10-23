@@ -84,7 +84,21 @@ Compatibility should be treated as successful only when:
 - ✅ The offline sysPass 3.2.11 fixture verifies PHP-created login/master bcrypt
   hashes, decrypts PHP-created `User.mPass`/`User.mKey`, and decrypts a password
   written by PHP's `account/saveCreate` endpoint from `Account.pass`/`Account.key`.
-- Add the reverse round trip: verify Python-produced encrypted values with PHP.
+- ✅ Reverse round trip: every pySysPass credential write (account API
+  create/update/copy, CSV/KeePass/XML import, public links) is decoded by the
+  upstream sysPass PHP classes (`Crypt::decrypt`, `Vault::getData`,
+  `PublicLinkKey`, `Util::unserialize`) at commit `9d0e169` with Defuse 2.4.0
+  in `tests/compatibility/test_php_reverse_roundtrip.py`, a CI job. The PHP
+  runtime is the class library, not the web UI; a UI-level check is still open.
+- ✅ Writes without the vault master password are refused (`428`) instead of
+  falling back to the Python AES format. Native-format rows are never passed to
+  the legacy decryptor. Legacy Python rows stay readable and are not rewritten.
+- ✅ Public links are created natively: a PHP-serialized `Vault` holding the
+  `AccountExtData` that `getDataForLink()` would produce. Its serializer
+  reproduces the PHP-authored fixture byte for byte. PHP links have no access
+  password, so new links cannot have one; legacy password links stay readable.
+- Built-in 2FA state still uses a Python JSON/AES format in the PHP
+  `Authenticator` `PluginData` row; the PHP Authenticator plugin cannot read it.
 - Confirm temporary master password and password-reset flows do not diverge from PHP semantics where shared data is involved.
 
 ### 3. Auth, Permissions, And Profiles

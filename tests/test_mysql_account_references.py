@@ -29,6 +29,7 @@ from app.schemas.user_profile import ProfilePermissions
 from app.services.auth_service import issue_session_token, get_password_hash
 from app.services.category_service import make_item_hash
 from app.services.import_export_service import CsvImportService
+from tests.account_refs import TEST_MASTER_PASSWORD
 
 MYSQL_URL = os.environ.get("PYSYSPASS_MYSQL_TEST_URL")
 
@@ -100,7 +101,7 @@ def _api(session):
 
 
 def _headers(user):
-    token = issue_session_token(user)
+    token = issue_session_token(user, master_pass=TEST_MASTER_PASSWORD)
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -150,7 +151,7 @@ def test_api_returns_validation_errors_instead_of_mysql_errors(mysql_session):
 
 def test_csv_import_on_canonical_schema(mysql_session, encryption_service):
     session, user, client, category = mysql_session
-    importer = CsvImportService(session, encryption_service, user.id)
+    importer = CsvImportService(session, encryption_service, user.id, master_password=TEST_MASTER_PASSWORD)
     rows = importer.parse_csv(
         "name,client,category,password\n"
         f"mysql-import,{client.name},new-mysql-category,secret\n"
@@ -165,7 +166,7 @@ def test_csv_import_on_canonical_schema(mysql_session, encryption_service):
 
 def test_failed_import_row_does_not_abort_later_rows(mysql_session, encryption_service):
     session, user, client, category = mysql_session
-    importer = CsvImportService(session, encryption_service, user.id)
+    importer = CsvImportService(session, encryption_service, user.id, master_password=TEST_MASTER_PASSWORD)
     rows = importer.parse_csv(
         "name,client,category,login,password\n"
         f"too-long-login,{client.name},{category.name},{'x' * 51},secret\n"

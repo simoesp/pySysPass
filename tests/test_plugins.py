@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from app.core.security import EncryptionService
-from tests.account_refs import account_create
+from tests.account_refs import account_create, TEST_MASTER_PASSWORD
 from app.services.account_service import AccountService
 from app.services.plugin_service import PLATFORM_HOOKS, PluginService
 
@@ -129,7 +129,7 @@ def test_account_service_emits_plugin_hook(db_session, tmp_path, monkeypatch):
             category_id=category.id,
             client_id=client.id,
         ),
-        user.id,
+        user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     assert account["title"] == "Plugin Test"

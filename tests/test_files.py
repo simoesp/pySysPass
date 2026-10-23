@@ -1,6 +1,7 @@
 import pytest
 import base64
 from app.services.file_service import FileService
+from tests.account_refs import TEST_MASTER_PASSWORD
 
 @pytest.mark.asyncio
 async def test_create_file(db_session, encryption_service, test_user):
@@ -11,7 +12,7 @@ async def test_create_file(db_session, encryption_service, test_user):
     account_service = AccountService(db_session, encryption_service)
     account = account_service.create_account(
         account_create(title="Test Account", password="secret"),
-        test_user.id
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     service = FileService(db_session)
@@ -42,7 +43,7 @@ async def test_get_files(db_session, encryption_service, test_user):
     account_service = AccountService(db_session, encryption_service)
     account = account_service.create_account(
         account_create(title="Test Account", password="secret"),
-        test_user.id
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     service = FileService(db_session)
@@ -72,7 +73,7 @@ async def test_get_file(db_session, encryption_service, test_user):
     account_service = AccountService(db_session, encryption_service)
     account = account_service.create_account(
         account_create(title="Test Account", password="secret"),
-        test_user.id
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     service = FileService(db_session)
@@ -101,7 +102,7 @@ async def test_get_file_content(db_session, encryption_service, test_user):
     account_service = AccountService(db_session, encryption_service)
     account = account_service.create_account(
         account_create(title="Test Account", password="secret"),
-        test_user.id
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     service = FileService(db_session)
@@ -129,7 +130,7 @@ async def test_delete_file(db_session, encryption_service, test_user):
     account_service = AccountService(db_session, encryption_service)
     account = account_service.create_account(
         account_create(title="Test Account", password="secret"),
-        test_user.id
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     service = FileService(db_session)
@@ -157,7 +158,7 @@ async def test_get_file_count(db_session, encryption_service, test_user):
     account_service = AccountService(db_session, encryption_service)
     account = account_service.create_account(
         account_create(title="Test Account", password="secret"),
-        test_user.id
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     service = FileService(db_session)
@@ -201,7 +202,7 @@ async def test_cannot_access_others_files(db_session, encryption_service, test_u
     account_service = AccountService(db_session, encryption_service)
     account = account_service.create_account(
         account_create(title="Private Account", password="secret"),
-        test_user.id
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     service = FileService(db_session)
@@ -228,7 +229,7 @@ async def test_file_with_various_types(db_session, encryption_service, test_user
     account_service = AccountService(db_session, encryption_service)
     account = account_service.create_account(
         account_create(title="Test Account", password="secret"),
-        test_user.id
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     service = FileService(db_session)

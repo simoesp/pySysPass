@@ -14,6 +14,7 @@ from app.services.import_export_service import (
     KeePassImportService,
     XmlImportService,
 )
+from tests.account_refs import TEST_MASTER_PASSWORD
 
 
 PHP_CRYPTO_FIXTURE = Path(__file__).parent / "fixtures" / "php_syspass_3211_crypto.json"
@@ -71,7 +72,9 @@ def test_keepass_export_generates_valid_string_entries(db_session):
     assert values["Client"] == "Example Client"
     assert "[encrypted]" not in xml_output
 
-    parsed = KeePassImportService(db_session, encryption, 1).parse_keepass(xml_output)
+    parsed = KeePassImportService(
+        db_session, encryption, 1, master_password=TEST_MASTER_PASSWORD
+    ).parse_keepass(xml_output)
     assert parsed == [{
         "name": "Demo Account",
         "login": "alice",
@@ -88,7 +91,7 @@ def test_keepass_parser_accepts_upstream_php_fixture():
     if not PHP_KEEPASS_FIXTURE.exists():
         pytest.skip("../phpSysPass KeePass fixture is not available")
 
-    parsed = KeePassImportService(None, None, 1).parse_keepass(
+    parsed = KeePassImportService(None, None, 1, master_password=TEST_MASTER_PASSWORD).parse_keepass(
         PHP_KEEPASS_FIXTURE.read_text(encoding="utf-8")
     )
 

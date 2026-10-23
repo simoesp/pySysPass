@@ -781,7 +781,7 @@ async function saveEdit() {
     showEdit.value = false
     Notify.create({ message: 'Account updated', color: 'positive' })
   } catch (e) {
-    Notify.create({ message: e.response?.data?.detail || 'Failed to save', color: 'negative' })
+    Notify.create({ message: e.response?.data?.detail?.message || e.response?.data?.detail || 'Failed to save', color: 'negative' })
   } finally {
     editSaving.value = false
   }

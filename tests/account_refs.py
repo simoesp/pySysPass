@@ -9,6 +9,9 @@ from app.schemas.account import AccountCreate
 
 TEST_CLIENT_ID = 900
 TEST_CATEGORY_ID = 900
+# Synthetic vault master password: account passwords are always stored as
+# PHP Defuse ciphertext under a master password, never in a Python format.
+TEST_MASTER_PASSWORD = "test-vault-master"
 
 
 def add_reference_rows(db) -> None:

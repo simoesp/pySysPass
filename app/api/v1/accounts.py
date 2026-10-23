@@ -6,7 +6,7 @@ from app.schemas.account import (
     AccountCreate, AccountResponse, AccountUpdate, PasswordResponse,
     SharedUserInfo, SharedGroupInfo, AccountAuditEntry,
 )
-from app.services.account_service import AccountService, AccountValidationError
+from app.services.account_service import AccountService, AccountValidationError, VaultRequiredError
 from app.services.account_audit_service import AccountAuditService
 from app.core.security import get_encryption_service
 from app.api.deps import (
@@ -16,6 +16,11 @@ from app.api.deps import (
 )
 
 router = APIRouter()
+
+
+def _vault_required(exc: VaultRequiredError) -> HTTPException:
+    # Same code the login flow uses when the vault cannot be unlocked.
+    return HTTPException(status_code=428, detail={"code": "MASTER_PASSWORD_REQUIRED", "message": str(exc)})
 
 
 def _client_ip(request: Request) -> str:
@@ -103,6 +108,9 @@ async def create_account(
     except AccountValidationError as e:
         db.rollback()
         raise HTTPException(status_code=422, detail=str(e))
+    except VaultRequiredError as e:
+        db.rollback()
+        raise _vault_required(e)
 
 
 @router.get("/accounts/{account_id}/audit", response_model=List[AccountAuditEntry])
@@ -171,6 +179,9 @@ async def update_account(
     except AccountValidationError as e:
         db.rollback()
         raise HTTPException(status_code=422, detail=str(e))
+    except VaultRequiredError as e:
+        db.rollback()
+        raise _vault_required(e)
     if not result:
         raise HTTPException(status_code=404, detail="Account not found")
     # account.edit is recorded by the global audit middleware (with the
@@ -196,9 +207,12 @@ async def get_account_password(
     db: Session = Depends(get_db),
     current_user=Depends(account_view_pass),
 ):
-    password = AccountService(db, get_encryption_service()).get_decrypted_password(
-        account_id, current_user["id"], master_pass=current_user.get("master_pass")
-    )
+    try:
+        password = AccountService(db, get_encryption_service()).get_decrypted_password(
+            account_id, current_user["id"], master_pass=current_user.get("master_pass")
+        )
+    except VaultRequiredError as e:
+        raise _vault_required(e)
     if password is None:
         raise HTTPException(status_code=404, detail="Account not found or no password")
     AccountAuditService(db).log(
@@ -227,9 +241,12 @@ async def copy_account(
     db: Session = Depends(get_db),
     current_user=Depends(account_copy),
 ):
-    result = AccountService(db, get_encryption_service()).copy_account(
-        account_id, current_user["id"], master_pass=current_user.get("master_pass")
-    )
+    try:
+        result = AccountService(db, get_encryption_service()).copy_account(
+            account_id, current_user["id"], master_pass=current_user.get("master_pass")
+        )
+    except VaultRequiredError as e:
+        raise _vault_required(e)
     if not result:
         raise HTTPException(status_code=404, detail="Account not found")
     return result

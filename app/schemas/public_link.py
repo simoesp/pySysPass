@@ -7,6 +7,7 @@ class PublicLinkBase(BaseModel):
     expire: Optional[int] = None  # Expiration time in seconds
 
 class PublicLinkCreate(PublicLinkBase):
+    # Deprecated: sysPass PHP links have no access password; a value is rejected.
     password: Optional[str] = Field(None, min_length=1)
 
 class PublicLinkResponse(BaseModel):

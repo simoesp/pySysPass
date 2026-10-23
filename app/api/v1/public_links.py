@@ -3,11 +3,11 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from app.db.base import get_db
 from app.schemas.public_link import PublicLinkCreate, PublicLinkResponse, PublicLinkAccess
-from app.services.public_link_service import PublicLinkService
+from app.services.public_link_service import PublicLinkService, PublicLinksDisabledError
 from app.api.deps import reject_during_maintenance, require_any_permission
 from app.core.security import get_encryption_service
 from app.core.php_public_link import PublicLinkSnapshot
-from app.services.account_service import AccountService
+from app.services.account_service import AccountService, VaultRequiredError
 
 router = APIRouter()
 link_manage = require_any_permission("mgm_public_links")
@@ -45,9 +45,14 @@ async def create_public_link(
             account_id=account_id,
             user_id=current_user["id"],
             expire_seconds=link_data.expire,
-            password=link_data.password
+            password=link_data.password,
+            master_pass=current_user.get("master_pass"),
         )
         return link
+    except VaultRequiredError as e:
+        raise HTTPException(status_code=428, detail={"code": "MASTER_PASSWORD_REQUIRED", "message": str(e)})
+    except PublicLinksDisabledError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

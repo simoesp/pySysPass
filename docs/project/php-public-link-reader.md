@@ -53,10 +53,18 @@ Use sysPass commit `9d0e169d2163897238877fb65130db47fe1ddcfa` and Defuse
 timestamps intentionally change on regeneration. The committed fixture runs
 in pytest without requiring PHP or a database service.
 
-## Remaining interoperability work
+## Native writes
 
-This implements native reads only. Python link creation still uses the legacy
-format; native Vault writing and verification through PHP's link-creation/UI
-flows remain open. Existing native links require the matching PHP password
-salt in runtime configuration. Missing/wrong salts fail closed; no fallback
-key or empty salt is used.
+Since R5 / #56, `POST /accounts/{id}/public-links` writes the native format
+too (`app.core.php_public_link.write_public_link_vault`). The snapshot follows
+PHP `getDataForLink()` (selected columns as PDO strings or NULL, all other
+`AccountExtData` properties at their class defaults, `key` null) and the Vault
+follows `Vault::saveData()`. Re-serializing the committed fixture reproduces
+PHP's bytes exactly. The upstream PHP classes decode Python-written links in
+`tests/compatibility/test_php_reverse_roundtrip.py`. Hashes are 30 random
+bytes in hex, and the default lifetime is `publinks_max_time`, both as in PHP.
+New links cannot have an access password. No stored links are rewritten.
+
+Remaining: the round trip runs PHP's classes, not its web UI; refreshing a
+link (PHP `refresh`) is not implemented; existing native links require the
+matching PHP password salt, and missing or wrong salts fail closed.

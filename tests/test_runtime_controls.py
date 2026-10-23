@@ -15,7 +15,7 @@ from app.schemas.user_profile import ProfilePermissions
 from app.services.account_service import AccountService
 from app.services.auth_service import get_password_hash, issue_session_token, store_user_master_pass
 from app.services.runtime_policy import RuntimePolicy, invalidate_policy_cache
-from tests.account_refs import account_create
+from tests.account_refs import account_create, TEST_MASTER_PASSWORD
 
 
 @pytest.fixture(autouse=True)
@@ -60,7 +60,7 @@ def _grant_all(db_session, user):
 
 
 def _bearer(user):
-    return {"Authorization": f"Bearer {issue_session_token(user)}"}
+    return {"Authorization": f"Bearer {issue_session_token(user, master_pass=TEST_MASTER_PASSWORD)}"}
 
 
 def _admin(db_session):
@@ -161,7 +161,7 @@ def test_force_https_cannot_be_enabled_over_http(db_session, test_user):
 
 def _account(db_session, encryption_service, user):
     return AccountService(db_session, encryption_service).create_account(
-        account_create(title="Files", password="secret", is_public=True), user.id
+        account_create(title="Files", password="secret", is_public=True), user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
 

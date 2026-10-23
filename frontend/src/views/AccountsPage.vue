@@ -543,7 +543,7 @@ async function createAccount() {
     showAdd.value = false
     await loadAccounts()
   } catch (e) {
-    Notify.create({ message: e.response?.data?.detail || 'Failed to create', color: 'negative' })
+    Notify.create({ message: e.response?.data?.detail?.message || e.response?.data?.detail || 'Failed to create', color: 'negative' })
   } finally {
     saving.value = false
   }

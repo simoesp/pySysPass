@@ -32,6 +32,15 @@ class AccountValidationError(ValueError):
     """Request data references rows the PHP schema requires to exist."""
 
 
+class VaultRequiredError(RuntimeError):
+    """A credential write needs the vault master password.
+
+    sysPass PHP stores Account.pass/key as Defuse ciphertext under the master
+    password. Without it pySysPass would have to write a Python-only format
+    that PHP cannot read, so the write is refused instead.
+    """
+
+
 class AccountService:
     def __init__(self, db: Session, encryption: EncryptionService):
         self.db = db
@@ -486,15 +495,7 @@ class AccountService:
         plaintext = maybe_decrypt(data.password)
         user = self.db.query(User).filter(User.id == user_id).first()
         user_group_id = user.userGroupId if user else 1
-
-        if master_pass and plaintext:
-            pass_hex, key_hex = encrypt_account_pass(plaintext, master_pass)
-            enc_pass_bytes = pass_hex.encode()
-            enc_key_bytes = key_hex.encode()
-        else:
-            enc_raw = self.encryption.encrypt(plaintext)
-            enc_pass_bytes = enc_raw.encode() if isinstance(enc_raw, str) else enc_raw
-            enc_key_bytes = b''
+        enc_pass_bytes, enc_key_bytes = self._encrypt_native(plaintext, master_pass)
 
         account = Account(
             name=data.title,
@@ -540,6 +541,8 @@ class AccountService:
         self._validate_references(
             data.client_id, data.category_id, data.tag_ids, data.shared_users, data.shared_groups
         )
+        if data.password and not master_pass:
+            raise VaultRequiredError("Master password required to change an account password")
 
         # sysPass PHP saves the complete pre-update account state in the same
         # transaction, so password and metadata changes can be restored.
@@ -577,14 +580,7 @@ class AccountService:
             elif not data.is_favorite and existing_favorite:
                 self.db.delete(existing_favorite)
         if data.password:
-            plaintext = maybe_decrypt(data.password)
-            if master_pass and plaintext:
-                pass_hex, key_hex = encrypt_account_pass(plaintext, master_pass)
-                account.pass_ = pass_hex.encode()
-                account.key = key_hex.encode()
-            else:
-                enc = self.encryption.encrypt(plaintext)
-                account.pass_ = enc.encode() if isinstance(enc, str) else enc
+            account.pass_, account.key = self._encrypt_native(maybe_decrypt(data.password), master_pass)
             account.passDate = int(datetime.now().timestamp())
         account.userEditId = user_id
         if data.tag_ids is not None:
@@ -611,6 +607,14 @@ class AccountService:
         self._emit_hook("on_account_deleted", payload=payload, actor_user_id=user_id)
         return True
 
+    @staticmethod
+    def _encrypt_native(plaintext: Optional[str], master_pass: Optional[str]) -> tuple:
+        """Account.pass/key as PHP Crypt::encrypt() writes them (Defuse)."""
+        if not master_pass:
+            raise VaultRequiredError("Master password required to store account passwords")
+        pass_hex, key_hex = encrypt_account_pass(plaintext or '', master_pass)
+        return pass_hex.encode(), key_hex.encode()
+
     def _decrypt_account_pass(self, account: Account, master_pass: Optional[str]) -> Optional[str]:
         """
         Dispatch to defuse decryption for PHP-created accounts, or to the
@@ -621,12 +625,17 @@ class AccountService:
         key_raw  = account.key   if isinstance(account.key,   bytes) else (account.key or b'').encode()
         key_ascii = key_raw.decode('ascii', errors='ignore')
         # defuse KeyProtectedByPassword header \xDE\xF1\x00\x00 encodes to "def10000"
-        if key_ascii.startswith('def10000') and master_pass:
+        if key_ascii.startswith('def10000'):
+            # Native (PHP or pySysPass) ciphertext: only the vault key opens it.
+            # Never hand Defuse data to the legacy Python decryptor.
+            if not master_pass:
+                raise VaultRequiredError("Master password required to decrypt account passwords")
+            from app.core.defuse_compat import decrypt_account_pass
             try:
-                from app.core.defuse_compat import decrypt_account_pass
                 return decrypt_account_pass(pass_raw.decode('ascii'), key_ascii, master_pass)
             except Exception:
-                pass
+                return None
+        # Legacy rows written by earlier pySysPass releases (empty key).
         return self.encryption.decrypt(pass_raw.decode())
 
     def get_decrypted_password(self, account_id: int, user_id: Optional[int] = None,
@@ -638,9 +647,11 @@ class AccountService:
         account = query.first()
         if not account or not account.pass_:
             return None
+        password = self._decrypt_account_pass(account, master_pass)
+        if password is None:
+            return None
         account.countDecrypt = (account.countDecrypt or 0) + 1
         self.db.commit()
-        password = self._decrypt_account_pass(account, master_pass)
         self._emit_hook(
             "on_password_decrypted",
             actor_user_id=user_id,
@@ -677,17 +688,22 @@ class AccountService:
         if not source:
             return None
 
+        if not master_pass:
+            raise VaultRequiredError("Master password required to copy account passwords")
         plaintext = None
         if source.pass_:
             plaintext = self._decrypt_account_pass(source, master_pass)
+        enc_pass, enc_key = self._encrypt_native(plaintext or '', master_pass)
 
         user = self.db.query(User).filter(User.id == user_id).first()
         copy = Account(
-            name=f'{source.name} (copy)',
+            # Account.name is varchar(100) in the PHP schema.
+            name=f'{source.name[:93]} (copy)',
             notes=source.notes,
             login=source.login,
             url=source.url,
-            key=b'',
+            pass_=enc_pass,
+            key=enc_key,
             categoryId=source.categoryId,
             clientId=source.clientId,
             userId=user_id,
@@ -699,10 +715,6 @@ class AccountService:
             otherUserGroupEdit=source.otherUserGroupEdit,
             passDateChange=source.passDateChange,
         )
-        if plaintext:
-            enc = self.encryption.encrypt(plaintext)
-            copy.pass_ = enc.encode() if isinstance(enc, str) else enc
-
         self.db.add(copy)
         self.db.flush()
 

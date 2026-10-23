@@ -212,6 +212,17 @@ Response:
 }
 ```
 
+Account passwords are always stored as sysPass PHP writes them: Defuse
+ciphertext in `Account.pass` with a password-protected key in `Account.key`,
+under the vault master password. Any request that has to encrypt or decrypt
+one therefore needs a session with an unlocked vault, and otherwise returns
+`428` with code `MASTER_PASSWORD_REQUIRED`. That covers creating an account,
+changing its password, copying it, reading its password, CSV/XML/KeePass
+import, and public-link creation. sysPass API tokens carry no vault key, so
+token callers cannot do these; metadata-only edits still work. Rows written
+in the legacy Python format by earlier releases (empty `Account.key`) stay
+readable and are not rewritten.
+
 ## Common Response Patterns
 
 ### Success
@@ -497,15 +508,28 @@ Account-scoped management routes also exist alongside the ones below:
 
 `POST /api/v1/accounts/{account_id}/public-links`
 
+Links are written in the native sysPass format, so sysPass PHP can open them:
+`PublicLink.data` holds a `SP\Core\Crypt\Vault` with the account snapshot,
+keyed by `sha1(passwordSalt . hash)`. Creation therefore needs:
+
+- `publinks_enabled` turned on (as in PHP, where the action is hidden otherwise): `403` otherwise
+- a session with an unlocked vault, to decrypt the account password for the snapshot:
+  `428` `MASTER_PASSWORD_REQUIRED` otherwise (API tokens never carry one)
+- the sysPass password salt in runtime configuration: `400` otherwise
+
 Example request:
 
 ```json
 {
   "account_id": 101,
-  "expire": 3600,
-  "password": "optional-link-password"
+  "expire": 3600
 }
 ```
+
+`expire` (seconds) defaults to the `publinks_max_time` setting (PHP default
+600). `password` is deprecated: PHP links have no access password, so any
+value is rejected with `400`. Existing password-protected links created by
+earlier pySysPass releases can still be opened with `?password=`.
 
 Example response:
 
@@ -515,10 +539,12 @@ Example response:
   "account_id": 101,
   "hash": "3d1b0f4f...",
   "expire": 3600,
-  "has_password": true,
+  "has_password": false,
   "date_add": "2026-06-30T13:15:00"
 }
 ```
+
+The hash is 60 hexadecimal characters (30 random bytes), as PHP generates.
 
 ### Access a public link
 
