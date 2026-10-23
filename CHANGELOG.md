@@ -3,6 +3,58 @@
 All notable changes to pySysPass are documented here. Versions follow
 [Semantic Versioning](https://semver.org/). Dates are ISO 8601.
 
+## [Unreleased]
+
+Production-readiness hardening (draft PR #66). Not yet released; several
+changes alter behaviour for existing deployments, listed under **Upgrade notes**.
+Evidence for each item: `docs/project/production-readiness-review-2026-10-23.md`.
+
+### Upgrade notes
+- The backend image runs as UID 10001. Volumes written by earlier (root) images
+  need a one-time `chown -R 10001:10001` (see `docs/installation.md`); until
+  then `/health/ready` reports `data directory not writable`.
+- Sessions now expire after `session_timeout` of inactivity (default 300 s)
+  instead of 24 hours. Tokens issued by earlier releases are rejected once;
+  users sign in again.
+- Account passwords, imports and public links can only be written with an
+  unlocked vault (`428 MASTER_PASSWORD_REQUIRED` otherwise); API tokens can no
+  longer create accounts or change their passwords.
+- New public links cannot have an access password (sysPass PHP has none) and
+  require `publinks_enabled`. Existing links keep working.
+- Accounts require `client_id` and `category_id`. CSV/XML import rows without
+  both are skipped. In-use clients and categories cannot be deleted (409).
+- After a master password change made in sysPass PHP, users must re-enter the
+  master password at their next sign-in, as in PHP.
+- Production startup fails without explicit, non-sample `SECRET_KEY` and
+  `ENCRYPTION_KEY`; `DEBUG` defaults to false.
+- `GET /api/v1/tags/{id}` now requires authentication.
+
+### Added
+- `/health/ready` readiness checks (configuration, database, schema, storage).
+- `python -m app.rotate_master_password`: offline, transactional master
+  password change with a pre-change backup and PHP semantics.
+- `python -m app.restore_backup` offline restore with rollback attempts.
+- `POST /api/v1/auth/logout` and `POST /api/v1/auth/refresh`.
+- `GET /api/v1/security/operations` (admins): failure counters and scheduler state.
+- CI: canonical MySQL API/import/readiness tests, a PHP job that decodes every
+  pySysPass credential write, image hardening checks, dependency lock check,
+  75% coverage floor.
+
+### Changed
+- Credentials are always written as native sysPass Defuse ciphertext; public
+  links as native PHP Vaults.
+- Force HTTPS, maintenance mode and attachment limits are enforced server-side.
+- Logout, password changes (from either application) and 2FA changes revoke sessions.
+- Backups fail closed; runtime JSON config writes are locked and atomic.
+- Container builds use an allowlist, a hash-pinned `requirements.lock` and
+  digest-pinned base images; test tools moved to `requirements-dev.txt`.
+
+### Fixed
+- Client IP spoofing through forwarded headers; SPA routes losing security headers.
+- Password reset not setting PHP migration flags.
+- Reads of native ciphertext without a vault key raising 500.
+- `masterPwd` hashing for keys longer than 72 characters (now matches PHP).
+
 ## [2.2.2] — 2026-10-23
 
 Routine dependency and security updates. No API or database changes.
