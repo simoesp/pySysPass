@@ -8,10 +8,11 @@ from app.api.deps import enforce_maintenance, get_current_user, reject_during_ma
 from app.schemas.install import InstallRequest, InstallResponse, InstallStatusResponse
 from app.schemas.user import UserCreate, UserResponse, Token
 from app.services.auth_service import (
-    get_password_hash, verify_password, issue_session_token,
+    get_password_hash, hash_master_key, verify_password, issue_session_token,
     decrypt_user_master_pass, get_master_password_hash_row,
     finalize_user_master_pass, migrate_user_master_pass,
     verify_master_password_hash, store_user_master_pass,
+    master_pass_matches_config, user_master_pass_is_stale,
 )
 from app.services.user_profile_service import UserProfileService
 from app.services.user_service import UserService
@@ -108,7 +109,7 @@ async def install(body: InstallRequest, db: Session = Depends(get_db)):
     )
     store_user_master_pass(db_user, login_password, master_password)
     db.add(db_user)
-    db.add(Config(parameter="masterPwd", value=get_password_hash(master_password)))
+    db.add(Config(parameter="masterPwd", value=hash_master_key(master_password)))
     db.commit()
     db.refresh(db_user)
 
@@ -224,6 +225,12 @@ async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends
     supplied_master_pass = _decode_secret(login_form.get("mpass"), "master password")
     old_password = _decode_secret(login_form.get("oldpass"), "previous password")
     master_pass = decrypt_user_master_pass(user, plain_password)
+    # PHP UserPassService::loadUserMPass(): a per-user copy older than the
+    # last master password change (MPASS_CHANGED) or one that no longer
+    # matches Config.masterPwd (MPASS_WRONG) must not unlock the vault.
+    master_changed = user_master_pass_is_stale(db, user)
+    if master_pass is not None and (master_changed or not master_pass_matches_config(db, master_pass)):
+        master_pass = None
 
     if master_pass is None:
         if supplied_master_pass:
@@ -242,14 +249,14 @@ async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends
                     )
             elif not hashed_master_password:
                 if master_hash_row:
-                    master_hash_row.value = get_password_hash(supplied_master_pass)
+                    master_hash_row.value = hash_master_key(supplied_master_pass)
                 else:
-                    db.add(Config(parameter="masterPwd", value=get_password_hash(supplied_master_pass)))
+                    db.add(Config(parameter="masterPwd", value=hash_master_key(supplied_master_pass)))
             finalize_user_master_pass(user, plain_password, resolved_master_pass)
             master_pass = resolved_master_pass
             db.commit()
 
-        if master_pass is None and user.isChangedPass:
+        if master_pass is None and user.isChangedPass and not master_changed:
             if not old_password:
                 raise HTTPException(
                     status_code=428,

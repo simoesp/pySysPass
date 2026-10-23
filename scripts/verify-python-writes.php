@@ -6,8 +6,9 @@
 //
 // Input:  {"password_salt": "...", "master_password": "...",
 //          "accounts": [{"pass": "...", "key": "..."}],
-//          "links": [{"hash": "...", "data_base64": "..."}]}
-// Output: {"accounts": ["plaintext", ...], "links": [{account fields}, ...]}
+//          "links": [{"hash": "...", "data_base64": "..."}],
+//          "hash_checks": [{"key": "...", "hash": "..."}]}
+// Output: {"accounts": ["plaintext", ...], "links": [{account fields}, ...], "hash_checks": [bool, ...]}
 // All inputs are synthetic test data, never production secrets.
 error_reporting(E_ALL & ~E_DEPRECATED);
 define('APP_ROOT', $argv[1]);
@@ -30,15 +31,20 @@ if (!function_exists('logger')) {
 }
 
 $input = json_decode(stream_get_contents(STDIN), true, 32, JSON_THROW_ON_ERROR);
-$output = ['accounts' => [], 'links' => []];
+$output = ['accounts' => [], 'links' => [], 'hash_checks' => []];
+
+// Config.masterPwd: MasterPassService::checkMasterPassword() path.
+foreach ($input['hash_checks'] ?? [] as $check) {
+    $output['hash_checks'][] = SP\Core\Crypt\Hash::checkHashKey($check['key'], $check['hash']);
+}
 
 // Account.pass/Account.key: AccountService::getPasswordForId() path.
-foreach ($input['accounts'] as $account) {
+foreach ($input['accounts'] ?? [] as $account) {
     $output['accounts'][] = SP\Core\Crypt\Crypt::decrypt($account['pass'], $account['key'], $input['master_password']);
 }
 
 // PublicLink.data: AccountController::viewLinkAction() path.
-foreach ($input['links'] as $link) {
+foreach ($input['links'] ?? [] as $link) {
     $vault = unserialize(base64_decode($link['data_base64'], true), ['allowed_classes' => [SP\Core\Crypt\Vault::class]]);
     if (!$vault instanceof SP\Core\Crypt\Vault) {
         throw new RuntimeException('PublicLink.data is not a sysPass Vault');

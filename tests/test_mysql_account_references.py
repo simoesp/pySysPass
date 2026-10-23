@@ -175,3 +175,50 @@ def test_failed_import_row_does_not_abort_later_rows(mysql_session, encryption_s
     assert importer.import_accounts(rows) == {"success": 1, "failed": 1, "skipped": 0}
     assert session.query(Account).filter_by(name="after-failure").count() == 1
     assert session.query(Account).filter_by(name="too-long-login").count() == 0
+
+
+def test_master_password_rotation_is_atomic_on_mysql(mysql_session, monkeypatch):
+    """R8 / #58: an aborted rotation leaves no partial rewrite on InnoDB."""
+    from app.core.defuse_compat import decrypt_account_pass, encrypt_account_pass
+    from app.models.account import Config
+    from app.services import master_password_rotation as rotation_module
+    from app.services.auth_service import hash_master_key
+
+    session, user, client, category = mysql_session
+    old, new = "mysql-old-master", "mysql-new-master"
+    for parameter, value in (("masterPwd", hash_master_key(old)), ("maintenance", "true")):
+        row = session.query(Config).filter_by(parameter=parameter).first()
+        if row:
+            row.value = value
+        else:
+            session.add(Config(parameter=parameter, value=value))
+    ids = []
+    for index in range(3):
+        pass_hex, key_hex = encrypt_account_pass(f"secret-{index}", old)
+        account = Account(name=f"rotate-{index}-{user.id}", userId=user.id, userEditId=user.id,
+                          userGroupId=user.userGroupId, clientId=client.id, categoryId=category.id,
+                          pass_=pass_hex.encode(), key=key_hex.encode())
+        session.add(account)
+        session.flush()
+        ids.append(account.id)
+    session.commit()
+    # Other tests' accounts in this module use other masters; rotate only ours.
+    others = session.query(Account).filter(Account.id.notin_(ids)).all()
+    for other in others:
+        session.delete(other)
+    session.commit()
+
+    monkeypatch.setattr(rotation_module, "hash_master_key", lambda _: (_ for _ in ()).throw(RuntimeError("boom")))
+    with pytest.raises(RuntimeError):
+        rotation_module.MasterPasswordRotation(session).rotate(old, new)
+    session.expire_all()
+    for index, account_id in enumerate(ids):
+        account = session.get(Account, account_id)
+        assert decrypt_account_pass(account.pass_.decode(), account.key.decode(), old) == f"secret-{index}"
+
+    monkeypatch.undo()
+    rotation_module.MasterPasswordRotation(session).rotate(old, new)
+    session.expire_all()
+    for index, account_id in enumerate(ids):
+        account = session.get(Account, account_id)
+        assert decrypt_account_pass(account.pass_.decode(), account.key.decode(), new) == f"secret-{index}"

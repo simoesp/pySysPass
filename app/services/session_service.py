@@ -33,6 +33,7 @@ from app.core.config import BASE_DIR, settings
 from app.core.runtime_json_config import locked_path, write_text_atomically
 
 DEFAULT_SESSION_TIMEOUT = 300
+ALL_USERS = "*"
 MIN_SESSION_TIMEOUT = 60
 MAX_SESSION_SECONDS = 24 * 3600
 
@@ -118,13 +119,21 @@ class SessionStore:
         stamp = time.time() if before is None else before
         self._update(lambda doc: doc["not_before"].__setitem__(str(user_id), float(stamp)))
 
+    def revoke_all(self, before: Optional[float] = None) -> None:
+        """End every session, e.g. after the vault master password changes."""
+        self.revoke_user(ALL_USERS, before)
+
     def is_revoked(self, payload: dict) -> bool:
         document = self._read()
         jti = payload.get("jti")
         if jti and jti in document["revoked"]:
             return True
-        not_before = document["not_before"].get(str(payload.get("user_id")))
-        return not_before is not None and float(payload.get("iat", 0)) < not_before
+        issued = float(payload.get("iat", 0))
+        for key in (str(payload.get("user_id")), ALL_USERS):
+            not_before = document["not_before"].get(key)
+            if not_before is not None and issued < not_before:
+                return True
+        return False
 
 
 session_store = SessionStore()

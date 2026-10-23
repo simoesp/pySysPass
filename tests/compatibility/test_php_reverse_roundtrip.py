@@ -104,3 +104,42 @@ def test_php_reads_every_python_credential_write(db_session, encryption_service,
         "notes": "multi\nline", "pass": "Créé-秘密-1", "key": None,
         "clientName": "Test Client", "categoryName": "Test Category", "timeSet": link.dateAdd,
     }
+
+
+def test_php_accepts_a_python_master_password_change(db_session, test_user, tmp_path, monkeypatch):
+    """PHP-authored vault, rotated by pySysPass, then opened by PHP with the new master."""
+    from pathlib import Path
+
+    from app.core.defuse_compat import encrypt_account_pass
+    from app.models.account import AccountHistory
+    from app.services.master_password_rotation import MasterPasswordRotation
+
+    monkeypatch.setattr(
+        "app.core.runtime_json_config.settings.SYSPASS_RUNTIME_CONFIG_JSON_PATH", str(tmp_path / "rt.json")
+    )
+    fixture = json.loads((Path(__file__).parents[1] / "fixtures" / "php_syspass_3211_crypto.json").read_text())
+    old_master, new_master = fixture["known_values"]["master_password"], "Rotated-" + "ü" * 80
+    db_session.add_all([Config(parameter="masterPwd", value=fixture["config"]["masterPwd"]),
+                        Config(parameter="maintenance", value="true")])
+    db_session.add(Account(id=60, name="PHP", userId=test_user.id, userEditId=test_user.id, userGroupId=1,
+                           clientId=900, categoryId=900, pass_=fixture["account"]["pass"].encode(),
+                           key=fixture["account"]["key"].encode()))
+    db_session.flush()
+    history_pass, history_key = encrypt_account_pass("history", old_master)
+    db_session.add(AccountHistory(accountId=60, userGroupId=1, userId=test_user.id, userEditId=test_user.id,
+                                  clientId=900, categoryId=900, name="h", notes="", pass_=history_pass.encode(),
+                                  key=history_key.encode(), mPassHash=fixture["config"]["masterPwd"].encode()))
+    db_session.commit()
+
+    MasterPasswordRotation(db_session).rotate(old_master, new_master)
+
+    account = db_session.get(Account, 60)
+    history = db_session.query(AccountHistory).one()
+    master_hash = db_session.query(Config).filter_by(parameter="masterPwd").one().value
+    result = _php({
+        "master_password": new_master,
+        "accounts": [_ciphertext(account), _ciphertext(history)],
+        "hash_checks": [{"key": new_master, "hash": master_hash}, {"key": old_master, "hash": master_hash}],
+    })
+    assert result["accounts"] == [fixture["known_values"]["account_password"], "history"]
+    assert result["hash_checks"] == [True, False]

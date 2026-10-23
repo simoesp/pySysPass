@@ -63,3 +63,41 @@ recovery, including preservation of the data directory inode. Run only against
 an isolated bootstrapped MySQL database and disposable data/backup directories,
 with `ALLOW_DISPOSABLE_RECOVERY_TEST=yes`. It modifies the canonical `Category`
 table without changing the PHP schema.
+
+## Changing the vault master password
+
+The online rekey operation stays disabled. Change the master password offline,
+the way sysPass PHP does: re-encrypt `Account.pass/key`, the `AccountHistory`
+rows whose `mPassHash` matches the current `Config.masterPwd`, and every
+`CustomFieldData` row with a key; then store the new `masterPwd` hash and
+`lastupdatempass`. Users, in pySysPass and in PHP, re-enter the new master
+password once at their next sign-in.
+
+1. Enable maintenance mode (PHP requires it too), then stop every Python and PHP
+   application writer.
+2. Run a dry run, then the change. Supply the passwords through the environment
+   or the prompts, never as arguments:
+
+   ```bash
+   docker compose -f podman-compose.yml run --rm --no-deps backend \
+     python -m app.rotate_master_password --confirm-stopped --dry-run
+   docker compose -f podman-compose.yml run --rm --no-deps backend \
+     python -m app.rotate_master_password --confirm-stopped
+   ```
+
+3. Start the stack, disable maintenance mode, and sign in with the new master
+   password.
+
+The command checks that the current password matches `masterPwd`. It decrypts
+every candidate value with it and aborts if any value fails; PHP would skip that
+row instead. It writes a full backup before changing anything and fails if the
+backup fails. It makes every change in one database transaction, decrypts each
+rewritten value with the new password before committing, retires any temporary
+master password, and ends all pySysPass sessions. Values still in the legacy
+pySysPass AES format make it stop unless `--include-legacy` is given, which
+rewrites them in the native format. History rows encrypted under an older master
+password are left unchanged, as in PHP.
+
+To undo the change, restore the backup the command reported, using the restore
+procedure above. Keep that archive and both passwords until users have signed in
+successfully.

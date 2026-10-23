@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+import hashlib
 from time import time
 from typing import Optional
 import jwt
@@ -53,10 +54,38 @@ def decrypt_user_master_pass(user: User, plain_password: str) -> Optional[str]:
         return None
 
 
+# sysPass PHP SP\Core\Crypt\Hash::MAX_KEY_LENGTH
+_PHP_HASH_MAX_KEY_LENGTH = 72
+
+
+def _php_hash_key_input(key: str) -> bytes:
+    """PHP Hash::getKey(): SHA-256 hex for keys over 72 characters (mb_strlen).
+
+    bcrypt itself only uses the first 72 bytes; PHP truncates silently, while
+    the Python bcrypt module refuses longer input, so truncate the same way.
+    """
+    if len(key) > _PHP_HASH_MAX_KEY_LENGTH:
+        key = hashlib.sha256(key.encode("utf-8")).hexdigest()
+    return key.encode("utf-8")[:72]
+
+
+def hash_master_key(master_password: str) -> str:
+    """PHP Hash::hashKey(): the value sysPass stores in Config.masterPwd."""
+    hashed = bcrypt_lib.hashpw(_php_hash_key_input(master_password), bcrypt_lib.gensalt(rounds=10))
+    return hashed.replace(b"$2b$", b"$2y$").decode()
+
+
 def verify_master_password_hash(master_password: str, hashed_master_password: Optional[str]) -> bool:
-    if not hashed_master_password:
+    """PHP Hash::checkHashKey()."""
+    if not hashed_master_password or master_password is None:
         return False
-    return verify_password(master_password, hashed_master_password)
+    hashed = hashed_master_password.encode() if isinstance(hashed_master_password, str) else hashed_master_password
+    if hashed.startswith(b"$2y$"):
+        hashed = b"$2b$" + hashed[4:]
+    try:
+        return bcrypt_lib.checkpw(_php_hash_key_input(master_password), hashed)
+    except ValueError:
+        return False
 
 
 def store_user_master_pass(user: User, login_password: str, master_password: str) -> None:
@@ -91,10 +120,30 @@ def migrate_user_master_pass(
         return None
 
     if master_hash_row is None:
-        db.add(Config(parameter="masterPwd", value=get_password_hash(master_password)))
+        db.add(Config(parameter="masterPwd", value=hash_master_key(master_password)))
 
     finalize_user_master_pass(user, new_login_password, master_password)
     return master_password
+
+
+def master_pass_changed_at(db) -> int:
+    """Config.lastupdatempass: when the vault master password last changed."""
+    row = db.query(Config).filter(Config.parameter == "lastupdatempass").first()
+    try:
+        return int(row.value) if row and row.value else 0
+    except ValueError:
+        return 0
+
+
+def user_master_pass_is_stale(db, user: User) -> bool:
+    """PHP MPASS_CHANGED: the user's mPass predates the current master."""
+    return int(user.lastUpdateMPass or 0) < master_pass_changed_at(db)
+
+
+def master_pass_matches_config(db, master_password: str) -> bool:
+    """PHP checks the unlocked master against Config.masterPwd when one is set."""
+    row = get_master_password_hash_row(db)
+    return not (row and row.value) or verify_master_password_hash(master_password, row.value)
 
 
 def get_master_password_hash_row(db) -> Optional[Config]:

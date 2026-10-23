@@ -78,9 +78,21 @@ Compatibility should be treated as successful only when:
   `isChangedPass` migration flow. Regression coverage begins with PHP-authored
   `mPass`/`mKey`, verifies they remain unchanged at password replacement, then
   verifies recovery with the previous login password. No schema changes are used.
-- The incomplete online encryption-key rotation route now refuses requests
-  without reading or changing ciphertext. A complete native-format-aware
-  rotation and recovery workflow remains outstanding.
+- The online encryption-key rotation route still refuses requests. The vault
+  master password is changed offline with `python -m app.rotate_master_password`,
+  which follows PHP `MasterPassService::changeMasterPassword()` (accounts,
+  matching history rows, encrypted custom fields, `masterPwd`, `lastupdatempass`).
+  It is all-or-nothing in one transaction, backs up first, and verifies with the
+  new password before commit. Upstream PHP decrypted a pySysPass-rotated vault
+  and accepted the new hash. Rotating `ENCRYPTION_KEY` itself (legacy rows, 2FA
+  state, session claims) is still unsupported.
+- ✅ Sign-in follows PHP `loadUserMPass()`: a user's `mPass` older than
+  `lastupdatempass` (MPASS_CHANGED) or one that fails `Hash::checkHashKey()`
+  against `masterPwd` (MPASS_WRONG) no longer unlocks the vault. Previously,
+  after a PHP master change, pySysPass would have kept using the old master and
+  written ciphertext PHP users could not open.
+- ✅ `masterPwd` hashing matches PHP `Hash::hashKey()`, including SHA-256
+  pre-hashing of keys longer than 72 characters.
 - ✅ The offline sysPass 3.2.11 fixture verifies PHP-created login/master bcrypt
   hashes, decrypts PHP-created `User.mPass`/`User.mKey`, and decrypts a password
   written by PHP's `account/saveCreate` endpoint from `Account.pass`/`Account.key`.

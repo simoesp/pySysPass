@@ -1,6 +1,8 @@
 # Synthetic configuration regression: SECRET_KEY is a test parameter and the
 # encryption key is the constant expression "a" * 64, not a credential.
 4edd552871bb88ad996a24e5822af5f3e3f7decf:tests/test_production_security.py:generic-api-key:54
-# Documentation prose, not a secret: the generic-api-key rule matched the words
-# "password, CSV/XML/KeePass" in the API reference (reworded in a later commit).
+# Documentation prose, not a secret: generic-api-key matched a list of import
+# format names after the word for credentials in the API reference (reworded).
 0c24dfdb2f5c590d304a6e257151e99610ab5763:docs/api/reference.md:generic-api-key:220
+# The first version of the comment above quoted that same prose.
+21f6ebca50dfb286365a267d2330342d19d25aa8:.gitleaksignore:generic-api-key:5

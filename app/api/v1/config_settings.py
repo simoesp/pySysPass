@@ -277,11 +277,16 @@ async def rekey_encryption(
     db: Session = Depends(get_db),
     current_user=Depends(require_admin),
 ):
-    """Refuse rotation until all PHP and runtime secret formats are supported."""
+    """Online rotation stays disabled: it cannot stop other writers or sessions.
+
+    The vault master password is changed offline with
+    ``python -m app.rotate_master_password`` (docs/backup-recovery.md).
+    """
     raise HTTPException(
         status_code=409,
         detail=(
-            "Encryption key rotation is unavailable until a complete, recoverable "
-            "rotation process is implemented. Existing keys and encrypted data were not changed."
+            "Online key rotation is disabled. Change the master password offline with "
+            "'python -m app.rotate_master_password' (see the backup and recovery guide). "
+            "Existing keys and encrypted data were not changed."
         ),
     )

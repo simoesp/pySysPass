@@ -405,3 +405,37 @@ and build passed. Ruff and Bandit passed. Remaining: built-in 2FA state still us
 Python format in the PHP `Authenticator` plugin row; the round trip uses PHP's class
 library, not the PHP web UI; PHP API-token vaults (`AuthToken.vault`) are not read, so
 token callers cannot write credentials; link refresh is not implemented.
+
+R8 / #58 follow-up: online rekey stays disabled. The vault master password now changes
+offline through `python -m app.rotate_master_password`, which follows PHP
+`MasterPassService::changeMasterPassword()`: it rotates `Account.pass/key`,
+`AccountHistory` rows whose `mPassHash` matches `masterPwd`, and encrypted
+`CustomFieldData`, then sets `masterPwd` (PHP `Hash::hashKey`) and `lastupdatempass`.
+It requires maintenance mode, as PHP does, and an explicit `--confirm-stopped`. It proves
+every value decrypts with the current master before writing; any failure aborts, where
+PHP would skip the row. It takes a fail-closed full backup, rewrites in one transaction,
+verifies with the new master before commit, retires temporary master passwords, and ends
+all pySysPass sessions. Legacy pySysPass AES rows are converted only with
+`--include-legacy`.
+
+The work exposed and fixed a live PHP-compatibility bug: sign-in ignored
+`lastupdatempass` and never checked the unlocked master against `masterPwd`. After a
+master change made in PHP, pySysPass would have kept unlocking users' stale master copies
+and encrypting new data with the old master. Sign-in now follows PHP `loadUserMPass()`
+and asks for the master password again. `masterPwd` hashing now matches PHP
+`Hash::hashKey()` for keys longer than 72 characters (Python bcrypt previously raised).
+
+Validation: 11 rotation tests start from the PHP-authored 3.2.11 vault. They cover full
+rotation, skipped old-master history, the custom field, preconditions, maintenance,
+undecryptable-value abort, legacy conversion, write-failure rollback, PHP MPASS_CHANGED
+login behaviour, long-key hash parity, and the CLI with session revocation. Upstream PHP
+(9d0e169, Defuse 2.4.0) decrypted the Python-rotated account and history row with the new
+80-character multibyte master and accepted its hash, while rejecting the old master. On
+MySQL 8.0.46 a failure injected mid-rotation left all rows readable with the old master.
+A full rehearsal in the non-root backend image against MySQL (25 accounts) refused a wrong
+master with no backup or writes, then wrote a backup, rotated and verified all 25, and
+revoked every session. Restoring the reported backup brought back the old-master vault.
+Limitations: there is no online or zero-downtime rotation; `ENCRYPTION_KEY` rotation
+(legacy rows, 2FA state, session claims) is still unsupported; PHP's per-run task progress
+UI and "hash only" option are not offered; the rehearsal used a small dataset, so
+large-vault duration is unmeasured.
