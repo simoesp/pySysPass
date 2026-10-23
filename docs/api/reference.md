@@ -217,8 +217,8 @@ ciphertext in `Account.pass` with a password-protected key in `Account.key`,
 under the vault master password. Any request that has to encrypt or decrypt
 one therefore needs a session with an unlocked vault, and otherwise returns
 `428` with code `MASTER_PASSWORD_REQUIRED`. That covers creating an account,
-changing its password, copying it, reading its password, CSV/XML/KeePass
-import, and public-link creation. sysPass API tokens carry no vault key, so
+changing or reading its stored secret, copying it, every import format, and
+public-link creation. sysPass API tokens carry no vault key, so
 token callers cannot do these; metadata-only edits still work. Rows written
 in the legacy Python format by earlier releases (empty `Account.key`) stay
 readable and are not rewritten.
