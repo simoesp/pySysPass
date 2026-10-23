@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.concurrency import run_in_threadpool
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from app.core.config import settings, validate_production_settings
 from app.db.bootstrap import bootstrap_database_on_startup
@@ -13,6 +14,7 @@ from app.api.v1 import (
     security_logs, password_reset, ldap, item_presets, backup, plugins,
 )
 from app.services.readiness_service import run_readiness_checks
+from app.services.runtime_policy import get_policy
 from app.services.task_service import task_service
 from contextlib import asynccontextmanager
 import re
@@ -137,6 +139,37 @@ async def audit_log_middleware(request: Request, call_next):
         except Exception:
             pass  # never let audit logging break a request
     return response
+
+MAX_REQUEST_BODY_BYTES = 24 * 1024 * 1024  # matches nginx client_max_body_size
+
+
+@app.middleware("http")
+async def request_size_limit_middleware(request: Request, call_next):
+    """Refuse oversized bodies before parsing them (transport-level bound)."""
+    length = request.headers.get("content-length")
+    if length is not None:
+        try:
+            too_large = int(length) > MAX_REQUEST_BODY_BYTES
+        except ValueError:
+            return JSONResponse(status_code=400, content={"detail": "Invalid Content-Length"})
+        if too_large:
+            return JSONResponse(status_code=413, content={"detail": "Request body too large"})
+    return await call_next(request)
+
+
+@app.middleware("http")
+async def force_https_middleware(request: Request, call_next):
+    """sysPass PHP HttpUtil::checkHttps(): redirect plain HTTP when enabled.
+
+    Registered before ProxyHeadersMiddleware, so it runs after a trusted
+    proxy's X-Forwarded-Proto has set the request scheme. Health probes stay
+    reachable on the private network.
+    """
+    if request.url.scheme != "https" and not request.url.path.startswith("/health"):
+        if (await run_in_threadpool(get_policy)).https_required:
+            return RedirectResponse(str(request.url.replace(scheme="https")), status_code=308)
+    return await call_next(request)
+
 
 # Install last so proxy normalization happens before audit attribution.
 # Uvicorn must use --no-proxy-headers to avoid a second trust policy.

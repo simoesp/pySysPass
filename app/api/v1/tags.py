@@ -30,7 +30,8 @@ async def create_tag(
 @router.get("/tags/{tag_id}", response_model=TagResponse)
 async def get_tag(
     tag_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
 ):
     """Get a specific tag"""
     service = TagService(db)

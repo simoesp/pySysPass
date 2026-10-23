@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from app.db.base import get_db
@@ -9,6 +9,7 @@ from app.schemas.config import (
     TemporaryMasterPasswordStatus,
 )
 from app.services.config_service import ConfigService
+from app.services.runtime_policy import MAX_FILE_SIZE_KB, invalidate_policy_cache
 from app.services.temporary_master_password_service import TemporaryMasterPasswordService
 from app.api.deps import require_admin, require_permission
 
@@ -57,11 +58,21 @@ async def get_general_settings(
 @router.put("/settings/general", response_model=GeneralSettings)
 async def save_general_settings(
     settings: GeneralSettings,
+    request: Request,
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_general')),
 ):
     svc = ConfigService(db)
+    # Force HTTPS redirects every plain-HTTP request. Turning it on from a
+    # connection that is not itself HTTPS (or whose proxy does not report
+    # it) would lock every user out, so require proof that HTTPS works.
+    if settings.https_enabled and not svc.get_general_settings().https_enabled and request.url.scheme != "https":
+        raise HTTPException(
+            status_code=400,
+            detail="Enable Force HTTPS from an HTTPS connection; this request arrived over HTTP.",
+        )
     svc.save_general_settings(settings)
+    invalidate_policy_cache()
     return svc.get_general_settings()
 
 
@@ -117,8 +128,12 @@ async def save_accounts_settings(
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_general')),
 ):
+    if settings.files_allowed_size is not None and not 1 <= settings.files_allowed_size <= MAX_FILE_SIZE_KB:
+        # Same ceiling as sysPass PHP ConfigAccountController (16384 KB).
+        raise HTTPException(status_code=422, detail=f"files_allowed_size must be 1-{MAX_FILE_SIZE_KB} KB")
     svc = ConfigService(db)
     svc.save_accounts_settings(settings)
+    invalidate_policy_cache()
     return svc.get_accounts_settings()
 
 

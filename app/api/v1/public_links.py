@@ -4,7 +4,7 @@ from typing import List, Optional
 from app.db.base import get_db
 from app.schemas.public_link import PublicLinkCreate, PublicLinkResponse, PublicLinkAccess
 from app.services.public_link_service import PublicLinkService
-from app.api.deps import require_any_permission
+from app.api.deps import reject_during_maintenance, require_any_permission
 from app.core.security import get_encryption_service
 from app.core.php_public_link import PublicLinkSnapshot
 from app.services.account_service import AccountService
@@ -51,7 +51,7 @@ async def create_public_link(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-@router.get("/public-links/{link_hash}/access")
+@router.get("/public-links/{link_hash}/access", dependencies=[Depends(reject_during_maintenance)])
 async def access_public_link(
     link_hash: str,
     password: Optional[str] = None,

@@ -66,8 +66,16 @@
           <div class="text-subtitle1 text-weight-medium q-mb-sm">Flags</div>
 
           <q-toggle v-model="general.https_enabled" label="Force HTTPS" />
+          <div class="text-caption text-grey-7 q-ml-md">
+            Redirects plain-HTTP requests to HTTPS. Can only be turned on over HTTPS, and needs a
+            TLS-terminating proxy that reports the original scheme.
+          </div>
           <q-toggle v-model="general.debug" label="Debug mode" />
           <q-toggle v-model="general.maintenance" label="Maintenance mode" />
+          <div class="text-caption text-grey-7 q-ml-md">
+            Blocks sign-in, API access, public links and password resets for everyone except
+            application administrators.
+          </div>
           <q-toggle v-model="general.check_updates" label="Check for updates" />
           <q-toggle v-model="general.log_enabled" label="Event logging" />
 
@@ -359,7 +367,8 @@
           <div class="text-subtitle1 text-weight-medium q-mb-sm">Files</div>
           <q-toggle v-model="accounts.files_enabled" label="Enable file attachments" />
           <template v-if="accounts.files_enabled">
-            <q-input v-model.number="accounts.files_allowed_size" label="Max file size (KB)" type="number" outlined dense />
+            <q-input v-model.number="accounts.files_allowed_size" label="Max file size (KB, 1-16384)" type="number" outlined dense
+              hint="Checked against the decoded upload; 1 KB = 1000 bytes, as in sysPass PHP" />
             <q-input v-model="accounts.files_allowed_exts" label="Allowed extensions (comma-separated)" outlined dense
               hint="Leave empty to allow all. e.g. pdf,docx,png" />
           </template>

@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 import secrets
 import time
 from app.db.base import get_db
-from app.api.deps import get_current_user
+from app.api.deps import enforce_maintenance, get_current_user, reject_during_maintenance
 from app.schemas.install import InstallRequest, InstallResponse, InstallStatusResponse
 from app.schemas.user import UserCreate, UserResponse, Token
 from app.services.auth_service import (
@@ -124,7 +124,10 @@ async def install(body: InstallRequest, db: Session = Depends(get_db)):
         ),
     )
 
-@router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(reject_during_maintenance)],
+)
 async def register(user: UserCreate, db: Session = Depends(get_db)):
     raise HTTPException(
         status_code=410,
@@ -173,6 +176,9 @@ async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends
             user_id=user.id, login=user.username, ip=ip, level="WARN",
         )
         raise HTTPException(status_code=401, detail="User is disabled")
+    # Credentials are checked first so the response does not reveal whether
+    # a non-admin account exists while maintenance is on.
+    enforce_maintenance(db, user)
 
     login_form = await request.form()
 

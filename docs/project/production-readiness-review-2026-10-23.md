@@ -345,3 +345,35 @@ valid without a readable vault key. Separate observation for follow-up: the sess
 token embeds the user's master password encrypted with unauthenticated AES-CTR under
 `ENCRYPTION_KEY`, and browsers keep the token in `localStorage`, so token theft plus
 key disclosure exposes the master password.
+
+R9 / #52 follow-up: the controls on the settings page are now enforced server-side.
+Settings are read through the same runtime-JSON/`Config` precedence, cached for two
+seconds per process; saving settings clears the local cache.
+
+- Force HTTPS: plain-HTTP requests other than `/health*` get a 308 to HTTPS. The check
+  runs after trusted-proxy normalization, so a trusted proxy's `X-Forwarded-Proto` is
+  honoured and a direct caller's is not. It can be enabled only from an HTTPS request,
+  so an HTTP-only deployment cannot lock itself out. TLS must still terminate at a
+  proxy; RSA field wrapping is not transport security.
+- Maintenance mode: non-admin sign-in (after credential checks), JWT and API-token
+  requests, public links, password reset, and registration return 503. Application
+  administrators stay admitted, unlike PHP's lock holder.
+- Attachments: `files_enabled` gates upload and listing; the decoded upload must not
+  exceed `files_allowed_size` × 1000 bytes (1–16,384 KB, PHP's ceiling); oversized
+  base64 is refused before decoding; invalid base64 returns 400; the extension comes
+  from the file name (upper-cased, as in PHP) and must be in `files_allowed_exts` when
+  that list is set. Caller-declared size and extension are ignored. File names follow
+  PHP's 100-character column.
+- Transport: nginx allows 24 MB API bodies (the previous 1 MB default rejected uploads
+  near the default limit) and the backend refuses larger `Content-Length` with 413.
+- `GET /tags/{id}` required no authentication; it now requires a session like the other
+  tag routes.
+
+Validation: 13 new tests cover each control, including spoofed and trusted
+`X-Forwarded-Proto`, middleware order, and the HTTPS enable guard. Backend: 363 passed,
+8 skipped. Frontend: 24 tests and build passed; lint 0 errors (526 warnings, 3 new ones
+of the existing attribute-style classes in `SettingsPage.vue`). The rebuilt nginx image
+returned 413 for a 25 MiB API body, forwarded a 2 MiB body, and passed the header check.
+Ruff and Bandit passed. Limitations: other workers see setting changes within two
+seconds; extension checks do not inspect content (PHP checks MIME); maintenance does
+not stop external PHP writers; configuring real TLS remains a deployment task.

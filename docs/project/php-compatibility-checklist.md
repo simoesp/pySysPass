@@ -116,6 +116,18 @@ Compatibility should be treated as successful only when:
 - PHP's per-user `SessionTimeout` item presets (serialized objects with
   address/mask) are not applied; only the global timeout is.
 - Confirm user-group membership behavior matches PHP tables exactly.
+- ✅ Maintenance mode is enforced: sign-in, API (including API tokens), public
+  links, password reset, and registration return 503. Deliberate divergence:
+  PHP admits only the maintenance task's lock holder, while pySysPass admits
+  application administrators so maintenance can be switched off in the UI.
+- ✅ Force HTTPS redirects plain HTTP (308), like PHP `HttpUtil::checkHttps()`,
+  after trusted-proxy scheme normalization.
+- ✅ Attachments follow PHP: `files_enabled` gates upload and listing, the
+  decoded size is compared with `files_allowed_size` × 1000 bytes (maximum
+  16384 KB), and the stored extension is the upper-cased file-name suffix.
+  Divergence: PHP 3 checks an allowed MIME list (`filesAllowedMime`, empty
+  means none allowed); pySysPass checks its `files_allowed_exts` list, and an
+  empty list allows any extension. PHP `config.xml` file settings are not read.
 - Compare admin, account-admin, disabled-user, and forced-password-change behavior with upstream sysPass flows.
 
 ### 4. Account And Sharing Behavior

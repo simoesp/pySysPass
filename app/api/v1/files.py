@@ -9,7 +9,10 @@ from app.api.deps import require_any_permission
 from app.core.security import get_encryption_service
 from app.services.account_service import AccountService
 from app.services.history_service import HistoryService
+from app.services.runtime_policy import get_policy
 import base64
+import binascii
+import os
 
 router = APIRouter()
 file_access = require_any_permission("acc_files", account_admin=True)
@@ -21,6 +24,9 @@ async def list_files(
     current_user = Depends(file_access)
 ):
     """List all files attached to an account"""
+    if not get_policy(db).files_enabled:
+        # sysPass PHP AccountFileController::listAction() gate.
+        raise HTTPException(status_code=403, detail="Files management disabled")
     if not AccountService(db, get_encryption_service()).can_access_account(account_id, current_user["id"]):
         raise HTTPException(status_code=404, detail="Account not found")
 
@@ -38,11 +44,27 @@ async def upload_file(
     if not AccountService(db, get_encryption_service()).can_edit_account(account_id, current_user["id"]):
         raise HTTPException(status_code=404, detail="Account not found")
 
-    # Decode base64 content
+    policy = get_policy(db)
+    if not policy.files_enabled:
+        raise HTTPException(status_code=403, detail="Files management disabled")
+    # Bound the work before decoding; the decoded length is checked exactly.
+    if len(file_data.content) > 4 * -(-policy.max_file_bytes // 3) + 4:
+        raise HTTPException(status_code=413, detail=f"File size exceeded (maximum {policy.files_allowed_size_kb} KB)")
     try:
-        content = base64.b64decode(file_data.content)
-    except Exception:
+        content = base64.b64decode(file_data.content, validate=True)
+    except (binascii.Error, ValueError):
         raise HTTPException(status_code=400, detail="Invalid base64 content")
+    if not content:
+        raise HTTPException(status_code=400, detail="Invalid file")
+    if len(content) > policy.max_file_bytes:
+        raise HTTPException(status_code=413, detail=f"File size exceeded (maximum {policy.files_allowed_size_kb} KB)")
+
+    # sysPass PHP: extension = upper-cased suffix of the file name.
+    extension = os.path.splitext(file_data.name)[1].lstrip(".").upper()
+    if len(extension) > 10:
+        raise HTTPException(status_code=422, detail="File extension too long")
+    if policy.files_allowed_exts and extension not in policy.files_allowed_exts:
+        raise HTTPException(status_code=415, detail="File type not allowed")
 
     service = FileService(db)
 
@@ -51,9 +73,9 @@ async def upload_file(
         account_id=account_id,
         name=file_data.name,
         file_type=file_data.type,
-        size=file_data.size,
+        size=len(content),
         content=content,
-        extension=file_data.extension
+        extension=extension
     )
 
     # Log the upload

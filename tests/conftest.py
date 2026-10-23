@@ -53,6 +53,16 @@ def isolated_session_store(tmp_path, monkeypatch):
     return session_store
 
 
+@pytest.fixture(autouse=True)
+def fresh_runtime_policy():
+    """Runtime policy is cached per process; never carry it across tests."""
+    from app.services.runtime_policy import invalidate_policy_cache
+
+    invalidate_policy_cache()
+    yield
+    invalidate_policy_cache()
+
+
 @pytest.fixture(scope="function")
 def db_session():
     # Mapped PHP views must not be materialized as tables. Tests should fail
