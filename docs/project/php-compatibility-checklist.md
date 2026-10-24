@@ -120,7 +120,10 @@ Compatibility should be treated as successful only when:
   Defuse-encrypted under the vault master password (plugin commit `b304661`).
   The upstream plugin decodes pySysPass enrollments, and its TOTP check accepts
   them (CI). A PHP-authored row is a committed fixture; Python reproduces its
-  bytes and signs in with its TOTP and recovery codes. As in PHP, 2FA is checked
+  bytes and signs in with its TOTP and recovery codes. Through the PHP web UI,
+  with the plugin installed in the official 3.2.11 image, PHP's own 2FA step
+  rejects a wrong code for a pySysPass enrollment and accepts a current TOTP
+  and a pySysPass recovery code (CI). As in PHP, 2FA is checked
   after the vault is unlocked. Pending setup secrets stay outside PHP tables
   (`data/two-factor-pending.json`), so a row always means "enrolled". New
   secrets and recovery codes use PHP's formats.

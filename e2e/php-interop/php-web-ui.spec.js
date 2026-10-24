@@ -1,7 +1,21 @@
 // R5 / #56: the sysPass PHP web UI reads what pySysPass writes, and
 // pySysPass unlocks the vault of a PHP-created installation.
 // Requires scripts/php-interop-stack.sh up. Synthetic credentials only.
+import { createHmac } from 'node:crypto'
 import { test, expect } from '@playwright/test'
+
+// RFC 6238 TOTP (SHA-1, 30 s, 6 digits) for a Base32 seed.
+function totp(seed) {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'
+  let bits = ''
+  for (const char of seed.replace(/=+$/, '').toUpperCase()) bits += alphabet.indexOf(char).toString(2).padStart(5, '0')
+  const key = Buffer.from(bits.match(/.{8}/g).map(byte => parseInt(byte, 2)))
+  const counter = Buffer.alloc(8)
+  counter.writeBigUInt64BE(BigInt(Math.floor(Date.now() / 30000)))
+  const digest = createHmac('sha1', key).update(counter).digest()
+  const offset = digest[digest.length - 1] & 0xf
+  return String((digest.readUInt32BE(offset) & 0x7fffffff) % 1000000).padStart(6, '0')
+}
 
 const PHP = 'http://127.0.0.1:18400'
 const PY = 'http://127.0.0.1:18401/api/v1'
@@ -103,4 +117,42 @@ test('PHP imports a password-protected XML export written by pySysPass', async (
   await page.locator(`[data-action-route="account/viewPass"][data-item-id="${copy.id}"]`).first().click()
   expect((await (await viewPass).json()).status).toBe(0)
   await expect.poll(async () => (await page.content()).includes(secret)).toBe(true)
+})
+
+// Needs the stack started with AUTHENTICATOR_DIR (sysPass/plugin-Authenticator).
+test('the PHP Authenticator plugin enforces 2FA enrolled through pySysPass', async ({ page, request }) => {
+  test.skip(!process.env.INTEROP_2FA, 'start the stack with AUTHENTICATOR_DIR and set INTEROP_2FA=1')
+  const login = await request.post(`${PY}/auth/login`, {
+    form: { username: 'phpadmin', password: 'PhpAdmin-Pass-2026' },
+  })
+  let headers = { Authorization: `Bearer ${(await login.json()).access_token}` }
+  expect((await request.put(`${PY}/settings/two-factor`, { headers, data: { mode: 'enabled' } })).status()).toBe(200)
+  const setup = await (await request.post(`${PY}/2fa/setup`, { headers, data: { password: 'PhpAdmin-Pass-2026' } })).json()
+  const enabled = await request.post(`${PY}/2fa/enable`, { headers, data: { code: totp(setup.secret) } })
+  expect(enabled.status()).toBe(200)
+  const { access_token: rotated, backup_codes: codes } = await enabled.json()
+  headers = { Authorization: `Bearer ${rotated}` }
+
+  async function phpSignIn(pin) {
+    await page.goto(`${PHP}/index.php`)
+    await page.fill('#user', 'phpadmin')
+    await page.fill('#pass', 'PhpAdmin-Pass-2026')
+    await page.click('#btnLogin')
+    await page.waitForURL(/authenticatorLogin/)
+    await page.fill('#pin', pin)
+    const checked = page.waitForResponse(response => response.url().includes('checkCode'))
+    await page.click('#btnLogin')
+    return (await (await checked).json()).status
+  }
+
+  try {
+    // PHP reads the AuthenticatorData pySysPass wrote and demands a code.
+    expect(await phpSignIn('000000')).not.toBe(0)
+    expect(await phpSignIn(totp(setup.secret))).toBe(0)
+    await page.context().clearCookies()
+    // A pySysPass recovery code is a valid PHP recovery code (20 hex chars).
+    expect(await phpSignIn(codes[0])).toBe(0)
+  } finally {
+    await request.post(`${PY}/2fa/disable`, { headers, data: { password: 'PhpAdmin-Pass-2026' } })
+  }
 })

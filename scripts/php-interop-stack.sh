@@ -16,8 +16,47 @@ case "${1:-}" in
     docker run -d --rm --name interop-db --network "$NET" -e MYSQL_ROOT_PASSWORD=root \
       "$MYSQL_IMAGE" --default-authentication-plugin=mysql_native_password >/dev/null
     until docker exec interop-db mysql -uroot -proot -e "select 1" >/dev/null 2>&1; do sleep 2; done
-    docker run -d --rm --name interop-php --network "$NET" -p 127.0.0.1:18400:80 "$PHP_IMAGE" >/dev/null
-    until curl -sf -o /dev/null http://127.0.0.1:18400/index.php; do sleep 2; done
+    # Optional AUTHENTICATOR_DIR: a sysPass/plugin-Authenticator checkout to
+    # test 2FA. Copied in before first start: the image's entrypoint chowns the
+    # sysPass tree, so a read-only bind mount would make it exit.
+    docker create --rm --name interop-php --network "$NET" -p 127.0.0.1:18400:80 "$PHP_IMAGE" >/dev/null
+    if [ -n "${AUTHENTICATOR_DIR:-}" ]; then
+      docker cp "$AUTHENTICATOR_DIR/." interop-php:/var/www/html/sysPass/app/modules/web/plugins/Authenticator
+      # A real plugin install runs Composer, which adds the plugin to the
+      # autoloader. Emulate that for this disposable instance only: the image's
+      # classmap is authoritative, and base.php's class_exists() probe would
+      # otherwise cache the class as missing before registering it.
+      tmp=$(mktemp -d)
+      docker cp interop-php:/var/www/html/sysPass/vendor/composer/autoload_real.php "$tmp/"
+      python3 - "$tmp/autoload_real.php" <<'PY'
+import sys
+path = sys.argv[1]
+source = open(path).read()
+old = "$loader->setClassMapAuthoritative(true);"
+lib = "__DIR__ . '/../../app/modules/web/plugins/Authenticator/src/lib"
+new = ("$loader->setClassMapAuthoritative(false);\n"
+       f"        $loader->addPsr4('SP\\\\Modules\\\\Web\\\\Plugins\\\\Authenticator\\\\', {lib}');\n"
+       "        $loader->addClassMap([\n"
+       f"            'SP\\\\Modules\\\\Web\\\\Controllers\\\\AuthenticatorController' => {lib}/Controllers/AuthenticatorController.php',\n"
+       f"            'SP\\\\Modules\\\\Web\\\\Controllers\\\\AuthenticatorLoginController' => {lib}/Controllers/AuthenticatorLoginController.php',\n"
+       "        ]);")
+assert old in source, "authoritative classmap call not found"
+open(path, "w").write(source.replace(old, new))
+PY
+      grep -q "Plugins.*Authenticator" "$tmp/autoload_real.php" || { echo "autoloader patch failed" >&2; exit 1; }
+      docker cp "$tmp/autoload_real.php" interop-php:/var/www/html/sysPass/vendor/composer/autoload_real.php
+      rm -rf "$tmp"
+    fi
+    docker start interop-php >/dev/null
+    for attempt in $(seq 1 60); do
+      curl -sf -o /dev/null http://127.0.0.1:18400/index.php && break
+      if [ "$attempt" = 60 ] || ! docker ps -q --filter name=interop-php | grep -q .; then
+        echo "sysPass PHP did not start" >&2
+        docker logs interop-php 2>&1 | tail -20 >&2 || true
+        exit 1
+      fi
+      sleep 2
+    done
     result=$(curl -sf -X POST "http://127.0.0.1:18400/index.php?r=install/install" \
       --data-urlencode adminlogin=phpadmin --data-urlencode adminpass=PhpAdmin-Pass-2026 \
       --data-urlencode adminpassr=PhpAdmin-Pass-2026 --data-urlencode masterpassword=Php-Master-Pass-2026 \

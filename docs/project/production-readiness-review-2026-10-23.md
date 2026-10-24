@@ -561,5 +561,9 @@ category, and incremented `countViews` and the account's view and decrypt counte
 own sign-in, search, and `account/viewPass` dialog decrypted and showed the password. The
 test passed locally and runs in a new CI job. A second test exports an account as password-protected XML
 through pySysPass and deletes it there. It then imports the file through PHP's own Import
-screen and confirms that PHP's view-password dialog decrypts the imported copy. Not covered:
-2FA through the PHP plugin UI (the plugin is not in the official image).
+screen and confirms that PHP's view-password dialog decrypts the imported copy. A third test installs the pinned sysPass
+Authenticator plugin into the PHP container, registered with Composer's autoloader as a
+real plugin install would. It enrolls the PHP admin through pySysPass: PHP's sign-in then
+redirected to the plugin's 2FA step, rejected a wrong code, and accepted a current TOTP
+and a pySysPass recovery code. The suite passed three consecutive runs locally and runs
+in CI.

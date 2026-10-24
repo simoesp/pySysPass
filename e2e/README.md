@@ -31,3 +31,11 @@ scripts/php-interop-stack.sh up   # PHP UI :18400, pySysPass API :18401
 cd e2e && npx playwright test -c playwright.php-interop.config.js
 scripts/php-interop-stack.sh down
 ```
+
+The 2FA test also needs the sysPass Authenticator plugin (not in the official
+image). Start the stack with `AUTHENTICATOR_DIR=/path/to/plugin-Authenticator`
+(commit `b304661`) and run the suite with `INTEROP_2FA=1`. The script copies the
+plugin in and, for that disposable container only, registers it with Composer's
+autoloader as a real plugin install would. pySysPass enrolls the PHP admin;
+PHP's plugin must reject a wrong code and accept a current TOTP and a pySysPass
+recovery code.
