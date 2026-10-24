@@ -668,3 +668,12 @@ Observation (not changed): neither pySysPass nor the sysPass Authenticator
 plugin blocks reuse of a TOTP code inside its validity window (pySysPass accepts
 ±1 step, PHP `Google2FA::verify_key()` ±4). Blocking replay needs a persisted
 last-used step, which the PHP plugin data does not store.
+
+#65 follow-up (large dataset and soak): see `docs/project/load-test-2026-10-24.md`,
+"Large dataset and soak". At 18,432 accounts, unbounded `/accounts/search`
+dominated latency; it is now paged (behaviour change for API clients). A
+30-minute soak with 20 users, token refresh, and a mid-run backup served
+158,355 requests without errors. Backend memory rose from 457 to 595 MiB,
+which this run cannot classify. The run also found that several workers racing
+to bootstrap an empty database stopped the server; bootstrap is now serialized
+with a database lock and covered by a MySQL test (CI "Schema bootstrap on MySQL 8").

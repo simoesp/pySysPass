@@ -467,7 +467,7 @@ class AccountService:
         accounts = (
             self._listing_query()
             .filter(*self._list_filters(user_id, group_ids, q, category_id, client_id, tag_id))
-            .order_by(Account.dateAdd.desc())
+            .order_by(Account.dateAdd.desc(), Account.id.desc())  # id: stable pages for equal dates
             .offset(skip)
             .limit(limit)
             .all()
@@ -528,11 +528,14 @@ class AccountService:
         self.db.refresh(account)
         return self._to_response(account, user_id or account.userId, group_ids)
 
-    def search_accounts(self, user_id: int, query: str) -> List[dict]:
+    def search_accounts(self, user_id: int, query: str, skip: int = 0, limit: int = 100) -> List[dict]:
         group_ids = self._get_user_group_ids(user_id)
         accounts = (
             self._listing_query()
             .filter(*self._list_filters(user_id, group_ids, q=query))
+            .order_by(Account.dateAdd.desc(), Account.id.desc())
+            .offset(skip)
+            .limit(limit)
             .all()
         )
         return self._listing_responses(accounts, user_id, group_ids)

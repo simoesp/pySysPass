@@ -1,3 +1,5 @@
+from datetime import datetime
+
 import pytest
 from app.models.account import Account
 from app.schemas.account import AccountUpdate
@@ -107,6 +109,19 @@ async def test_search_accounts(db_session, encryption_service, test_user):
 
     assert len(results) == 1
     assert "GitHub" in results[0].title
+
+
+def test_search_is_paged_and_stable(db_session, encryption_service, test_user):
+    service = AccountService(db_session, encryption_service)
+    for index in range(5):
+        service.create_account(account_create(title=f"Paged {index}", password="pass"), test_user.id,
+                               master_pass=TEST_MASTER_PASSWORD)
+    db_session.query(Account).update({Account.dateAdd: datetime(2026, 1, 1)})  # equal dates: id breaks ties
+    db_session.commit()
+    pages = [service.search_accounts(test_user.id, "Paged", skip, 2) for skip in (0, 2, 4)]
+    assert [len(page) for page in pages] == [2, 2, 1]
+    ids = [account.id for page in pages for account in page]
+    assert len(set(ids)) == 5 and ids == sorted(ids, reverse=True)
 
 @pytest.mark.asyncio
 async def test_account_access_is_scoped_to_owner(db_session, encryption_service, test_user):

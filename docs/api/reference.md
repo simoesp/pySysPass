@@ -382,7 +382,9 @@ Used by the frontend for server-side pagination.
 
 `GET /api/v1/accounts/search?q=postgres`
 
-The current implementation searches within the user’s accessible account set.
+Searches within the user’s accessible account set. Optional `skip` (default 0)
+and `limit` (default 100, maximum 500) page the results, newest first, as
+`GET /accounts` does. Earlier releases returned every match.
 
 #### Toggle favourite
 

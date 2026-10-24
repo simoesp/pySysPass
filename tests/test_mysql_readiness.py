@@ -51,3 +51,30 @@ def test_unreachable_mysql_is_not_ready(storage):  # noqa: F811
     result = asyncio.run(run_readiness_checks(engine, config=_config(storage)))
     assert result["checks"]["database"] == {"ok": False, "reason": "database unreachable"}
     assert result["ready"] is False
+
+
+def test_concurrent_workers_bootstrap_a_virgin_database_once(monkeypatch):
+    # WEB_CONCURRENCY workers all run the startup hook; on a virgin database the
+    # losers used to fail with "Table ... already exists" and stop uvicorn.
+    from concurrent.futures import ThreadPoolExecutor
+
+    from app.db import bootstrap
+
+    monkeypatch.setattr(bootstrap.settings, "AUTO_INIT_DB_ON_STARTUP", True)
+    server_url = make_url(MYSQL_URL)
+    database = f"pysyspass_race_{secrets.token_hex(4)}"
+    admin = create_engine(server_url.set(database=None))
+    with admin.begin() as conn:
+        conn.execute(text(f"CREATE DATABASE `{database}`"))
+    engines = [create_engine(server_url.set(database=database)) for _ in range(4)]
+    try:
+        with ThreadPoolExecutor(len(engines)) as pool:
+            results = list(pool.map(lambda e: bootstrap.bootstrap_database_on_startup(e), engines))
+        assert results.count(True) == 1  # exactly one worker applied the schema
+        assert bootstrap.database_requires_bootstrap(engines[0]) is False
+    finally:
+        for engine in engines:
+            engine.dispose()
+        with admin.begin() as conn:
+            conn.execute(text(f"DROP DATABASE IF EXISTS `{database}`"))
+        admin.dispose()

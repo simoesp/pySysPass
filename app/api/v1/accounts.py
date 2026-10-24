@@ -80,10 +80,14 @@ def count_accounts(
 @router.get("/accounts/search", response_model=List[AccountResponse])
 def search_accounts(
     q: str,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db),
     current_user=Depends(account_view),
 ):
-    return AccountService(db, get_encryption_service()).search_accounts(current_user["id"], q)
+    # Paged like /accounts (and PHP's account search); unbounded results cost
+    # seconds per request on large vaults.
+    return AccountService(db, get_encryption_service()).search_accounts(current_user["id"], q, skip, limit)
 
 
 @router.post("/accounts", response_model=AccountResponse, status_code=status.HTTP_201_CREATED)

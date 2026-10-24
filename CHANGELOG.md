@@ -35,6 +35,8 @@ Evidence for each item: `docs/project/production-readiness-review-2026-10-23.md`
 - Production startup fails without explicit, non-sample `SECRET_KEY` and
   `ENCRYPTION_KEY`; `DEBUG` defaults to false.
 - `GET /api/v1/tags/{id}` now requires authentication.
+- `GET /api/v1/accounts/search` is paged like `GET /accounts` (`skip`, `limit`
+  default 100, maximum 500, newest first); it used to return every match.
 - Item presets use sysPass PHP types (`account.permission`, `account.private`,
   `account.password`, `session.timeout`) and are now enforced. Managing them
   requires the `mgm_items_preset` permission, and every preset needs a user,
@@ -74,6 +76,9 @@ Evidence for each item: `docs/project/production-readiness-review-2026-10-23.md`
 - Password reset not setting PHP migration flags.
 - Reads of native ciphertext without a vault key raising 500.
 - `masterPwd` hashing for keys longer than 72 characters (now matches PHP).
+- With `WEB_CONCURRENCY` > 1 and `AUTO_INIT_DB_ON_STARTUP`, workers raced to
+  bootstrap an empty database; the losers crashed and uvicorn stopped. The
+  bootstrap now runs under a database lock (MySQL `GET_LOCK`).
 - The master password in session tokens is sealed with AES-256-GCM under a
   derived, single-purpose key and bound to the user (was unauthenticated AES-CTR).
 
