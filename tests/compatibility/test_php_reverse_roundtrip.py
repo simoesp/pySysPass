@@ -176,7 +176,7 @@ def test_php_authenticator_plugin_reads_python_2fa_enrollment(db_session, encryp
 def test_php_reads_values_migrated_from_legacy_formats(db_session, test_user):
     """Legacy pySysPass account and 2FA rows become PHP-readable after migration."""
     from app.core.security import EncryptionService
-    from app.models.account import PluginData
+    from app.models.account import Plugin, PluginData
     from app.services.auth_service import hash_master_key
     from app.services.legacy_migration import LegacyFormatMigration
 
@@ -185,6 +185,8 @@ def test_php_reads_values_migrated_from_legacy_formats(db_session, test_user):
     db_session.add(Account(id=80, name="legacy", userId=test_user.id, userEditId=test_user.id, userGroupId=1,
                            clientId=900, categoryId=900, pass_=old.encrypt("was-legacy").encode(), key=b""))
     vault = old.encrypt(json.dumps({"secret": "JBSWY3DPEHPK3PXP", "backup_codes": ["0123456789abcdef0123"]}))
+    db_session.add(Plugin(name="Authenticator", enabled=True, available=True))  # PluginData FK parent
+    db_session.flush()
     db_session.add(PluginData(name="Authenticator", itemId=test_user.id,
                               data=json.dumps({"enabled": True, "vault": vault}).encode(), key=b""))
     db_session.commit()

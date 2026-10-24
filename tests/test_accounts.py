@@ -262,3 +262,46 @@ async def test_count_accounts_is_scoped_to_user(db_session, encryption_service, 
 
     assert service.count_accounts(test_user.id) == 1
     assert service.count_accounts(other_user.id) == 0
+
+
+def test_account_listing_queries_do_not_grow_with_rows(db_session, encryption_service, test_user):
+    """Listing builds every row from a fixed number of queries (no N+1)."""
+    from sqlalchemy import event
+
+    from app.models.account import AccountToFavorite, Tag
+    from app.schemas.account import SharedGroupEntry, SharedUserEntry
+    from app.services.category_service import make_item_hash
+
+    service = AccountService(db_session, encryption_service)
+    db_session.add(Tag(id=5, name="t", hash=make_item_hash("t")))
+    db_session.commit()
+
+    def build(count):
+        for index in range(count):
+            created = service.create_account(account_create(
+                title=f"q{count}-{index}", password="p", is_public=True, tag_ids=[5],
+                shared_users=[SharedUserEntry(user_id=test_user.id)], shared_groups=[SharedGroupEntry(group_id=1)],
+            ), test_user.id, master_pass=TEST_MASTER_PASSWORD)
+            db_session.add(AccountToFavorite(accountId=created["id"], userId=test_user.id))
+        db_session.commit()
+
+    def queries_for_listing():
+        engine = db_session.get_bind()
+        seen = []
+        listener = lambda *args: seen.append(1)  # noqa: E731
+        event.listen(engine, "before_cursor_execute", listener)
+        try:
+            rows = AccountService(db_session, encryption_service).get_accounts(test_user.id, 0, 500)
+        finally:
+            event.remove(engine, "before_cursor_execute", listener)
+        return len(rows), len(seen), rows
+
+    build(5)
+    small_rows, small, _ = queries_for_listing()
+    build(45)
+    large_rows, large, rows = queries_for_listing()
+    assert (small_rows, large_rows) == (5, 50)
+    assert large == small  # constant, not proportional to rows
+    assert all(r["is_favorite"] and [t.id for t in r["tags"]] == [5] for r in rows)
+    assert all(r["shared_users"][0].username == test_user.username for r in rows)
+    assert all(r["shared_groups"][0].group_id == 1 for r in rows)

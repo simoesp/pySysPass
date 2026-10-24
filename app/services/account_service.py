@@ -1,7 +1,7 @@
 from typing import List, Optional, Set
 from datetime import datetime
 from sqlalchemy import and_, or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from app.models.account import (
     Account, AccountHistory, AccountToTag, AccountToFavorite, AccountToUser, AccountToUserGroup,
     Category, Client, Tag, User, UserGroup, UserToUserGroup
@@ -47,17 +47,68 @@ class AccountService:
         self.encryption = encryption
         self._full_group_access: Optional[bool] = None
         self._global_search: Optional[bool] = None
+        # Per-request caches. A service instance lives for one request, so
+        # reusing these rows avoids N+1 queries when building account lists.
+        self._users: dict = {}
+        self._groups: dict = {}
+        self._favorites: Optional[Set[int]] = None
 
     # ── Internal helpers ──────────────────────────────────────────────────
 
     def _is_favorited(self, account_id: int, user_id: int) -> bool:
+        if self._favorites is not None:
+            return account_id in self._favorites
         return self.db.query(AccountToFavorite).filter(
             AccountToFavorite.accountId == account_id,
             AccountToFavorite.userId == user_id,
         ).first() is not None
 
     def _get_user(self, user_id: int) -> Optional[User]:
-        return self.db.query(User).filter(User.id == user_id).first()
+        if user_id not in self._users:
+            self._users[user_id] = self.db.query(User).filter(User.id == user_id).first()
+        return self._users[user_id]
+
+    def _get_group(self, group_id: int) -> Optional[UserGroup]:
+        if group_id not in self._groups:
+            self._groups[group_id] = self.db.query(UserGroup).filter(UserGroup.id == group_id).first()
+        return self._groups[group_id]
+
+    def _prefetch_for_listing(self, accounts: List[Account], user_id: int) -> None:
+        """Load everything _to_response needs for many accounts in a few queries."""
+        ids = [a.id for a in accounts]
+        if not ids:
+            self._favorites = set()
+            return
+        self._favorites = {
+            row[0] for row in self.db.query(AccountToFavorite.accountId).filter(
+                AccountToFavorite.userId == user_id, AccountToFavorite.accountId.in_(ids)
+            ).all()
+        }
+        user_ids = {s.userId for a in accounts for s in a.sharedUsers or []} - set(self._users)
+        for user in self.db.query(User).filter(User.id.in_(user_ids)).all() if user_ids else []:
+            self._users[user.id] = user
+        for missing in user_ids - set(self._users):
+            self._users[missing] = None
+        group_ids = {s.userGroupId for a in accounts for s in a.sharedUserGroups or []} - set(self._groups)
+        for group in self.db.query(UserGroup).filter(UserGroup.id.in_(group_ids)).all() if group_ids else []:
+            self._groups[group.id] = group
+        for missing in group_ids - set(self._groups):
+            self._groups[missing] = None
+
+    def _listing_responses(self, accounts: List[Account], user_id: int, group_ids: Set[int]) -> List[dict]:
+        self._prefetch_for_listing(accounts, user_id)
+        try:
+            return [self._to_response(a, user_id, group_ids) for a in accounts]
+        finally:
+            self._favorites = None  # only valid while this listing is built
+
+    def _listing_query(self):
+        # Eager-load the per-account collections shown in listings.
+        return self.db.query(Account).options(
+            selectinload(Account.tags).selectinload(AccountToTag.tag),
+            selectinload(Account.sharedUsers),
+            selectinload(Account.sharedUserGroups),
+        )
 
     def _get_user_group_ids(self, user_id: int) -> Set[int]:
         user = self._get_user(user_id)
@@ -247,7 +298,7 @@ class AccountService:
     def _get_shared_users(self, account: Account) -> List[SharedUserInfo]:
         result = []
         for atu in (account.sharedUsers or []):
-            user = self.db.query(User).filter(User.id == atu.userId).first()
+            user = self._get_user(atu.userId)
             if user:
                 result.append(SharedUserInfo(
                     user_id=user.id,
@@ -259,7 +310,7 @@ class AccountService:
     def _get_shared_groups(self, account: Account) -> List[SharedGroupInfo]:
         result = []
         for atg in (account.sharedUserGroups or []):
-            group = self.db.query(UserGroup).filter(UserGroup.id == atg.userGroupId).first()
+            group = self._get_group(atg.userGroupId)
             if group:
                 result.append(SharedGroupInfo(
                     group_id=group.id,
@@ -414,14 +465,14 @@ class AccountService:
     ) -> List[dict]:
         group_ids = self._get_user_group_ids(user_id)
         accounts = (
-            self.db.query(Account)
+            self._listing_query()
             .filter(*self._list_filters(user_id, group_ids, q, category_id, client_id, tag_id))
             .order_by(Account.dateAdd.desc())
             .offset(skip)
             .limit(limit)
             .all()
         )
-        return [self._to_response(a, user_id, group_ids) for a in accounts]
+        return self._listing_responses(accounts, user_id, group_ids)
 
     def count_accounts(
         self,
@@ -480,11 +531,11 @@ class AccountService:
     def search_accounts(self, user_id: int, query: str) -> List[dict]:
         group_ids = self._get_user_group_ids(user_id)
         accounts = (
-            self.db.query(Account)
+            self._listing_query()
             .filter(*self._list_filters(user_id, group_ids, q=query))
             .all()
         )
-        return [self._to_response(a, user_id, group_ids) for a in accounts]
+        return self._listing_responses(accounts, user_id, group_ids)
 
     # ── Mutations ─────────────────────────────────────────────────────────
 

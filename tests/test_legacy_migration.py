@@ -6,7 +6,7 @@ import pytest
 
 from app.core.defuse_compat import decrypt_account_pass, encrypt_account_pass
 from app.core.security import EncryptionService
-from app.models.account import Account, AccountHistory, Config, PluginData, PublicLink
+from app.models.account import Account, AccountHistory, Config, Plugin, PluginData, PublicLink
 from app.services.auth_service import hash_master_key, issue_session_token, decode_token
 from app.services.legacy_migration import LegacyFormatMigration, LegacyMigrationError
 from app.services.two_factor_service import TwoFactorStore
@@ -35,6 +35,8 @@ def legacy(db_session, test_user):
     db_session.add(AccountHistory(accountId=70, name="h", notes="", pass_=old.encrypt("old-legacy").encode(),
                                   key=b"", mPassHash=b"", **refs))
     vault = old.encrypt(json.dumps({"secret": "JBSWY3DPEHPK3PXP", "backup_codes": ["1111122222"]}))
+    db_session.add(Plugin(name="Authenticator", enabled=True, available=True))  # PluginData FK parent
+    db_session.flush()
     db_session.add_all([
         PluginData(name="Authenticator", itemId=test_user.id,
                    data=json.dumps({"enabled": True, "vault": vault}).encode(), key=b""),

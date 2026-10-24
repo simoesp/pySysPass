@@ -525,3 +525,15 @@ legacy 2FA row under key A: `check` reported 21; `migrate` took a backup and con
 all 21; `check` then reported 0; after switching to key B and `end-sessions`, all 20
 accounts and the 2FA secret were readable. Remaining: rotation is offline; SECRET_KEY
 rotation is only `end-sessions` plus the new value.
+
+R16 / #65 fourth follow-up (load test): `scripts/load_test.py` drove a production-like
+stack (nginx → backend → MySQL 8, `DEBUG=false`) with a mixed authenticated workload; see
+`docs/project/load-test-2026-10-24.md`. The first run exposed an N+1 query pattern:
+account lists and search issued about five queries per account, so listing took 3.3 s
+(p50) at 10 users and throughput was 5.1 req/s. Listing now eager-loads tags and shares
+and caches users, groups, and favourites per request: 10 queries regardless of page size,
+pinned by a test that fails on the old code. The same run then reached 49.3 req/s with list
+p50 148 ms. At 30 users with a mid-run backup, one worker held 46.5 req/s with p95 near
+1 s; four workers (`WEB_CONCURRENCY`) reached 133.6 req/s with p95 300–520 ms. All runs
+had zero errors, and the backup took about 2.6 s during load. Limits: one host, datasets
+under 1,000 accounts, no remote-database latency, no slow SMTP/LDAP, no soak test.

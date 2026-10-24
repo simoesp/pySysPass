@@ -141,8 +141,10 @@ Bind mounts need the same ownership on the host (`chown -R 10001:10001`), or
 - Probe `/health/ready` for readiness and `/health` for liveness.
 - API routes run their blocking work (database, bcrypt, Defuse, files) in the
   threadpool rather than on the event loop, so one slow request does not stall
-  others. Each worker has about 40 threadpool slots; size workers for peak load.
-  No load test has established capacity.
+  others. One worker served about 47 requests/s of a mixed workload on an 8-CPU
+  test host, and four workers about 134 requests/s
+  (`docs/project/load-test-2026-10-24.md`). Set `WEB_CONCURRENCY` to choose the
+  worker count; workers in one container share `/app/data` safely.
 
 ### Reproducible builds
 
