@@ -631,3 +631,13 @@ display control. Tests cover the global setting, the `config.xml` fallback,
 fixed and non-fixed presets, and public links. Pillow 13.0.0 is a new locked
 runtime dependency. Checked against upstream: the password preset `score` is
 not enforced in PHP 3.2.11 either, so it stays stored-only.
+
+Validation for the vault-claim and password-image follow-ups: CI on `35754b9`
+and `675c10b` passed all nine jobs. On `35754b9` the backend suite gave 409
+passed, 14 skipped, 77.07% coverage (floor 75%); the whole suite on MySQL 8
+with the canonical schema gave 416 passed, 7 skipped. Locally on `675c10b`
+(`DEBUG=false`): 411 passed, 14 skipped; Ruff, Bandit, the frontend build and a
+full-history gitleaks scan passed. Still open: PHP's finfo MIME detection is
+not reproduced (the declared type is checked), there is no soak or
+large-dataset test, and pySysPass UI browser tests do not cover 2FA, settings
+or most admin pages.
