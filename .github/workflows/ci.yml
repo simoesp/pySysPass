@@ -159,6 +159,37 @@ jobs:
         if: always()
         run: scripts/e2e-stack.sh down
 
+  php-web-interop:
+    name: sysPass PHP web UI reads pySysPass data
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+      - run: docker build -t pysyspass-backend:e2e .
+      # Official sysPass 3.2.11 installed by its own installer; pySysPass joins
+      # the PHP-created database with the same password salt.
+      - run: scripts/php-interop-stack.sh up
+      - run: npm ci
+        working-directory: e2e
+      - run: npx playwright install --with-deps chromium
+        working-directory: e2e
+      - run: npx playwright test -c playwright.php-interop.config.js
+        working-directory: e2e
+      - name: Upload traces
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: php-interop-traces
+          path: e2e/test-results/
+          retention-days: 7
+      - name: Stop stack
+        if: always()
+        run: scripts/php-interop-stack.sh down
+
   compat-php-reverse:
     name: PHP reads Python writes (sysPass 9d0e169)
     runs-on: ubuntu-latest

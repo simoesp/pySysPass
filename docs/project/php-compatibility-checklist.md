@@ -219,9 +219,15 @@ Compatibility should be treated as successful only when:
   account `pass`/`key` ciphertext, and uses PHP-compatible Defuse encryption for
   protected exports. PHP's own DOM/Defuse runtime verified a Python export's
   SHA-1/HMAC integrity fields and decrypted all four sections.
-- Importing a complete Python-generated export through the PHP UI remains an
-  open mutation test; run it against an isolated database before calling the
-  reverse application-level round trip complete.
+- ✅ Application-level round trip through the PHP web UI (CI job "sysPass PHP
+  web UI reads pySysPass data"): the official sysPass 3.2.11 image is
+  installed by its own installer, and pySysPass joins the PHP-created database
+  with the same salt. pySysPass signs in as the PHP-created admin, unlocking a
+  PHP-authored vault, then writes an account and a public link. PHP's
+  `viewLink` page and `account/viewPass` dialog show the password, and PHP
+  updates the counters.
+- Importing a complete Python-generated XML export through the PHP UI is not
+  yet automated.
 - ✅ CSV, XML, and KeePass imports follow upstream PHP (`CsvImportBase`,
   `KeepassImport`, master `9d0e169`): CSV/XML rows without a client or category
   are rejected and reported, and KeePass entries get the `KeePass` client and a

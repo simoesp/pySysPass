@@ -548,3 +548,17 @@ redirects from protected routes, and the CSP/frame headers on SPA routes. All 3 
 passed locally in Chromium (8 s); the new CI job runs them and keeps traces on failure.
 Remaining: 2FA enrollment, settings, imports, and the admin pages have no browser
 coverage, and only Chromium is tested.
+
+R5 / #56 follow-up (PHP web UI): sysPass PHP itself, not only its class library, now
+reads pySysPass writes. `scripts/php-interop-stack.sh` installs the official
+`syspass/syspass:3.2.11` image (digest-pinned) with the PHP installer on MySQL 8 (native
+password auth, which PHP 7.3 requires). pySysPass then joins that PHP-created database
+with the PHP password salt and no bootstrap; readiness reported the canonical schema as
+ready. In `e2e/php-interop/`, pySysPass signs in as the PHP-created admin, which unlocks
+the PHP-authored `mPass`/`mKey`, and writes an account and a native public link through
+its API. PHP's `viewLink` page then rendered the snapshot with the password, client and
+category, and incremented `countViews` and the account's view and decrypt counters. PHP's
+own sign-in, search, and `account/viewPass` dialog decrypted and showed the password. The
+test passed locally and runs in a new CI job. Not covered: 2FA through the PHP plugin UI
+(the plugin is not in the official image), and importing a pySysPass XML export through
+the PHP UI.

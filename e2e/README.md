@@ -14,3 +14,19 @@ scripts/e2e-stack.sh down
 
 The global setup installs the instance through the API with synthetic
 credentials. Never point `E2E_BASE_URL` at a real installation.
+
+## sysPass PHP web UI interoperability
+
+`php-interop/` checks the other direction through the real PHP application:
+the official sysPass 3.2.11 image is installed with its own installer, and
+pySysPass joins the PHP-created database with the same password salt. The test
+signs in to pySysPass as the PHP-created admin (unlocking a PHP-authored vault),
+writes an account and a public link through the pySysPass API, then opens the
+link and the account's "view password" dialog in the PHP web UI.
+
+```bash
+docker build -t pysyspass-backend:e2e .
+scripts/php-interop-stack.sh up   # PHP UI :18400, pySysPass API :18401
+cd e2e && npx playwright test -c playwright.php-interop.config.js
+scripts/php-interop-stack.sh down
+```
