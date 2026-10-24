@@ -3,6 +3,85 @@
 All notable changes to pySysPass are documented here. Versions follow
 [Semantic Versioning](https://semver.org/). Dates are ISO 8601.
 
+## [Unreleased]
+
+Production-readiness hardening (draft PR #66). Not yet released; several
+changes alter behaviour for existing deployments, listed under **Upgrade notes**.
+Evidence for each item: `docs/project/production-readiness-review-2026-10-23.md`.
+
+### Upgrade notes
+- The frontend image runs nginx unprivileged (uid 101) on container port
+  8080 instead of 80; update custom port mappings and health checks.
+- The backend image runs as UID 10001. Volumes written by earlier (root) images
+  need a one-time `chown -R 10001:10001` (see `docs/installation.md`); until
+  then `/health/ready` reports `data directory not writable`.
+- Sessions now expire after `session_timeout` of inactivity (default 300 s)
+  instead of 24 hours. Tokens issued by earlier releases are rejected once;
+  users sign in again.
+- Account passwords, imports and public links can only be written with an
+  unlocked vault (`428 MASTER_PASSWORD_REQUIRED` otherwise); API tokens can no
+  longer create accounts or change their passwords.
+- New public links cannot have an access password (sysPass PHP has none) and
+  require `publinks_enabled`. Existing links keep working.
+- Accounts require `client_id` and `category_id`. CSV/XML import rows without
+  both are skipped. In-use clients and categories cannot be deleted (409).
+- After a master password change made in sysPass PHP, users must re-enter the
+  master password at their next sign-in, as in PHP.
+- 2FA is stored in the sysPass Authenticator plugin's format, under the vault
+  master password; changing 2FA settings requires an unlocked vault. Users
+  enrolled by earlier pySysPass releases keep working, but PHP cannot read
+  their rows; have them disable and re-enable 2FA. Saving the 2FA mode once
+  moves it out of `Plugin.data`.
+- Production startup fails without explicit, non-sample `SECRET_KEY` and
+  `ENCRYPTION_KEY`; `DEBUG` defaults to false.
+- `GET /api/v1/tags/{id}` now requires authentication.
+- `GET /api/v1/accounts/search` is paged like `GET /accounts` (`skip`, `limit`
+  default 100, maximum 500, newest first); it used to return every match.
+- Item presets use sysPass PHP types (`account.permission`, `account.private`,
+  `account.password`, `session.timeout`) and are now enforced. Managing them
+  requires the `mgm_items_preset` permission, and every preset needs a user,
+  group or profile scope. Presets saved by earlier releases are shown as legacy
+  and ignored until saved again.
+- "Show password as image" (`account_pass_to_image`, PHP `accountPassToImage`),
+  a fixed password preset with `use_image`, and "Show password as image in
+  public link" (`publinks_image_enabled`) are now enforced: viewing returns a
+  PNG instead of the text, and public links then carry no text password.
+  Copying still returns the text, as in PHP. New runtime dependency: Pillow.
+
+### Added
+- `/health/ready` readiness checks (configuration, database, schema, storage).
+- `python -m app.rotate_master_password`: offline, transactional master
+  password change with a pre-change backup and PHP semantics.
+- `python -m app.restore_backup` offline restore with rollback attempts.
+- `POST /api/v1/auth/logout` and `POST /api/v1/auth/refresh`.
+- `GET /api/v1/security/operations` (admins): failure counters and scheduler state.
+- CI: canonical MySQL API/import/readiness tests, a PHP job that decodes every
+  pySysPass credential write, image hardening checks, dependency lock check,
+  75% coverage floor.
+
+### Changed
+- Credentials are always written as native sysPass Defuse ciphertext; public
+  links as native PHP Vaults; 2FA enrollments as PHP Authenticator plugin data.
+- Force HTTPS, maintenance mode and attachment limits are enforced server-side.
+  When the declared MIME type is not allowed, the type detected from the
+  content (libmagic, as PHP fileinfo) is tried and stored, as in PHP. The
+  backend image now installs `libmagic1`.
+- Logout, password changes (from either application) and 2FA changes revoke sessions.
+- Backups fail closed; runtime JSON config writes are locked and atomic.
+- Container builds use an allowlist, a hash-pinned `requirements.lock` and
+  digest-pinned base images; test tools moved to `requirements-dev.txt`.
+
+### Fixed
+- Client IP spoofing through forwarded headers; SPA routes losing security headers.
+- Password reset not setting PHP migration flags.
+- Reads of native ciphertext without a vault key raising 500.
+- `masterPwd` hashing for keys longer than 72 characters (now matches PHP).
+- With `WEB_CONCURRENCY` > 1 and `AUTO_INIT_DB_ON_STARTUP`, workers raced to
+  bootstrap an empty database; the losers crashed and uvicorn stopped. The
+  bootstrap now runs under a database lock (MySQL `GET_LOCK`).
+- The master password in session tokens is sealed with AES-256-GCM under a
+  derived, single-purpose key and bound to the user (was unauthenticated AES-CTR).
+
 ## [2.2.2] — 2026-10-23
 
 Routine dependency and security updates. No API or database changes.

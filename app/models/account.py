@@ -109,7 +109,7 @@ class User(Base):
     )
 
     id              = Column(mysql_smallint(), primary_key=True, autoincrement=True, nullable=True)
-    name            = Column(String(80), nullable=True)
+    name            = Column(String(80), nullable=False)
     userGroupId     = Column(mysql_smallint(), ForeignKey('UserGroup.id', name='fk_User_userGroupId'), nullable=False)
     username        = Column('login', String(50), nullable=False)
     ssoLogin        = Column(String(100), nullable=True)
@@ -119,7 +119,7 @@ class User(Base):
     email           = Column(String(80), nullable=True)
     notes           = Column(Text, nullable=True)
     loginCount      = Column(mysql_integer(), default=0, server_default=text("0"), nullable=False)
-    userProfileId   = Column(mysql_smallint(), ForeignKey('UserProfile.id', name='fk_User_userProfileId'), nullable=True)
+    userProfileId   = Column(mysql_smallint(), ForeignKey('UserProfile.id', name='fk_User_userProfileId'), nullable=False)
     lastLogin       = Column(DateTime, nullable=True)
     lastUpdate      = Column(DateTime, nullable=True)
     lastUpdateMPass = Column(mysql_integer(width=11), default=0, server_default=text("0"), nullable=False)
@@ -127,7 +127,7 @@ class User(Base):
     isAdminAcc      = Column(Boolean, default=False, server_default=text("0"))
     isLdap          = Column(Boolean, default=False, server_default=text("0"))
     isDisabled      = Column(Boolean, default=False, server_default=text("0"))
-    hashSalt        = Column(FlexibleBinary(255, mysql_type=mysql.VARBINARY(255)), nullable=True)
+    hashSalt        = Column(FlexibleBinary(255, mysql_type=mysql.VARBINARY(255)), nullable=False)
     isMigrate       = Column(Boolean, default=False, server_default=text("0"))
     isChangePass    = Column(Boolean, default=False, server_default=text("0"))
     isChangedPass   = Column(Boolean, default=False, server_default=text("0"))
@@ -163,6 +163,11 @@ class User(Base):
         ).first()
         if not row or not row.data:
             return False
+        key = row.key.decode('ascii', 'ignore') if isinstance(row.key, (bytes, bytearray)) else str(row.key or '')
+        if key.startswith('def10000'):
+            # Native PHP AuthenticatorData is encrypted under the master
+            # password; PHP stores a row only for enrolled users.
+            return True
         raw = row.data
         if isinstance(raw, (bytes, bytearray)):
             raw = raw.decode('utf-8', errors='ignore')
@@ -295,9 +300,9 @@ class Account(Base):
     userGroupId      = Column(mysql_smallint(), ForeignKey('UserGroup.id', name='fk_Account_userGroupId'), nullable=False)
     userId           = Column(mysql_smallint(), ForeignKey('User.id', name='fk_Account_userId'), nullable=False)
     userEditId       = Column(mysql_smallint(), ForeignKey('User.id', name='fk_Account_userEditId'), nullable=False)
-    clientId         = Column(mysql_mediumint(), ForeignKey('Client.id', name='fk_Account_clientId'), nullable=True)
+    clientId         = Column(mysql_mediumint(), ForeignKey('Client.id', name='fk_Account_clientId'), nullable=False)
     name             = Column(String(100),    nullable=False)
-    categoryId       = Column(mysql_mediumint(), ForeignKey('Category.id', name='fk_Account_categoryId'), nullable=True)
+    categoryId       = Column(mysql_mediumint(), ForeignKey('Category.id', name='fk_Account_categoryId'), nullable=False)
     login            = Column(String(50),     nullable=True)
     url              = Column(String(255),    nullable=True)
     pass_            = Column('pass', FlexibleBinary(2000, mysql_type=mysql.VARBINARY(2000)), nullable=False)
@@ -396,9 +401,9 @@ class AccountHistory(Base):
     userGroupId      = Column(mysql_smallint(), ForeignKey('UserGroup.id', name='fk_AccountHistory_userGroupId'), nullable=False)
     userId           = Column(mysql_smallint(), ForeignKey('User.id', name='fk_AccountHistory_userId'), nullable=False)
     userEditId       = Column(mysql_smallint(), ForeignKey('User.id', name='fk_AccountHistory_userEditId'), nullable=False)
-    clientId         = Column(mysql_mediumint(), ForeignKey('Client.id', name='fk_AccountHistory_clientId'), nullable=True)
+    clientId         = Column(mysql_mediumint(), ForeignKey('Client.id', name='fk_AccountHistory_clientId'), nullable=False)
     name             = Column(String(255),  nullable=False)
-    categoryId       = Column(mysql_mediumint(), ForeignKey('Category.id', name='fk_AccountHistory_categoryId'), nullable=True)
+    categoryId       = Column(mysql_mediumint(), ForeignKey('Category.id', name='fk_AccountHistory_categoryId'), nullable=False)
     login            = Column(String(50),   nullable=True)
     url              = Column(String(255),  nullable=True)
     pass_            = Column('pass', FlexibleBinary(2000, mysql_type=mysql.VARBINARY(2000)), nullable=False)

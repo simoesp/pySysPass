@@ -53,9 +53,8 @@ Services and published ports:
 | Service | URL | Purpose |
 | --- | --- | --- |
 | `frontend` | http://localhost:8080 | Web UI |
-| `backend` | http://localhost:8000 | REST API |
-| Swagger UI | http://localhost:8000/docs | Interactive API docs |
-| Health check | http://localhost:8000/health | Liveness probe |
+| API | http://localhost:8080/api/v1/ | REST endpoints through nginx; backend is private |
+| Health check | http://localhost:8080/health/ready | Readiness probe (`/health` is liveness only) |
 | `db` | localhost:3306 | MySQL 8 |
 | `graphify` | http://localhost:8090 | Static knowledge-graph report |
 
@@ -64,12 +63,110 @@ creates the full sysPass-compatible schema automatically on first boot. Wait for
 the backend health check to pass before continuing:
 
 ```bash
-curl -fsS http://localhost:8000/health && echo " backend up"
+curl -fsS http://localhost:8080/health/ready && echo " backend ready"
 ```
 
 > **Change the defaults.** `podman-compose.yml` ships development secrets
 > (`SECRET_KEY`, `ENCRYPTION_KEY`, `MYSQL_*`, and a sample `SYSPASS_PASSWORD_SALT`).
 > Replace all of them before any shared or exposed deployment.
+
+### Proxy trust and production startup
+
+The backend port is no longer published by the supplied stacks. API requests go
+through the frontend's `/api/` proxy. Run Uvicorn with `--no-proxy-headers`:
+the application applies its own `TRUSTED_PROXY_HOSTS` allowlist, which defaults
+to an empty list. Never enable a second, broader proxy policy in Uvicorn.
+
+Each stack pins its frontend address and trusts only that address:
+
+| Stack | Network | Trusted frontend |
+| --- | --- | --- |
+| Development | `172.30.81.0/24` | `172.30.81.10` |
+| External database | `172.30.82.0/24` | `172.30.82.10` |
+| Portainer | `172.30.83.0/24` | `172.30.83.10` |
+
+If one of these ranges conflicts with your host networks, change the subnet,
+both service addresses, and `TRUSTED_PROXY_HOSTS` together. Recreate the stack
+network after changing it; do not remove persistent database volumes. For a
+custom deployment, supply a JSON array of trusted proxy IPs or narrow CIDRs,
+for example `TRUSTED_PROXY_HOSTS='["10.20.0.10"]'`, and keep the backend private.
+Nginx replaces forwarded client-IP headers with its actual peer address. If
+another reverse proxy terminates TLS in front of nginx, configure nginx's real-IP
+trust explicitly for that proxy before relying on per-client lockouts.
+
+`DEBUG` now defaults to `false`. Production startup requires `DATABASE_URL`
+and explicitly supplied `SECRET_KEY` and `ENCRYPTION_KEY` values of at least
+32 bytes; empty and known sample keys are rejected. Values in `.env` count as
+explicit configuration. Use independently generated random secrets and retain
+the existing encryption key for an existing vault. **Do not replace a live
+encryption key simply to satisfy validation**: existing ciphertext requires it.
+The unsafe online rekey operation is disabled pending a complete migration and
+recovery workflow. Explicit `DEBUG=true` permits ephemeral development keys.
+
+### Container user and volume ownership
+
+The backend image runs as the unprivileged `syspass` account (UID/GID
+`10001`). Application code is root-owned and read-only to that account; only
+`/app/data` (runtime JSON config, RSA transport key) and `/app/backups` are
+writable. New named volumes inherit that ownership automatically.
+
+Volumes created by images before this change hold root-owned files, which the
+new backend cannot write: `/health/ready` reports `data directory not
+writable` and the container stays unhealthy. Stop the stack, take a backup of
+the volume, then change ownership once with the new image:
+
+```bash
+docker compose -f podman-compose.yml stop backend frontend
+docker compose -f podman-compose.yml run --rm --no-deps --user 0 \
+  --entrypoint chown backend -R 10001:10001 /app/data /app/backups
+docker compose -f podman-compose.yml up -d
+```
+
+Bind mounts need the same ownership on the host (`chown -R 10001:10001`), or
+`--userns`/`:U` mapping with rootless Podman.
+
+### Monitoring and scheduled work
+
+- Alert on backend log lines at `ERROR` level. Failures that must not break a
+  request are logged there instead of being swallowed: audit event writes
+  (`Audit event write failed`) and password-reset mail (`Password reset e-mail
+  could not be sent`; the API response stays the same to avoid revealing
+  accounts). `GET /api/v1/security/operations` (application admins) shows this
+  worker's failure counts since start, and whether a scheduler is running.
+- Nothing is scheduled by default: no automated backups and no password-expiry
+  notices. The scheduler thread starts only when jobs are registered. Run
+  backups from the host scheduler, for example a daily cron entry calling
+  `POST /api/v1/backup/create` or running the backup in the backend container,
+  and copy archives off the host.
+- Probe `/health/ready` for readiness and `/health` for liveness.
+- API routes run their blocking work (database, bcrypt, Defuse, files) in the
+  threadpool rather than on the event loop, so one slow request does not stall
+  others. One worker served about 47 requests/s of a mixed workload on an 8-CPU
+  test host, and four workers about 134 requests/s
+  (`docs/project/load-test-2026-10-24.md`). Set `WEB_CONCURRENCY` to choose the
+  worker count; workers in one container share `/app/data` safely.
+
+### Reproducible builds
+
+The image copies an explicit file allowlist (see `.dockerignore`); `.env*`,
+`data/`, `backups/`, `config/runtime-config.json`, tests, and tooling never
+enter the build context. It installs `requirements.lock`, a hash-pinned
+resolution of `requirements.txt` for Python 3.11, with `pip
+--require-hashes`, and no test tools or compiler. Base images are pinned by
+digest. After changing `requirements.txt`, regenerate and verify the lock:
+
+```bash
+uv pip compile requirements.txt --generate-hashes --python-version 3.11 --universal -o requirements.lock
+python scripts/check-requirements-lock.py
+```
+
+CI fails when the lock no longer satisfies `requirements.txt`, tests run
+against the locked set, and pip-audit checks it. Dependabot updates the
+ranges and image digests but does not regenerate the lock; refresh it in the
+same pull request. The frontend image is the official unprivileged nginx
+(uid 101) and listens on 8080 inside the container; the supplied stacks map
+their published ports to it. `Dockerfile.security` is an unmaintained
+scanning image, not a deployment artifact.
 
 ## First-run setup
 
@@ -92,14 +189,14 @@ save it somewhere safe, because it cannot be recovered.
 Check installation state:
 
 ```bash
-curl -s http://localhost:8000/api/v1/auth/install/status
+curl -s http://localhost:8080/api/v1/auth/install/status
 # {"installed": false, "user_count": 0, "has_master_password": false}
 ```
 
 Install with a generated master password (returned once, in the response):
 
 ```bash
-curl -s -X POST http://localhost:8000/api/v1/auth/install \
+curl -s -X POST http://localhost:8080/api/v1/auth/install \
   -H 'Content-Type: application/json' \
   -d '{
         "username": "admin",
@@ -126,7 +223,7 @@ To set your own master password instead, send `master_password` (minimum 12
 characters) and omit `generate_master_password`:
 
 ```bash
-curl -s -X POST http://localhost:8000/api/v1/auth/install \
+curl -s -X POST http://localhost:8080/api/v1/auth/install \
   -H 'Content-Type: application/json' \
   -d '{"username":"admin","password":"strong-login-password","master_password":"your-master-password"}'
 ```
@@ -137,11 +234,11 @@ Installing twice is refused with HTTP 409 (`sysPass is already installed`).
 
 ```bash
 # Setup is complete
-curl -s http://localhost:8000/api/v1/auth/install/status
+curl -s http://localhost:8080/api/v1/auth/install/status
 # {"installed": true, "user_count": 1, "has_master_password": true}
 
 # Log in with the administrator credentials created above
-curl -s -X POST http://localhost:8000/api/v1/auth/login \
+curl -s -X POST http://localhost:8080/api/v1/auth/login \
   -H 'Content-Type: application/json' \
   -d '{"username":"admin","password":"choose-a-strong-login-password"}'
 ```
@@ -155,13 +252,14 @@ Then open http://localhost:8080 and sign in through the UI.
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install --require-hashes -r requirements.lock   # or: pip install -r requirements.txt
+pip install -r requirements-dev.txt                # test tools (pytest)
 
 export DATABASE_URL="sqlite:///./syspass.db"   # or a MySQL URL
 export SECRET_KEY="$(openssl rand -hex 32)"
 export ENCRYPTION_KEY="$(openssl rand -hex 32)"
 
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+DEBUG=true uvicorn app.main:app --reload --host 127.0.0.1 --port 8000 --no-proxy-headers
 ```
 
 The backend runs against SQLite for development or MySQL for
@@ -197,8 +295,7 @@ docker compose --env-file .env.external -f podman-compose.external.yml up -d --b
 podman-compose --env-file .env.external -f podman-compose.external.yml up -d --build
 ```
 
-Defaults expose the UI at http://localhost:8081 and the backend at
-http://localhost:8001. The `passwordSalt` is required to decrypt PHP-created
+Defaults expose only the UI at http://localhost:8081; the backend is private. The `passwordSalt` is required to decrypt PHP-created
 master-password material; without the matching salt, existing users cannot log
 in. Because the database already has an administrator and master password, skip
 first-run setup and log in with the existing PHP credentials.
@@ -223,8 +320,8 @@ Settings are read from environment variables (and optionally an `.env` file) via
 | Variable | Default | Description |
 | --- | --- | --- |
 | `DATABASE_URL` | unset (required) | SQLAlchemy connection string |
-| `SECRET_KEY` | generated at runtime when unset | JWT signing secret |
-| `ENCRYPTION_KEY` | generated at runtime when unset | Master key for AES encryption |
+| `SECRET_KEY` | required outside explicit debug mode | JWT signing secret |
+| `ENCRYPTION_KEY` | required outside explicit debug mode | Master key for AES encryption |
 | `SYSPASS_PASSWORD_SALT` | empty | sysPass password-salt compatibility value (from PHP `config.xml`) |
 | `SYSPASS_RUNTIME_CONFIG_JSON_PATH` | `config/runtime-config.json` | Structured JSON runtime config file |
 | `SQLALCHEMY_SCHEMA_GUARD` | `true` | Prevents unintended schema mutation |
@@ -233,7 +330,7 @@ Settings are read from environment variables (and optionally an `.env` file) via
 | `SYSPASS_CONFIG_CACHE_PATH` | empty | Legacy PHP `config.cache` fallback file |
 | `ALLOWED_HOSTS` | `["*"]` | Host header allowlist for the backend |
 | `AUTO_INIT_DB_ON_STARTUP` | `true` | Bootstrap schema when the database is empty |
-| `DEBUG` | `true` | Debug-friendly runtime behaviour |
+| `DEBUG` | `false` | Debug-friendly runtime behaviour |
 | `CORS_ORIGINS` | empty | Allowed browser origins; falls back to `config/cors-origins.json` when unset |
 | `CORS_ORIGINS_FILE` | `config/cors-origins.json` | Browser origin allowlist file |
 

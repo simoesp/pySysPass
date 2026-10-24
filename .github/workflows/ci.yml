@@ -31,8 +31,12 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-      - run: pip install -r requirements.txt
-      - run: python -m pytest tests/ -q
+      # Test exactly the hash-pinned set the container ships, plus test tools.
+      - run: pip install --require-hashes -r requirements.lock
+      - run: pip install -r requirements-dev.txt
+      - run: python scripts/check-requirements-lock.py
+      # Floor just under the measured 76% so coverage cannot silently regress.
+      - run: python -m pytest tests/ -q --cov=app --cov-report=term --cov-fail-under=75
 
   frontend-build:
     name: Frontend tests + build (vitest / vite)
@@ -54,6 +58,13 @@ jobs:
         working-directory: frontend
       - name: Build frontend container
         run: docker build --tag syspass-frontend:ci frontend
+      - name: Verify effective SPA security headers
+        run: |
+          docker run -d --name syspass-header-test --add-host backend:127.0.0.1 -p 127.0.0.1:18080:8080 syspass-frontend:ci
+          python scripts/check-security-headers.py http://127.0.0.1:18080
+      - name: Remove header test container
+        if: always()
+        run: docker rm -f syspass-header-test || true
 
   security:
     name: Security scan (bandit / pip-audit / npm audit / gitleaks)
@@ -70,15 +81,161 @@ jobs:
       - run: bandit -r app/ -ll
       # Fail on known-vulnerable Python dependencies.
       - run: pip-audit -r requirements.txt
+      # Audit the exact hash-pinned set the backend image installs.
+      - run: pip-audit --disable-pip -r requirements.lock
       # Fail on known-vulnerable frontend dependencies.
       - run: npm audit --audit-level=high
         working-directory: frontend
+      - run: npm audit --audit-level=high
+        working-directory: e2e
       # Secrets scan across the full history (fetch-depth: 0 above), using
       # the repo's .gitleaks.toml allowlist for known sample/test data.
       - run: >-
           docker run --rm -v "${{ github.workspace }}:/repo"
           zricethezav/gitleaks:latest detect
-          --source=/repo --config=/repo/.gitleaks.toml --redact
+          --source=/repo --config=/repo/.gitleaks.toml
+          --gitleaks-ignore-path=/repo/.gitleaksignore --redact
+
+  backend-tests-mysql:
+    name: Backend tests on canonical MySQL 8
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b
+        env:
+          MYSQL_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install --require-hashes -r requirements.lock
+      - run: pip install -r requirements-dev.txt
+      # The whole suite against a disposable database bootstrapped from
+      # schemas/dbstructure.sql, so NOT NULL columns, foreign keys, strict
+      # lengths and InnoDB transactions apply as in a PHP-created database.
+      - name: Run every backend test on MySQL
+        env:
+          PYSYSPASS_SUITE_MYSQL_URL: "mysql+pymysql://root:root@127.0.0.1:3306/"
+          PYSYSPASS_MYSQL_TEST_URL: "mysql+pymysql://root:root@127.0.0.1:3306/"
+        run: python -m pytest tests/ -q -rs
+
+  e2e-browser:
+    name: Browser acceptance tests (Playwright)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+      - name: Build images
+        run: |
+          docker build -t pysyspass-backend:e2e .
+          docker build -t pysyspass-frontend:e2e frontend
+      - name: Start disposable stack
+        run: scripts/e2e-stack.sh up
+      - run: npm ci
+        working-directory: e2e
+      - run: npx playwright install --with-deps chromium
+        working-directory: e2e
+      - run: npx playwright test
+        working-directory: e2e
+      - name: Upload traces
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-traces
+          path: e2e/test-results/
+          retention-days: 7
+      - name: Stop stack
+        if: always()
+        run: scripts/e2e-stack.sh down
+
+  php-web-interop:
+    name: sysPass PHP web UI reads pySysPass data
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+      - run: docker build -t pysyspass-backend:e2e .
+      - name: Fetch the pinned sysPass Authenticator plugin
+        run: |
+          git init -q /tmp/authenticator
+          git -C /tmp/authenticator fetch -q --depth 1 https://github.com/sysPass/plugin-Authenticator.git \
+            b3046617b51656999fe7e277a1ec4a4d7e374732
+          git -C /tmp/authenticator checkout -q FETCH_HEAD
+      # Official sysPass 3.2.11 installed by its own installer; pySysPass joins
+      # the PHP-created database with the same password salt.
+      - run: scripts/php-interop-stack.sh up
+        env:
+          AUTHENTICATOR_DIR: /tmp/authenticator
+      - run: npm ci
+        working-directory: e2e
+      - run: npx playwright install --with-deps chromium
+        working-directory: e2e
+      - run: npx playwright test -c playwright.php-interop.config.js
+        working-directory: e2e
+        env:
+          INTEROP_2FA: "1"
+      - name: Upload traces
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: php-interop-traces
+          path: e2e/test-results/
+          retention-days: 7
+      - name: Stop stack
+        if: always()
+        run: scripts/php-interop-stack.sh down
+
+  compat-php-reverse:
+    name: PHP reads Python writes (sysPass 9d0e169)
+    runs-on: ubuntu-latest
+    env:
+      SYSPASS_COMMIT: 9d0e169d2163897238877fb65130db47fe1ddcfa
+      DEFUSE_COMMIT: f53396c2d34225064647a05ca76c1da9d99e5828  # v2.4.0
+      PLUGIN_2FA_REF: b3046617b51656999fe7e277a1ec4a4d7e374732
+      PHP_IMAGE: docker.io/library/php:8.2-cli@sha256:2d72ff4b0cfe82e22f01f15223bc4ab4c825d318cb2e3275554cd32299a5ea50
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install --require-hashes -r requirements.lock
+      - run: pip install -r requirements-dev.txt
+      - name: Fetch pinned upstream sysPass and Defuse sources
+        run: |
+          for spec in "syspass https://github.com/nuxsmin/sysPass.git $SYSPASS_COMMIT" \
+                      "defuse https://github.com/defuse/php-encryption.git $DEFUSE_COMMIT" \
+                      "authenticator https://github.com/sysPass/plugin-Authenticator.git $PLUGIN_2FA_REF"; do
+            set -- $spec
+            git init -q "/tmp/upstream/$1"
+            git -C "/tmp/upstream/$1" fetch -q --depth 1 "$2" "$3"
+            git -C "/tmp/upstream/$1" checkout -q FETCH_HEAD
+          done
+      # Fails if sysPass PHP cannot decrypt account credentials or open public
+      # links written by pySysPass (API, copy, CSV/KeePass/XML import, links),
+      # or the Authenticator plugin cannot read pySysPass 2FA enrollments.
+      - name: Decode pySysPass writes with upstream PHP
+        env:
+          PYSYSPASS_PHP_VERIFY_CMD: >-
+            docker run --rm -i -v /tmp/upstream:/upstream:ro -v ${{ github.workspace }}/scripts:/scripts:ro
+            ${{ env.PHP_IMAGE }} php /scripts/verify-python-writes.php /upstream/syspass /upstream/defuse
+            /upstream/authenticator
+        run: python -m pytest -q -rs tests/compatibility/test_php_reverse_roundtrip.py
 
   compat-mysql:
     name: Schema bootstrap on MySQL 8 (PHP compatibility)
@@ -105,7 +262,8 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-      - run: pip install -r requirements.txt
+      - run: pip install --require-hashes -r requirements.lock
+      - run: pip install -r requirements-dev.txt
       # Create the full PHP-compatible schema on a real MySQL 8 instance.
       - run: python init_db.py
       # Assert the expected physical tables were created.
@@ -129,3 +287,29 @@ jobs:
                   c.execute(text(f"SELECT * FROM {view} LIMIT 0"))
           assert bootstrap_database(e) is False, "bootstrap must be idempotent"
           PY
+      # API/import behavior that SQLite cannot prove (NOT NULL FKs, strict
+      # column limits). Uses its own disposable database on this server.
+      - name: Canonical MySQL account, import, and readiness tests
+        env:
+          PYSYSPASS_MYSQL_TEST_URL: "mysql+pymysql://root:root@127.0.0.1:3306/"
+        run: python -m pytest -q -rs tests/test_mysql_account_references.py tests/test_mysql_readiness.py
+      - name: Build recovery container
+        run: docker build -t pysyspass-recovery:ci .
+      - name: Rehearse database and mounted runtime recovery
+        run: |
+          docker volume create recovery-ci-data
+          docker run --rm --network host \
+            -v recovery-ci-data:/app/data \
+            -v "$PWD/scripts:/app/scripts:ro" \
+            -e DATABASE_URL -e SQLALCHEMY_SCHEMA_GUARD -e DEBUG=false \
+            -e ALLOW_DISPOSABLE_RECOVERY_TEST=yes -e PYTHONPATH=/app \
+            pysyspass-recovery:ci python scripts/check-backup-recovery.py
+      # The runtime image must stay non-root and free of local state/tooling.
+      - name: Verify hardened backend image
+        run: |
+          test "$(docker run --rm pysyspass-recovery:ci id -u)" = 10001
+          docker run --rm pysyspass-recovery:ci sh -c \
+            '! python -c "import pytest" 2>/dev/null && ! command -v gcc && test ! -e /app/tests && test ! -e /app/config/runtime-config.json && ! touch /app/app/probe 2>/dev/null'
+      - name: Remove recovery volume
+        if: always()
+        run: docker volume rm recovery-ci-data || true

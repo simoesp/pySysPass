@@ -10,6 +10,7 @@ from app.schemas.tag import TagCreate
 from app.services.account_service import AccountService
 from app.services.category_service import CategoryService, ClientService
 from app.services.tag_service import TagService
+from tests.account_refs import TEST_MASTER_PASSWORD
 
 
 @dataclass
@@ -164,7 +165,7 @@ def seed_demo_workspace(db, encryption_service, owner_user) -> SeededWorkspace:
                 client_id=clients[item["client"]].id,
                 tag_ids=[tags[tag_name].id for tag_name in item["tags"]],
             ),
-            owner_user.id,
+            owner_user.id, master_pass=TEST_MASTER_PASSWORD
         )
         accounts[item["title"]] = account
 

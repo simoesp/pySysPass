@@ -10,6 +10,7 @@ services:
     container_name: pysyspass-external-backend
     restart: unless-stopped
     environment:
+      TRUSTED_PROXY_HOSTS: '["172.30.82.10"]'
       DATABASE_URL: ${PYSYSPASS_DATABASE_URL:?Set PYSYSPASS_DATABASE_URL}
       SECRET_KEY: ${PYSYSPASS_SECRET_KEY:?Set PYSYSPASS_SECRET_KEY}
       ENCRYPTION_KEY: ${PYSYSPASS_ENCRYPTION_KEY:?Set PYSYSPASS_ENCRYPTION_KEY}
@@ -22,16 +23,18 @@ services:
       SYSPASS_RUNTIME_CONFIG_JSON_PATH: /app/data/runtime-config.json
     volumes:
       - pysyspass_runtime_data:/app/data
-    ports:
-      - "${PYSYSPASS_BACKEND_PORT:-8001}:8000"
+      - pysyspass_backup_data:/app/backups
+    expose:
+      - "8000"
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=10)\""]
       interval: 10s
-      timeout: 5s
+      timeout: 12s
       retries: 10
       start_period: 10s
     networks:
-      - pysyspass-external
+      pysyspass-external:
+        ipv4_address: 172.30.82.11
 
   frontend:
     build:
@@ -40,22 +43,27 @@ services:
     container_name: pysyspass-external-frontend
     restart: unless-stopped
     ports:
-      - "${PYSYSPASS_FRONTEND_PORT:-8081}:80"
+      - "${PYSYSPASS_FRONTEND_PORT:-8081}:8080"
     depends_on:
       backend:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost/health"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 10s
     networks:
-      - pysyspass-external
+      pysyspass-external:
+        ipv4_address: 172.30.82.10
 
 networks:
   pysyspass-external:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.82.0/24
 
 volumes:
   pysyspass_runtime_data:
+  pysyspass_backup_data:

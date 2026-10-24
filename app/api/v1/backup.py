@@ -33,18 +33,20 @@ def _safe_path(filename: str):
 
 
 @router.get("/")
-async def list_backups(current_user=Depends(require_permission('config_backup'))) -> List[dict]:
+def list_backups(current_user=Depends(require_permission('config_backup'))) -> List[dict]:
     """List all available backup archives."""
     return _svc().list_backups()
 
 
 @router.post("/create")
-async def create_backup(
+def create_backup(
     include_db: bool = True,
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_backup')),
 ):
-    """Trigger a new backup. Includes mysqldump if available."""
+    """Publish a backup only when all requested components succeed."""
+    if include_db and not settings.DATABASE_URL:
+        raise HTTPException(status_code=503, detail="Database backup requires DATABASE_URL")
     db_url = settings.DATABASE_URL if include_db else None
     try:
         result = _svc().create_full_backup(db_url=db_url, include_files=True)
@@ -56,31 +58,27 @@ async def create_backup(
 
 
 @router.get("/{filename}/download")
-async def download_backup(filename: str, current_user=Depends(require_permission('config_backup'))):
+def download_backup(filename: str, current_user=Depends(require_permission('config_backup'))):
     """Download a backup archive by filename."""
     path = _safe_path(filename)
     return FileResponse(path=str(path), media_type="application/zip", filename=filename)
 
 
 @router.post("/{filename}/restore")
-async def restore_backup(
+def restore_backup(
     filename: str,
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_backup')),
 ):
-    """Restore a backup archive into the current runtime."""
-    _safe_path(filename)
-    try:
-        result = _svc().restore_backup(filename, db_url=settings.DATABASE_URL)
-        PluginService(db).call_plugin_hook("on_backup_restored", payload=result, actor_user_id=current_user.get("id"))
-        return result
-    except RuntimeError as exc:
-        logger.exception("Backup restore failed")
-        raise HTTPException(status_code=500, detail="Backup restore failed") from exc
+    """Recovery must run offline to avoid concurrent writes and cached keys."""
+    raise HTTPException(
+        status_code=409,
+        detail="Stop all application writers and use the offline restore command documented in the recovery guide.",
+    )
 
 
 @router.delete("/{filename}")
-async def delete_backup(filename: str, current_user=Depends(require_permission('config_backup'))):
+def delete_backup(filename: str, current_user=Depends(require_permission('config_backup'))):
     """Delete a backup archive."""
     _safe_path(filename)
     _svc().delete_backup(filename)

@@ -1,17 +1,18 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
 from fastapi.security import HTTPBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
-from datetime import timedelta
 import secrets
+import time
 from app.db.base import get_db
-from app.api.deps import get_current_user
+from app.api.deps import enforce_maintenance, get_current_user, reject_during_maintenance
 from app.schemas.install import InstallRequest, InstallResponse, InstallStatusResponse
 from app.schemas.user import UserCreate, UserResponse, Token
 from app.services.auth_service import (
-    get_password_hash, verify_password, create_access_token,
+    get_password_hash, hash_master_key, verify_password, issue_session_token,
     decrypt_user_master_pass, get_master_password_hash_row,
     finalize_user_master_pass, migrate_user_master_pass,
     verify_master_password_hash, store_user_master_pass,
+    master_pass_matches_config, user_master_pass_is_stale,
 )
 from app.services.user_profile_service import UserProfileService
 from app.services.user_service import UserService
@@ -22,15 +23,11 @@ from app.models.account import Config, User, UserGroup
 from app.core.security import get_encryption_service
 from app.core.rsa_service import maybe_decrypt
 from app.services.temporary_master_password_service import TemporaryMasterPasswordService
+from app.services.session_service import MAX_SESSION_SECONDS, resolve_session_timeout, session_store
 
 
 def _client_ip(request: Request) -> str:
-    real_ip = request.headers.get("X-Real-IP")
-    if real_ip:
-        return real_ip.strip()
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
+    # ProxyHeadersMiddleware normalizes this only for explicitly trusted peers.
     return request.client.host if request.client else "unknown"
 
 router = APIRouter()
@@ -71,7 +68,7 @@ def _decode_secret(value: str | None, field_name: str) -> str | None:
 
 
 @router.get("/install/status", response_model=InstallStatusResponse)
-async def install_status(db: Session = Depends(get_db)):
+def install_status(db: Session = Depends(get_db)):
     user_count, has_master_password = _installation_state(db)
     return InstallStatusResponse(
         installed=user_count > 0 and has_master_password,
@@ -81,7 +78,7 @@ async def install_status(db: Session = Depends(get_db)):
 
 
 @router.post("/install", response_model=InstallResponse, status_code=status.HTTP_201_CREATED)
-async def install(body: InstallRequest, db: Session = Depends(get_db)):
+def install(body: InstallRequest, db: Session = Depends(get_db)):
     user_count, has_master_password = _installation_state(db)
     if user_count > 0 or has_master_password:
         raise HTTPException(status_code=409, detail="sysPass is already installed")
@@ -112,7 +109,7 @@ async def install(body: InstallRequest, db: Session = Depends(get_db)):
     )
     store_user_master_pass(db_user, login_password, master_password)
     db.add(db_user)
-    db.add(Config(parameter="masterPwd", value=get_password_hash(master_password)))
+    db.add(Config(parameter="masterPwd", value=hash_master_key(master_password)))
     db.commit()
     db.refresh(db_user)
 
@@ -128,8 +125,11 @@ async def install(body: InstallRequest, db: Session = Depends(get_db)):
         ),
     )
 
-@router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-async def register(user: UserCreate, db: Session = Depends(get_db)):
+@router.post(
+    "/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(reject_during_maintenance)],
+)
+def register(user: UserCreate, db: Session = Depends(get_db)):
     raise HTTPException(
         status_code=410,
         detail=(
@@ -139,7 +139,16 @@ async def register(user: UserCreate, db: Session = Depends(get_db)):
     )
 
 @router.post("/login", response_model=Token)
-async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+def login(
+    request: Request,
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    otp: str = Form(""),
+    mpass: str = Form(""),
+    oldpass: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    # A plain (sync) route: FastAPI runs it in the threadpool, so bcrypt and
+    # Defuse key derivation do not block the event loop for other requests.
     ip = _client_ip(request)
     track = TrackService(db)
     elog = EventLogService(db)
@@ -177,15 +186,82 @@ async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends
             user_id=user.id, login=user.username, ip=ip, level="WARN",
         )
         raise HTTPException(status_code=401, detail="User is disabled")
+    # Credentials are checked first so the response does not reveal whether
+    # a non-admin account exists while maintenance is on.
+    enforce_maintenance(db, user)
 
-    login_form = await request.form()
+    supplied_master_pass = _decode_secret(mpass or None, "master password")
+    old_password = _decode_secret(oldpass or None, "previous password")
+    master_pass = decrypt_user_master_pass(user, plain_password)
+    # PHP UserPassService::loadUserMPass(): a per-user copy older than the
+    # last master password change (MPASS_CHANGED) or one that no longer
+    # matches Config.masterPwd (MPASS_WRONG) must not unlock the vault.
+    master_changed = user_master_pass_is_stale(db, user)
+    if master_pass is not None and (master_changed or not master_pass_matches_config(db, master_pass)):
+        master_pass = None
+
+    if master_pass is None:
+        if supplied_master_pass:
+            master_hash_row = get_master_password_hash_row(db)
+            hashed_master_password = master_hash_row.value if master_hash_row else None
+            resolved_master_pass = supplied_master_pass
+            if hashed_master_password and not verify_master_password_hash(supplied_master_pass, hashed_master_password):
+                resolved_master_pass = TemporaryMasterPasswordService(db).resolve_master_password(supplied_master_pass)
+                if resolved_master_pass is None:
+                    raise HTTPException(
+                        status_code=401,
+                        detail={
+                            "code": "MASTER_PASSWORD_INVALID",
+                            "message": "Wrong master password",
+                        },
+                    )
+            elif not hashed_master_password:
+                if master_hash_row:
+                    master_hash_row.value = hash_master_key(supplied_master_pass)
+                else:
+                    db.add(Config(parameter="masterPwd", value=hash_master_key(supplied_master_pass)))
+            finalize_user_master_pass(user, plain_password, resolved_master_pass)
+            master_pass = resolved_master_pass
+            db.commit()
+
+        if master_pass is None and user.isChangedPass and not master_changed:
+            if not old_password:
+                raise HTTPException(
+                    status_code=428,
+                    detail={
+                        "code": "OLD_PASSWORD_REQUIRED",
+                        "message": "Your previous password is needed to unlock and migrate your vault",
+                    },
+                )
+
+            master_pass = migrate_user_master_pass(db, user, old_password, plain_password)
+            if master_pass is None:
+                raise HTTPException(
+                    status_code=401,
+                    detail={
+                        "code": "OLD_PASSWORD_INVALID",
+                        "message": "Wrong previous password",
+                    },
+                )
+            db.commit()
+
+        if master_pass is None:
+            raise HTTPException(
+                status_code=428,
+                detail={
+                    "code": "MASTER_PASSWORD_REQUIRED",
+                    "message": "Master password required to unlock your vault",
+                },
+            )
 
     # PHP Authenticator parity: when the global 2FA mode is not disabled,
-    # enrolled users must supply a TOTP (or backup) code to log in.
+    # enrolled users must supply a TOTP (or recovery) code. As in PHP, this
+    # runs after the vault is unlocked (login.finish): the plugin's data is
+    # encrypted under the master password.
     if TwoFactorConfig(db).get_mode() != "disabled":
-        tf_store = TwoFactorStore(db, get_encryption_service())
+        tf_store = TwoFactorStore(db, get_encryption_service(), master_pass=master_pass)
         if tf_store.is_enabled(user.id):
-            otp = (login_form.get("otp") or "").strip()
+            otp = (otp or "").strip()
             if not otp:
                 raise HTTPException(
                     status_code=428,
@@ -219,77 +295,15 @@ async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends
                     },
                 )
 
-    supplied_master_pass = _decode_secret(login_form.get("mpass"), "master password")
-    old_password = _decode_secret(login_form.get("oldpass"), "previous password")
-    master_pass = decrypt_user_master_pass(user, plain_password)
-
-    if master_pass is None:
-        if supplied_master_pass:
-            master_hash_row = get_master_password_hash_row(db)
-            hashed_master_password = master_hash_row.value if master_hash_row else None
-            resolved_master_pass = supplied_master_pass
-            if hashed_master_password and not verify_master_password_hash(supplied_master_pass, hashed_master_password):
-                resolved_master_pass = TemporaryMasterPasswordService(db).resolve_master_password(supplied_master_pass)
-                if resolved_master_pass is None:
-                    raise HTTPException(
-                        status_code=401,
-                        detail={
-                            "code": "MASTER_PASSWORD_INVALID",
-                            "message": "Wrong master password",
-                        },
-                    )
-            elif not hashed_master_password:
-                if master_hash_row:
-                    master_hash_row.value = get_password_hash(supplied_master_pass)
-                else:
-                    db.add(Config(parameter="masterPwd", value=get_password_hash(supplied_master_pass)))
-            finalize_user_master_pass(user, plain_password, resolved_master_pass)
-            master_pass = resolved_master_pass
-            db.commit()
-
-        if master_pass is None and user.isChangedPass:
-            if not old_password:
-                raise HTTPException(
-                    status_code=428,
-                    detail={
-                        "code": "OLD_PASSWORD_REQUIRED",
-                        "message": "Your previous password is needed to unlock and migrate your vault",
-                    },
-                )
-
-            master_pass = migrate_user_master_pass(db, user, old_password, plain_password)
-            if master_pass is None:
-                raise HTTPException(
-                    status_code=401,
-                    detail={
-                        "code": "OLD_PASSWORD_INVALID",
-                        "message": "Wrong previous password",
-                    },
-                )
-            db.commit()
-
-        if master_pass is None:
-            raise HTTPException(
-                status_code=428,
-                detail={
-                    "code": "MASTER_PASSWORD_REQUIRED",
-                    "message": "Master password required to unlock your vault",
-                },
-            )
-
-    access_token = create_access_token(
-        data={"user_id": user.id, "username": user.username},
-        expires_delta=timedelta(hours=24),
-        master_pass=master_pass,
-        is_admin_app=bool(user.isAdminApp),
-        is_admin_acc=bool(user.isAdminAcc),
+    access_token = issue_session_token(
+        user, master_pass=master_pass, timeout_seconds=resolve_session_timeout(db, user.id, ip),
     )
     elog.log_event("auth.login.success", f"User '{user.username}' logged in from {ip}",
                    user_id=user.id, login=user.username, ip=ip, level="INFO")
     return {"access_token": access_token, "token_type": "bearer"}  # nosec B105
 
 @router.get("/me", response_model=UserResponse)
-async def get_current_user_info(
+def get_current_user_info(
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -312,3 +326,41 @@ async def get_current_user_info(
         created_at=user.dateCreate,
         permissions=permissions,
     )
+
+
+def _require_session(current_user: dict) -> dict:
+    session = current_user.get("session")
+    if not session:
+        # sysPass API tokens are managed via /auth-tokens, not sessions.
+        raise HTTPException(status_code=400, detail="Not a browser session token")
+    return session
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+def logout(current_user: dict = Depends(get_current_user)):
+    """Revoke the presented session token, like PHP destroying its session."""
+    session = _require_session(current_user)
+    session_store.revoke_token(session["jti"], session["exp"] or time.time() + MAX_SESSION_SECONDS)
+    return None
+
+
+@router.post("/refresh", response_model=Token)
+def refresh_session(request: Request, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Extend an active session by one inactivity window.
+
+    The SPA calls this only after user input, so an idle browser still times
+    out. The old token is revoked; the session cannot outlive
+    MAX_SESSION_SECONDS from the original login.
+    """
+    session = _require_session(current_user)
+    if time.time() >= float(session["auth_time"]) + MAX_SESSION_SECONDS:
+        raise HTTPException(status_code=401, detail="Session expired or revoked")
+    user = db.query(User).filter(User.id == current_user["id"]).one()
+    token = issue_session_token(
+        user,
+        master_pass=current_user.get("master_pass"),
+        timeout_seconds=resolve_session_timeout(db, user.id, _client_ip(request)),
+        auth_time=session["auth_time"],
+    )
+    session_store.revoke_token(session["jti"], session["exp"] or time.time() + MAX_SESSION_SECONDS)
+    return {"access_token": token, "token_type": "bearer"}  # nosec B105

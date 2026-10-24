@@ -7,6 +7,7 @@ class PublicLinkBase(BaseModel):
     expire: Optional[int] = None  # Expiration time in seconds
 
 class PublicLinkCreate(PublicLinkBase):
+    # Deprecated: sysPass PHP links have no access password; a value is rejected.
     password: Optional[str] = Field(None, min_length=1)
 
 class PublicLinkResponse(BaseModel):
@@ -29,5 +30,9 @@ class PublicLinkAccess(BaseModel):
     category_id: Optional[int] = None
     client_id: Optional[int] = None
     password: Optional[str] = None  # Present only in native PHP encrypted snapshots.
+    # publinks_image_enabled / account_pass_to_image: the password as a base64
+    # PNG instead of text, as in sysPass PHP.
+    use_image: bool = False
+    password_image: Optional[str] = None
     category_name: Optional[str] = None
     client_name: Optional[str] = None

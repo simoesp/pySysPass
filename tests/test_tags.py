@@ -2,6 +2,7 @@ import pytest
 from app.schemas.tag import TagCreate, TagUpdate
 from app.services.tag_service import TagService
 from app.models.account import Tag, AccountToTag
+from tests.account_refs import TEST_MASTER_PASSWORD
 
 @pytest.mark.asyncio
 async def test_create_tag(db_session, test_user):
@@ -71,14 +72,14 @@ async def test_delete_tag(db_session, test_user):
 async def test_add_tag_to_account(db_session, encryption_service, test_user):
     """Test adding a tag to an account"""
     from app.services.account_service import AccountService
-    from app.schemas.account import AccountCreate
+    from tests.account_refs import account_create
 
     account_service = AccountService(db_session, encryption_service)
     tag_service = TagService(db_session)
 
     account = account_service.create_account(
-        AccountCreate(title="Test Account", password="secret"),
-        test_user.id
+        account_create(title="Test Account", password="secret"),
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     tag = tag_service.create_tag(TagCreate(name="Important"), test_user.id)
@@ -99,14 +100,14 @@ async def test_add_tag_to_account(db_session, encryption_service, test_user):
 async def test_remove_tag_from_account(db_session, encryption_service, test_user):
     """Test removing a tag from an account"""
     from app.services.account_service import AccountService
-    from app.schemas.account import AccountCreate
+    from tests.account_refs import account_create
 
     account_service = AccountService(db_session, encryption_service)
     tag_service = TagService(db_session)
 
     account = account_service.create_account(
-        AccountCreate(title="Test Account", password="secret"),
-        test_user.id
+        account_create(title="Test Account", password="secret"),
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     tag = tag_service.create_tag(TagCreate(name="Test Tag"), test_user.id)
@@ -128,14 +129,14 @@ async def test_remove_tag_from_account(db_session, encryption_service, test_user
 async def test_get_account_tags(db_session, encryption_service, test_user):
     """Test getting all tags for an account"""
     from app.services.account_service import AccountService
-    from app.schemas.account import AccountCreate
+    from tests.account_refs import account_create
 
     account_service = AccountService(db_session, encryption_service)
     tag_service = TagService(db_session)
 
     account = account_service.create_account(
-        AccountCreate(title="Test Account", password="secret"),
-        test_user.id
+        account_create(title="Test Account", password="secret"),
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     # Add multiple tags
@@ -151,14 +152,14 @@ async def test_get_account_tags(db_session, encryption_service, test_user):
 async def test_cannot_add_duplicate_tag_to_account(db_session, encryption_service, test_user):
     """Test that adding the same tag twice returns False"""
     from app.services.account_service import AccountService
-    from app.schemas.account import AccountCreate
+    from tests.account_refs import account_create
 
     account_service = AccountService(db_session, encryption_service)
     tag_service = TagService(db_session)
 
     account = account_service.create_account(
-        AccountCreate(title="Test Account", password="secret"),
-        test_user.id
+        account_create(title="Test Account", password="secret"),
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     tag = tag_service.create_tag(TagCreate(name="Test Tag"), test_user.id)
@@ -175,25 +176,25 @@ async def test_cannot_add_duplicate_tag_to_account(db_session, encryption_servic
 async def test_search_accounts_by_tag(db_session, encryption_service, test_user):
     """Test searching accounts by tag"""
     from app.services.account_service import AccountService
-    from app.schemas.account import AccountCreate
+    from tests.account_refs import account_create
 
     account_service = AccountService(db_session, encryption_service)
     tag_service = TagService(db_session)
 
     # Create accounts
     account1 = account_service.create_account(
-        AccountCreate(title="GitHub Account", password="secret"),
-        test_user.id
+        account_create(title="GitHub Account", password="secret"),
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     account2 = account_service.create_account(
-        AccountCreate(title="GitLab Account", password="secret"),
-        test_user.id
+        account_create(title="GitLab Account", password="secret"),
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     account3 = account_service.create_account(
-        AccountCreate(title="Other Account", password="secret"),
-        test_user.id
+        account_create(title="Other Account", password="secret"),
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     # Create "Work" tag and apply to first two accounts

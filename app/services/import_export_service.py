@@ -29,6 +29,7 @@ from app.core.defuse_compat import (
 )
 from app.core.syspass_runtime_config import get_password_salt
 from app.services.auth_service import get_password_hash
+from app.services.account_service import VaultRequiredError
 from app.services.category_service import make_item_hash
 
 logger = logging.getLogger(__name__)
@@ -37,30 +38,41 @@ logger = logging.getLogger(__name__)
 class ImportService:
     """Base import service with common functionality"""
 
-    def __init__(self, db: Session, encryption_service: EncryptionService, user_id: int):
+    def __init__(
+        self,
+        db: Session,
+        encryption_service: EncryptionService,
+        user_id: int,
+        master_password: Optional[str] = None,
+    ):
         self.db = db
         self.encryption = encryption_service
         self.user_id = user_id
+        # Vault master password: plaintext rows are stored as PHP Crypt::encrypt()
+        # ciphertext under it, never in a Python-only format.
+        self.master_password = master_password or ""
         self.imported_accounts = []
         self.errors = []
 
     def _encrypt_password(self, password: str) -> tuple:
-        """Encrypt password using the encryption service"""
-        encrypted = self.encryption.encrypt(password)
-        return encrypted, b""  # Empty key identifies the Python AES fallback.
+        """Encrypt like sysPass PHP ImportBase::addAccount() (Defuse, master key)."""
+        if not self.master_password:
+            raise VaultRequiredError("Master password required to import account passwords")
+        pass_hex, key_hex = encrypt_account_pass(password or "", self.master_password)
+        return pass_hex.encode(), key_hex.encode()
 
     def _user_group_id(self) -> int:
         user = self.db.get(User, self.user_id)
         return user.userGroupId if user else 1
 
-    def _get_or_create_category(self, name: str) -> Category:
+    def _get_or_create_category(self, name: str, description: Optional[str] = None) -> Category:
         """Get existing category or create new one"""
         result = self.db.execute(
             select(Category).where(Category.name == name)
         ).scalars().first()
 
         if not result:
-            result = Category(name=name, hash=make_item_hash(name))
+            result = Category(name=name, description=description, hash=make_item_hash(name))
             self.db.add(result)
             self.db.flush()
 
@@ -100,19 +112,32 @@ class ImportService:
 
         return result
 
+    def _require_client_and_category(self, name: str, client: Optional[str], category: Optional[str]) -> bool:
+        # sysPass PHP rejects these rows ("Either client or category name not
+        # set"); Account.clientId/categoryId are NOT NULL foreign keys.
+        if client and category:
+            return True
+        self.errors.append(f"Account '{name}' requires both a client and a category")
+        return False
+
     def import_accounts(self, data: List[Dict[str, Any]]) -> Dict[str, int]:
         """Import accounts from parsed data"""
         stats = {'success': 0, 'failed': 0, 'skipped': 0}
 
         for item in data:
+            # Like PHP, a failing row is reported and the import continues; the
+            # savepoint keeps one database error from aborting later rows.
+            savepoint = self.db.begin_nested()
             try:
                 account = self._import_account(item)
+                savepoint.commit()
                 if account:
                     stats['success'] += 1
                     self.imported_accounts.append(account)
                 else:
                     stats['skipped'] += 1
             except Exception:
+                savepoint.rollback()
                 logger.exception("Account import row failed")
                 self.errors.append("Account import failed")
                 stats['failed'] += 1
@@ -137,19 +162,14 @@ class CsvImportService(ImportService):
             self.errors.append("Account name is required")
             return None
 
-        # Get or create category
-        category = None
-        if data.get('category'):
-            category = self._get_or_create_category(data['category'])
-
-        # Get or create client
-        client = None
-        if data.get('client'):
-            client = self._get_or_create_client(
-                data['client'],
-                contact=data.get('contact') or '',
-                notes=data.get('client_notes') or ''
-            )
+        if not self._require_client_and_category(name, data.get('client'), data.get('category')):
+            return None
+        category = self._get_or_create_category(data['category'])
+        client = self._get_or_create_client(
+            data['client'],
+            contact=data.get('contact') or '',
+            notes=data.get('client_notes') or ''
+        )
 
         # Encrypt password
         password = data.get('password', '')
@@ -160,9 +180,9 @@ class CsvImportService(ImportService):
             userGroupId=self._user_group_id(),
             userId=self.user_id,
             userEditId=self.user_id,
-            clientId=client.id if client else None,
+            clientId=client.id,
             name=name,
-            categoryId=category.id if category else None,
+            categoryId=category.id,
             login=data.get('login') or data.get('username'),
             url=data.get('url') or data.get('website'),
             pass_=encrypted_pass,
@@ -198,7 +218,7 @@ class XmlImportService(ImportService):
         import_master_password: Optional[str] = None,
         current_master_password: Optional[str] = None,
     ):
-        super().__init__(db, encryption_service, user_id)
+        super().__init__(db, encryption_service, user_id, master_password=current_master_password)
         self.export_password = export_password or ""
         self.import_master_password = import_master_password or ""
         self.current_master_password = current_master_password or ""
@@ -297,15 +317,10 @@ class XmlImportService(ImportService):
             self.errors.append("Account name is required")
             return None
 
-        # Get or create category
-        category = None
-        if data.get('category'):
-            category = self._get_or_create_category(data['category'])
-
-        # Get or create client
-        client = None
-        if data.get('client'):
-            client = self._get_or_create_client(data['client'])
+        if not self._require_client_and_category(name, data.get('client'), data.get('category')):
+            return None
+        category = self._get_or_create_category(data['category'])
+        client = self._get_or_create_client(data['client'])
 
         password = data.get('pass', '')
         if data.get("_native_ciphertext") and password and data.get("key"):
@@ -326,9 +341,9 @@ class XmlImportService(ImportService):
             userGroupId=self._user_group_id(),
             userId=self.user_id,
             userEditId=self.user_id,
-            clientId=client.id if client else None,
+            clientId=client.id,
             name=name,
-            categoryId=category.id if category else None,
+            categoryId=category.id,
             login=data.get('login'),
             url=data.get('url'),
             pass_=encrypted_pass.encode() if isinstance(encrypted_pass, str) else encrypted_pass,
@@ -356,6 +371,8 @@ class XmlImportService(ImportService):
 
 class KeePassImportService(ImportService):
     """KeePass XML import service"""
+
+    KEEPASS_NAME = "KeePass"
 
     def parse_keepass(self, content: str) -> List[Dict[str, Any]]:
         """Parse KeePass 2.x XML, preserving its group hierarchy as categories."""
@@ -396,9 +413,9 @@ class KeePassImportService(ImportService):
                 child_name = child.findtext("Name") or category
                 walk_group(child, child_name)
 
-        # Entries directly inside the database root are uncategorized. Nested
-        # KeePass groups map to sysPass categories using the nearest group name.
-        walk_group(root_group)
+        # Like sysPass PHP, every entry's category is its parent group's name,
+        # including entries directly inside the root group.
+        walk_group(root_group, root_group.findtext("Name") or None)
         return accounts
 
     def _import_account(self, data: Dict[str, str]) -> Optional[Account]:
@@ -408,14 +425,12 @@ class KeePassImportService(ImportService):
             self.errors.append("Account name is required")
             return None
 
-        # Get or create category from KeePass group
-        category = None
-        if data.get('category'):
-            category = self._get_or_create_category(data['category'])
-
-        client = None
-        if data.get('client'):
-            client = self._get_or_create_client(data['client'])
+        # sysPass PHP KeepassImport assigns every entry to a "KeePass" client
+        # and a category named after its group (description "KeePass").
+        category = self._get_or_create_category(
+            data.get('category') or self.KEEPASS_NAME, description=self.KEEPASS_NAME
+        )
+        client = self._get_or_create_client(data.get('client') or self.KEEPASS_NAME)
 
         # Encrypt password
         password = data.get('pass', '')
@@ -425,9 +440,9 @@ class KeePassImportService(ImportService):
             userGroupId=self._user_group_id(),
             userId=self.user_id,
             userEditId=self.user_id,
-            clientId=client.id if client else None,
+            clientId=client.id,
             name=name,
-            categoryId=category.id if category else None,
+            categoryId=category.id,
             login=data.get('login'),
             url=data.get('url'),
             pass_=encrypted_pass,

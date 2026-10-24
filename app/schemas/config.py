@@ -106,6 +106,9 @@ class AccountsSettings(BaseModel):
     files_enabled: Optional[bool] = True
     files_allowed_size: Optional[int] = 1024  # KB
     files_allowed_exts: Optional[str] = None
+    # sysPass PHP filesAllowedMime (comma-separated); None falls back to PHP
+    # config.xml, and only the extension list applies when neither is set.
+    files_allowed_mime: Optional[str] = None
     publinks_enabled: Optional[bool] = False
     publinks_image_enabled: Optional[bool] = False
     publinks_max_time: Optional[int] = 600

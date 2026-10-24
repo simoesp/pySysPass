@@ -1,9 +1,11 @@
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.concurrency import run_in_threadpool
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
-from app.core.config import settings
+from app.core.config import settings, validate_production_settings
 from app.db.bootstrap import bootstrap_database_on_startup
+from app.db import base as db_base
 from app.db.base import SchemaMutationError
 from app.api.v1 import (
     accounts, auth, categories, clients, users, two_factor, tags, history,
@@ -11,8 +13,12 @@ from app.api.v1 import (
     config_settings, custom_fields, account_sharing, import_export, auth_tokens,
     security_logs, password_reset, ldap, item_presets, backup, plugins,
 )
+from app.services.readiness_service import run_readiness_checks
+from app.services.runtime_policy import get_policy
 from app.services.task_service import task_service
+from app.core.operations import record_failure
 from contextlib import asynccontextmanager
+import logging
 import re
 
 
@@ -53,6 +59,9 @@ _AUDIT_ROUTES: list[tuple[str, re.Pattern, str, str]] = [
 ]
 
 
+logger = logging.getLogger(__name__)
+
+
 def _resolve_audit(method: str, path: str):
     for m, pattern, action, level in _AUDIT_ROUTES:
         if method == m and pattern.match(path):
@@ -61,16 +70,6 @@ def _resolve_audit(method: str, path: str):
 
 
 def _get_ip(request: Request) -> str:
-    # X-Real-IP is set by nginx to $remote_addr (single, reliable value).
-    # X-Forwarded-For is used as fallback for other proxies.
-    # After ProxyHeadersMiddleware, request.client.host already reflects the
-    # forwarded IP, but we read headers directly to be explicit.
-    real_ip = request.headers.get("X-Real-IP")
-    if real_ip:
-        return real_ip.strip()
-    fwd = request.headers.get("X-Forwarded-For")
-    if fwd:
-        return fwd.split(",")[0].strip()
     return request.client.host if request.client else "0.0.0.0"  # nosec B104
 
 
@@ -91,8 +90,12 @@ def _get_user_from_request(request: Request):
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
+    validate_production_settings(settings)
     bootstrap_database_on_startup()
-    task_service.start_scheduler()
+    # No jobs are registered by default: backups and expiry notices are not
+    # automated (docs/installation.md). Do not run an empty scheduler thread.
+    if task_service.tasks:
+        task_service.start_scheduler()
     yield
     task_service.stop_scheduler()
 
@@ -102,11 +105,6 @@ app = FastAPI(
     version="2.2.2",
     lifespan=lifespan,
 )
-
-# Trust X-Forwarded-For / X-Real-IP from the nginx reverse proxy.
-# trusted_hosts="*" is safe here because the upstream proxy is in the same
-# private Docker network — no untrusted clients can reach the backend directly.
-app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
 
 # CORS
 app.add_middleware(
@@ -118,14 +116,30 @@ app.add_middleware(
 )
 
 
+def _write_audit_event(action, level, description, user_id, username, ip) -> None:
+    from app.db.base import SessionLocal
+    from app.services.security_log_service import EventLogService
+
+    db = SessionLocal()
+    try:
+        EventLogService(db).log_event(
+            action=action,
+            description=description,
+            user_id=user_id,
+            login=username or "",
+            ip=ip,
+            level=level,
+        )
+    finally:
+        db.close()
+
+
 @app.middleware("http")
 async def audit_log_middleware(request: Request, call_next):
     response = await call_next(request)
     action, level = _resolve_audit(request.method, request.url.path)
     if action and 200 <= response.status_code < 300:
         try:
-            from app.db.base import SessionLocal
-            from app.services.security_log_service import EventLogService
             user_id, username = _get_user_from_request(request)
             ip = _get_ip(request)
             description = f"{request.method} {request.url.path}"
@@ -134,21 +148,48 @@ async def audit_log_middleware(request: Request, call_next):
             acc_match = re.match(r"^/api/v1/accounts/(\d+)", request.url.path)
             if acc_match:
                 description += f" [acc:{acc_match.group(1)}]"
-            db = SessionLocal()
-            try:
-                EventLogService(db).log_event(
-                    action=action,
-                    description=description,
-                    user_id=user_id,
-                    login=username or "",
-                    ip=ip,
-                    level=level,
-                )
-            finally:
-                db.close()
+            # Synchronous DB work runs in the threadpool, not on the event loop.
+            await run_in_threadpool(_write_audit_event, action, level, description, user_id, username, ip)
         except Exception:
-            pass  # never let audit logging break a request
+            # Never let audit logging break a request, but never hide it either.
+            logger.exception("Audit event write failed for %s %s", request.method, request.url.path)
+            record_failure("audit_log_write")
     return response
+
+MAX_REQUEST_BODY_BYTES = 24 * 1024 * 1024  # matches nginx client_max_body_size
+
+
+@app.middleware("http")
+async def request_size_limit_middleware(request: Request, call_next):
+    """Refuse oversized bodies before parsing them (transport-level bound)."""
+    length = request.headers.get("content-length")
+    if length is not None:
+        try:
+            too_large = int(length) > MAX_REQUEST_BODY_BYTES
+        except ValueError:
+            return JSONResponse(status_code=400, content={"detail": "Invalid Content-Length"})
+        if too_large:
+            return JSONResponse(status_code=413, content={"detail": "Request body too large"})
+    return await call_next(request)
+
+
+@app.middleware("http")
+async def force_https_middleware(request: Request, call_next):
+    """sysPass PHP HttpUtil::checkHttps(): redirect plain HTTP when enabled.
+
+    Registered before ProxyHeadersMiddleware, so it runs after a trusted
+    proxy's X-Forwarded-Proto has set the request scheme. Health probes stay
+    reachable on the private network.
+    """
+    if request.url.scheme != "https" and not request.url.path.startswith("/health"):
+        if (await run_in_threadpool(get_policy)).https_required:
+            return RedirectResponse(str(request.url.replace(scheme="https")), status_code=308)
+    return await call_next(request)
+
+
+# Install last so proxy normalization happens before audit attribution.
+# Uvicorn must use --no-proxy-headers to avoid a second trust policy.
+app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=settings.TRUSTED_PROXY_HOSTS)
 
 # Include routers
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
@@ -189,5 +230,17 @@ async def root():
     return {"message": "sysPass Python API", "version": "1.0.0"}
 
 @app.get("/health")
+@app.get("/health/live")
 async def health():
+    """Liveness: the process is serving requests. Says nothing about readiness."""
     return {"status": "healthy"}
+
+
+@app.get("/health/ready")
+async def readiness():
+    """Readiness: configuration, database, canonical schema, and storage."""
+    result = await run_readiness_checks(db_base.engine)
+    return JSONResponse(
+        status_code=200 if result["ready"] else 503,
+        content={"status": "ready" if result["ready"] else "not_ready", "checks": result["checks"]},
+    )

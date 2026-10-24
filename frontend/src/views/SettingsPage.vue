@@ -66,8 +66,16 @@
           <div class="text-subtitle1 text-weight-medium q-mb-sm">Flags</div>
 
           <q-toggle v-model="general.https_enabled" label="Force HTTPS" />
+          <div class="text-caption text-grey-7 q-ml-md">
+            Redirects plain-HTTP requests to HTTPS. Can only be turned on over HTTPS, and needs a
+            TLS-terminating proxy that reports the original scheme.
+          </div>
           <q-toggle v-model="general.debug" label="Debug mode" />
           <q-toggle v-model="general.maintenance" label="Maintenance mode" />
+          <div class="text-caption text-grey-7 q-ml-md">
+            Blocks sign-in, API access, public links and password resets for everyone except
+            application administrators.
+          </div>
           <q-toggle v-model="general.check_updates" label="Check for updates" />
           <q-toggle v-model="general.log_enabled" label="Event logging" />
 
@@ -250,38 +258,14 @@
             <template v-slot:avatar>
               <q-icon name="warning" />
             </template>
-            The default insecure encryption key is in use. Change it using the form below.
+            A sample encryption key is in use. Keep this deployment offline and plan a verified key migration.
           </q-banner>
 
           <q-separator />
-          <div class="text-subtitle1 text-weight-medium">Change Encryption Key</div>
-          <p class="text-body2 text-grey-7">
-            Re-encrypts all stored passwords with a new key. The application will also need
-            <code>ENCRYPTION_KEY</code> updated in the environment before the next restart.
-          </p>
-
-          <q-input v-model="rekey.current_key" label="Current encryption key" type="password" outlined dense />
-          <q-input v-model="rekey.new_key" label="New encryption key (min 16 chars)" type="password" outlined dense />
-          <q-input v-model="rekey.new_key_confirm" label="Confirm new key" type="password" outlined dense />
-
-          <q-banner rounded class="bg-negative text-white q-mt-sm">
-            <template v-slot:avatar><q-icon name="error" /></template>
-            This operation re-encrypts every stored password. Enable maintenance mode first
-            and ensure you have a database backup before proceeding.
-          </q-banner>
-
-          <div class="row justify-end q-mt-md">
-            <q-btn
-              color="negative"
-              icon="vpn_key"
-              label="Re-encrypt All Passwords"
-              :loading="rekeyLoading"
-              @click="doRekey"
-            />
-          </div>
-
-          <q-banner v-if="rekeyResult" rounded class="bg-positive text-white q-mt-sm">
-            {{ rekeyResult }}
+          <div class="text-subtitle1 text-weight-medium">Encryption Key Rotation</div>
+          <q-banner rounded class="bg-warning text-black">
+            Key rotation is temporarily unavailable. Keep your current encryption key securely backed up.
+            Changing it without migrating all encrypted data can make passwords and two-factor secrets unreadable.
           </q-banner>
 
           <q-separator />
@@ -383,9 +367,12 @@
           <div class="text-subtitle1 text-weight-medium q-mb-sm">Files</div>
           <q-toggle v-model="accounts.files_enabled" label="Enable file attachments" />
           <template v-if="accounts.files_enabled">
-            <q-input v-model.number="accounts.files_allowed_size" label="Max file size (KB)" type="number" outlined dense />
+            <q-input v-model.number="accounts.files_allowed_size" label="Max file size (KB, 1-16384)" type="number" outlined dense
+              hint="Checked against the decoded upload; 1 KB = 1000 bytes, as in sysPass PHP" />
             <q-input v-model="accounts.files_allowed_exts" label="Allowed extensions (comma-separated)" outlined dense
               hint="Leave empty to allow all. e.g. pdf,docx,png" />
+            <q-input v-model="accounts.files_allowed_mime" label="Allowed MIME types (comma-separated)" outlined dense
+              hint="sysPass PHP rule, e.g. application/pdf,image/png. Empty: use the PHP config.xml list if present" />
           </template>
 
           <q-separator />
@@ -724,9 +711,6 @@ function toggleLdapSelection() {
     if (!u._exists) u._selected = !all
   }
 }
-const rekey = ref({ current_key: '', new_key: '', new_key_confirm: '' })
-const rekeyLoading = ref(false)
-const rekeyResult = ref(null)
 const tempMasterStatus = ref(null)
 const tempMasterResult = ref(null)
 const tempMasterLoading = ref(false)
@@ -841,24 +825,6 @@ async function load() {
     }
   } catch (e) {
     loadError.value = e.response?.data?.detail || e.message
-  }
-}
-
-async function doRekey() {
-  rekeyResult.value = null
-  rekeyLoading.value = true
-  try {
-    const r = await api.post('/settings/encryption/rekey', rekey.value)
-    rekeyResult.value = `${r.data.message} — ${r.data.accounts_rekeyed} accounts, ${r.data.history_rekeyed} history rows re-encrypted. ${r.data.warning}`
-    rekey.value = { current_key: '', new_key: '', new_key_confirm: '' }
-    // Refresh status
-    const enc = await api.get('/settings/encryption')
-    encStatus.value = enc.data
-    Notify.create({ message: 'Re-key completed successfully', color: 'positive' })
-  } catch (e) {
-    Notify.create({ message: e.response?.data?.detail || 'Re-key failed', color: 'negative' })
-  } finally {
-    rekeyLoading.value = false
   }
 }
 

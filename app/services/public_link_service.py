@@ -1,15 +1,20 @@
 from typing import List, Optional, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from app.models.account import PublicLink, Account
+from app.models.account import Account, Category, Client, PublicLink
 from app.core.security import get_encryption_service
-from app.core.php_public_link import PublicLinkSnapshot, is_php_object, read_public_link_snapshot
+from app.core.php_public_link import (
+    PublicLinkSnapshot, build_link_snapshot, is_php_object, read_public_link_snapshot, write_public_link_vault,
+)
 from app.core.syspass_runtime_config import get_password_salt
-from app.services.account_service import AccountService
+from app.services.account_service import AccountService, VaultRequiredError
 from app.services.config_service import ConfigService
 import time
-import hashlib
 import secrets
+
+class PublicLinksDisabledError(PermissionError):
+    """publinks_enabled is off (PHP hides the create action)."""
+
 
 class PublicLinkService:
     def __init__(self, db: Session):
@@ -20,12 +25,23 @@ class PublicLinkService:
         account_id: int,
         user_id: int,
         expire_seconds: Optional[int] = None,
-        password: Optional[str] = None
+        password: Optional[str] = None,
+        master_pass: Optional[str] = None,
     ) -> PublicLink:
-        """Create a new public link for an account"""
-        # Verify user has access to this account
-        if not AccountService(self.db, get_encryption_service()).can_access_account(account_id, user_id):
+        """Create a link in the native sysPass format (PHP PublicLinkService::create).
+
+        PublicLink.data holds a Vault-wrapped AccountExtData snapshot that the
+        sysPass PHP reader can open. PHP links have no access password, so one
+        cannot be stored without a Python-only format.
+        """
+        if password:
+            raise ValueError("sysPass public links do not support access passwords")
+        accounts = AccountService(self.db, get_encryption_service())
+        if not accounts.can_access_account(account_id, user_id):
             raise ValueError("Account not found or access denied")
+        settings = ConfigService(self.db).get_accounts_settings()
+        if not settings.publinks_enabled:
+            raise PublicLinksDisabledError("Public links are disabled")
 
         existing = self.db.query(PublicLink.id).filter(
             PublicLink.accountId == account_id
@@ -33,32 +49,40 @@ class PublicLinkService:
         if existing:
             raise ValueError("Account already has a public link")
 
-        # Generate unique hash
+        if not master_pass:
+            raise VaultRequiredError("Master password required to create a public link")
+        salt = get_password_salt()
+        if not salt:
+            raise ValueError("The sysPass password salt is not configured")
+        # PHP getDataForLink(): INNER JOIN Client/Category for their names.
+        row = self.db.query(Account, Client.name, Category.name).join(
+            Client, Account.clientId == Client.id
+        ).join(Category, Account.categoryId == Category.id).filter(Account.id == account_id).first()
+        if row is None:
+            raise ValueError("Account not found or access denied")
+        account, client_name, category_name = row
+        plaintext = accounts._decrypt_account_pass(account, master_pass) if account.pass_ else ''
+        if plaintext is None:
+            raise ValueError("The account password could not be decrypted with this vault key")
+
         link_hash = self._generate_hash()
-
-        # Calculate expiration
         now = int(time.time())
-        date_expire = now + int(expire_seconds) if expire_seconds else now + 86400
-
-        # Encrypt password if provided
-        encrypted_password = None
-        if password:
-            from app.core.security import EncryptionService
-            from app.core.config import settings
-            encryption = EncryptionService(settings.ENCRYPTION_KEY)
-            encrypted_password = encryption.encrypt(password).encode()
-
+        lifetime = int(expire_seconds) if expire_seconds else int(settings.publinks_max_time or 600)
+        snapshot = build_link_snapshot(
+            account_id=account.id, name=account.name, login=account.login, url=account.url,
+            notes=account.notes, password=plaintext, client_name=client_name, category_name=category_name,
+        )
         link = PublicLink(
             accountId=account_id,
             hash=link_hash.encode("ascii"),
+            data=write_public_link_vault(snapshot, link_hash.encode("ascii"), salt, now),
             userId=user_id,
-            typeId=1,
+            typeId=1,  # PublicLinkService::TYPE_ACCOUNT
             notify=False,
             dateAdd=now,
-            dateExpire=date_expire,
+            dateExpire=now + lifetime,
             dateUpdate=0,
-            maxCountViews=ConfigService(self.db).get_accounts_settings().publinks_max_views,
-            password=encrypted_password,
+            maxCountViews=settings.publinks_max_views,
         )
 
         self.db.add(link)
@@ -184,9 +208,8 @@ class PublicLinkService:
         return link
 
     def _generate_hash(self) -> str:
-        """Generate a unique hash for the public link"""
-        random_bytes = secrets.token_bytes(32)
-        return hashlib.sha256(random_bytes).hexdigest()
+        """PHP PasswordUtil::generateRandomBytes(): 30 random bytes as hex."""
+        return secrets.token_hex(30)
 
     def is_link_expired(self, link: PublicLink) -> bool:
         """Check if a public link has expired"""

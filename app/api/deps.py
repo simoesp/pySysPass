@@ -1,10 +1,14 @@
 """Centralized FastAPI dependencies for auth and role checks."""
+import hmac
+
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
 from app.db.base import get_db
 from app.services.auth_service import decode_token
+from app.services.runtime_policy import get_policy
+from app.services.session_service import session_fingerprint, session_store
 from app.models.account import User
 
 security = HTTPBearer()
@@ -51,6 +55,30 @@ API_TOKEN_SCOPES: dict[int, set[tuple[str, str]]] = {
 }
 
 
+MAINTENANCE_DETAIL = {
+    "code": "MAINTENANCE",
+    "message": "sysPass is in maintenance mode. Try again later.",
+}
+
+
+def enforce_maintenance(db: Session, user=None) -> None:
+    """Refuse access while maintenance mode is on, except for app admins.
+
+    sysPass PHP serves only the maintenance task's lock holder; pySysPass
+    exempts application administrators instead so maintenance can be
+    switched off from the UI.
+    """
+    if user is not None and user.isAdminApp:
+        return
+    if get_policy(db).maintenance:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=MAINTENANCE_DETAIL)
+
+
+def reject_during_maintenance(db: Session = Depends(get_db)) -> None:
+    """Dependency for unauthenticated entry points (links, resets, sign-up)."""
+    enforce_maintenance(db)
+
+
 def _resolve_api_token(db: Session, token_value: str, request: Request) -> dict:
     """Authenticate a sysPass API token and enforce its action scope."""
     from app.models.account import AuthToken, User
@@ -82,6 +110,7 @@ def _resolve_api_token(db: Session, token_value: str, request: Request) -> dict:
     user = db.query(User).filter(User.id == row.userId).first()
     if user is None or not user.isUserEnabled:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+    enforce_maintenance(db, user)
 
     return {
         "id": user.id,
@@ -111,6 +140,17 @@ def get_current_user(
     user = db.query(User).filter(User.id == user_id).first()
     if user is None or not user.isUserEnabled:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+    # Sessions end on logout, credential change, or explicit revocation, not
+    # only at expiry (sysPass PHP destroys the server-side session).
+    fingerprint = payload.get("sfp")
+    if (
+        not isinstance(fingerprint, str)
+        or not payload.get("jti")
+        or not hmac.compare_digest(fingerprint, session_fingerprint(user))
+        or session_store.is_revoked(payload)
+    ):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired or revoked")
+    enforce_maintenance(db, user)
     return {
         "id": user.id,
         "username": user.username,
@@ -118,6 +158,11 @@ def get_current_user(
         "is_admin": bool(user.isAdminApp),
         "is_admin_app": bool(user.isAdminApp),
         "is_admin_acc": bool(user.isAdminAcc),
+        "session": {
+            "jti": payload["jti"],
+            "exp": payload.get("exp"),
+            "auth_time": payload.get("auth_time", payload.get("iat")),
+        },
     }
 
 

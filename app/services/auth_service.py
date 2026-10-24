@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+import hashlib
 from time import time
 from typing import Optional
 import jwt
@@ -23,6 +24,14 @@ def get_password_hash(password: str) -> str:
     return hashed.replace(b"$2b$", b"$2y$").decode()
 
 
+def set_user_login_password(user: User, password: str) -> None:
+    """Change login credentials while preserving PHP vault migration state."""
+    user.password = get_password_hash(password).encode("utf-8")
+    user.isChangePass = False
+    user.isChangedPass = True
+    user.isMigrate = False
+
+
 def make_user_key(login_pass: str, login_user: str) -> str:
     """Replicates PHP UserPassService::makeKeyForUser()."""
     return (login_pass + login_user + get_password_salt()).strip()
@@ -45,10 +54,38 @@ def decrypt_user_master_pass(user: User, plain_password: str) -> Optional[str]:
         return None
 
 
+# sysPass PHP SP\Core\Crypt\Hash::MAX_KEY_LENGTH
+_PHP_HASH_MAX_KEY_LENGTH = 72
+
+
+def _php_hash_key_input(key: str) -> bytes:
+    """PHP Hash::getKey(): SHA-256 hex for keys over 72 characters (mb_strlen).
+
+    bcrypt itself only uses the first 72 bytes; PHP truncates silently, while
+    the Python bcrypt module refuses longer input, so truncate the same way.
+    """
+    if len(key) > _PHP_HASH_MAX_KEY_LENGTH:
+        key = hashlib.sha256(key.encode("utf-8")).hexdigest()
+    return key.encode("utf-8")[:72]
+
+
+def hash_master_key(master_password: str) -> str:
+    """PHP Hash::hashKey(): the value sysPass stores in Config.masterPwd."""
+    hashed = bcrypt_lib.hashpw(_php_hash_key_input(master_password), bcrypt_lib.gensalt(rounds=10))
+    return hashed.replace(b"$2b$", b"$2y$").decode()
+
+
 def verify_master_password_hash(master_password: str, hashed_master_password: Optional[str]) -> bool:
-    if not hashed_master_password:
+    """PHP Hash::checkHashKey()."""
+    if not hashed_master_password or master_password is None:
         return False
-    return verify_password(master_password, hashed_master_password)
+    hashed = hashed_master_password.encode() if isinstance(hashed_master_password, str) else hashed_master_password
+    if hashed.startswith(b"$2y$"):
+        hashed = b"$2b$" + hashed[4:]
+    try:
+        return bcrypt_lib.checkpw(_php_hash_key_input(master_password), hashed)
+    except ValueError:
+        return False
 
 
 def store_user_master_pass(user: User, login_password: str, master_password: str) -> None:
@@ -83,40 +120,77 @@ def migrate_user_master_pass(
         return None
 
     if master_hash_row is None:
-        db.add(Config(parameter="masterPwd", value=get_password_hash(master_password)))
+        db.add(Config(parameter="masterPwd", value=hash_master_key(master_password)))
 
     finalize_user_master_pass(user, new_login_password, master_password)
     return master_password
+
+
+def master_pass_changed_at(db) -> int:
+    """Config.lastupdatempass: when the vault master password last changed."""
+    row = db.query(Config).filter(Config.parameter == "lastupdatempass").first()
+    try:
+        return int(row.value) if row and row.value else 0
+    except ValueError:
+        return 0
+
+
+def user_master_pass_is_stale(db, user: User) -> bool:
+    """PHP MPASS_CHANGED: the user's mPass predates the current master."""
+    return int(user.lastUpdateMPass or 0) < master_pass_changed_at(db)
+
+
+def master_pass_matches_config(db, master_password: str) -> bool:
+    """PHP checks the unlocked master against Config.masterPwd when one is set."""
+    row = get_master_password_hash_row(db)
+    return not (row and row.value) or verify_master_password_hash(master_password, row.value)
 
 
 def get_master_password_hash_row(db) -> Optional[Config]:
     return db.query(Config).filter(Config.parameter == "masterPwd").first()
 
 
-def _encrypt_short(plaintext: str) -> str:
-    """Encrypt a short string (master password) with ENCRYPTION_KEY for JWT embedding."""
-    import os
+_VAULT_CLAIM_INFO = b"pysyspass session vault claim v2"
+
+
+def _vault_claim_key() -> bytes:
+    """A dedicated key for the session vault claim, derived from ENCRYPTION_KEY."""
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
+    return HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=_VAULT_CLAIM_INFO).derive(
+        settings.ENCRYPTION_KEY.encode("utf-8")
+    )
+
+
+def _encrypt_short(plaintext: str, user_id=None) -> str:
+    """Encrypt the master password for the session token (AES-256-GCM).
+
+    The token is readable by whoever holds it, so the claim is encrypted with
+    an authenticated cipher under a key used for nothing else, bound to the
+    user ID so it cannot be moved into another user's token.
+    """
     import base64
-    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    import os
 
-    key = settings.ENCRYPTION_KEY.encode()[:32].ljust(32, b'\x00')
-    iv  = os.urandom(16)
-    ct  = Cipher(algorithms.AES(key), modes.CTR(iv)).encryptor()
-    enc = ct.update(plaintext.encode()) + ct.finalize()
-    return base64.b64encode(iv + enc).decode()
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    nonce = os.urandom(12)
+    sealed = AESGCM(_vault_claim_key()).encrypt(nonce, plaintext.encode("utf-8"), str(user_id).encode())
+    return "g2:" + base64.urlsafe_b64encode(nonce + sealed).decode()
 
 
-def _decrypt_short(token_value: str) -> Optional[str]:
-    """Decrypt a value that was encrypted by _encrypt_short."""
+def _decrypt_short(token_value: str, user_id=None) -> Optional[str]:
+    """Decrypt a claim made by _encrypt_short; None when it does not verify."""
     try:
         import base64
-        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
-        raw = base64.b64decode(token_value)
-        iv, enc = raw[:16], raw[16:]
-        key = settings.ENCRYPTION_KEY.encode()[:32].ljust(32, b'\x00')
-        dec = Cipher(algorithms.AES(key), modes.CTR(iv)).decryptor()
-        return (dec.update(enc) + dec.finalize()).decode()
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+        if not token_value.startswith("g2:"):
+            return None
+        raw = base64.urlsafe_b64decode(token_value[3:])
+        return AESGCM(_vault_claim_key()).decrypt(raw[:12], raw[12:], str(user_id).encode()).decode("utf-8")
     except Exception:
         return None
 
@@ -138,16 +212,49 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None,
     to_encode["is_admin_app"] = bool(app_admin)
     to_encode["is_admin_acc"] = bool(account_admin)
     if master_pass is not None:
-        to_encode["mpass"] = _encrypt_short(master_pass)
+        to_encode["mpass"] = _encrypt_short(master_pass, to_encode.get("user_id"))
     encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm="HS256")
     return encoded_jwt
+
+
+def issue_session_token(
+    user: User,
+    *,
+    master_pass: Optional[str] = None,
+    timeout_seconds: Optional[int] = None,
+    auth_time: Optional[float] = None,
+) -> str:
+    """Mint a revocable, inactivity-limited session token (see session_service)."""
+    from app.services.session_service import (
+        DEFAULT_SESSION_TIMEOUT, MAX_SESSION_SECONDS, new_session_id, session_fingerprint,
+    )
+
+    now = time()
+    started = now if auth_time is None else float(auth_time)
+    lifetime = min(timeout_seconds or DEFAULT_SESSION_TIMEOUT, max(0.0, started + MAX_SESSION_SECONDS - now))
+    data = {
+        "user_id": user.id,
+        "username": user.username,
+        # Float timestamps keep tokens minted right after a revocation valid.
+        "iat": now,
+        "auth_time": started,
+        "jti": new_session_id(),
+        "sfp": session_fingerprint(user),
+    }
+    return create_access_token(
+        data,
+        expires_delta=timedelta(seconds=lifetime),
+        master_pass=master_pass,
+        is_admin_app=bool(user.isAdminApp),
+        is_admin_acc=bool(user.isAdminAcc),
+    )
 
 
 def decode_token(token: str) -> Optional[dict]:
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
         if "mpass" in payload:
-            payload["master_pass"] = _decrypt_short(payload["mpass"])
+            payload["master_pass"] = _decrypt_short(payload["mpass"], payload.get("user_id"))
         return payload
     except jwt.PyJWTError:
         return None

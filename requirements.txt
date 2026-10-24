@@ -1,3 +1,5 @@
+# Runtime dependencies. Test tools live in requirements-dev.txt; the container
+# installs the hash-pinned resolution in requirements.lock (see docs/installation.md).
 # FastAPI
 fastapi>=0.143.2,<1.0.0
 uvicorn[standard]>=0.54.0
@@ -19,13 +21,8 @@ passlib[bcrypt]>=1.7.4
 python-multipart>=0.0.32
 pyotp>=2.10.0
 
-# Testing
-pytest==9.1.1
-pytest-asyncio>=1.4.0
-pytest-cov>=7.1.0
-httpx>=0.28.1
-
 # Utilities
 python-dotenv>=1.2.4
 schedule>=1.2.2
+Pillow>=12.3.0  # password-as-image (sysPass ImageUtil)
 ldap3>=2.9.1

@@ -3,18 +3,20 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from app.db.base import get_db
 from app.schemas.public_link import PublicLinkCreate, PublicLinkResponse, PublicLinkAccess
-from app.services.public_link_service import PublicLinkService
-from app.api.deps import require_any_permission
+from app.services.public_link_service import PublicLinkService, PublicLinksDisabledError
+from app.api.deps import reject_during_maintenance, require_any_permission
 from app.core.security import get_encryption_service
 from app.core.php_public_link import PublicLinkSnapshot
-from app.services.account_service import AccountService
+from app.core.password_image import text_to_png_base64
+from app.services.runtime_policy import get_policy
+from app.services.account_service import AccountService, VaultRequiredError
 
 router = APIRouter()
 link_manage = require_any_permission("mgm_public_links")
 link_create = require_any_permission("mgm_public_links", "acc_public_links")
 
 @router.get("/accounts/{account_id}/public-links", response_model=List[PublicLinkResponse])
-async def list_public_links(
+def list_public_links(
     account_id: int,
     db: Session = Depends(get_db),
     current_user = Depends(link_manage)
@@ -28,7 +30,7 @@ async def list_public_links(
 
 @router.post("/accounts/{account_id}/public-links", response_model=PublicLinkResponse,
              status_code=status.HTTP_201_CREATED)
-async def create_public_link(
+def create_public_link(
     account_id: int,
     link_data: PublicLinkCreate,
     db: Session = Depends(get_db),
@@ -45,14 +47,19 @@ async def create_public_link(
             account_id=account_id,
             user_id=current_user["id"],
             expire_seconds=link_data.expire,
-            password=link_data.password
+            password=link_data.password,
+            master_pass=current_user.get("master_pass"),
         )
         return link
+    except VaultRequiredError as e:
+        raise HTTPException(status_code=428, detail={"code": "MASTER_PASSWORD_REQUIRED", "message": str(e)})
+    except PublicLinksDisabledError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-@router.get("/public-links/{link_hash}/access")
-async def access_public_link(
+@router.get("/public-links/{link_hash}/access", dependencies=[Depends(reject_during_maintenance)])
+def access_public_link(
     link_hash: str,
     password: Optional[str] = None,
     db: Session = Depends(get_db)
@@ -73,6 +80,10 @@ async def access_public_link(
 
     # Native PHP links serve the authenticated snapshot, including its password.
     # Legacy Python links retain their metadata-only response.
+    password = account.password if isinstance(account, PublicLinkSnapshot) else None
+    policy = get_policy(db)
+    # AccountController::viewLinkAction(): image only, no copyable text.
+    use_image = password is not None and (policy.publinks_image_enabled or policy.account_pass_to_image)
     return PublicLinkAccess(
         account_id=account.id,
         account_title=account.name,
@@ -81,13 +92,15 @@ async def access_public_link(
         notes=account.notes,
         category_id=account.category_id if isinstance(account, PublicLinkSnapshot) else account.categoryId,
         client_id=account.client_id if isinstance(account, PublicLinkSnapshot) else account.clientId,
-        password=account.password if isinstance(account, PublicLinkSnapshot) else None,
+        password=None if use_image else password,
+        use_image=use_image,
+        password_image=text_to_png_base64(password) if use_image else None,
         category_name=account.category_name if isinstance(account, PublicLinkSnapshot) else None,
         client_name=account.client_name if isinstance(account, PublicLinkSnapshot) else None
     )
 
 @router.delete("/accounts/{account_id}/public-links/{link_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_public_link(
+def delete_public_link(
     account_id: int,
     link_id: int,
     db: Session = Depends(get_db),
@@ -105,7 +118,7 @@ async def delete_public_link(
     return None
 
 @router.get("/accounts/{account_id}/public-links/{link_id}")
-async def get_public_link(
+def get_public_link(
     account_id: int,
     link_id: int,
     db: Session = Depends(get_db),

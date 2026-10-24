@@ -17,6 +17,7 @@ This directory organizes the project documentation by topic so the main reposito
 
 ### Development and Project Status
 
+- [project/production-readiness-review-2026-10-23.md](project/production-readiness-review-2026-10-23.md): production readiness findings, validation evidence, release criteria, and GitHub milestones/issues
 - [project/feature-completion.md](project/feature-completion.md): implemented feature notes and historical delivery summary
 - [project/php-compatibility-checklist.md](project/php-compatibility-checklist.md): compatibility goals and parity checklist against sysPass PHP
 
@@ -24,3 +25,5 @@ This directory organizes the project documentation by topic so the main reposito
 
 - `AGENTS.md` remains at the repository root because it is used as a tooling instruction file rather than reader-facing project documentation.
 - The repository root is intentionally kept minimal. Reader-facing project documentation lives in this `docs/` tree, with `README.md` serving as the main entry point.
+
+- [Backup and offline recovery](backup-recovery.md)

@@ -2,6 +2,7 @@
 from typing import Optional
 import logging
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Response
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -9,6 +10,7 @@ from app.db.base import get_db
 from app.core.security import get_encryption_service
 from app.api.deps import require_permission
 from app.models.account import User
+from app.services.auth_service import get_master_password_hash_row, verify_master_password_hash
 from app.services.import_export_service import (
     CsvImportService,
     XmlImportService,
@@ -24,6 +26,25 @@ class KdbxExportRequest(BaseModel):
     export_password: str = Field(min_length=12, max_length=1024)
     export_password_confirm: str = Field(min_length=12, max_length=1024)
     account_ids: Optional[list[int]] = None
+
+
+def _import_master_password(db: Session, current_user: dict, supplied: str = "") -> str:
+    """Vault key used to store imported passwords in the PHP Defuse format."""
+    master = current_user.get("master_pass")
+    if supplied and supplied != master:
+        row = get_master_password_hash_row(db)
+        if not verify_master_password_hash(supplied, row.value if row else None):
+            raise HTTPException(status_code=400, detail="current_master_password does not match the vault")
+        master = supplied
+    if not master:
+        raise HTTPException(
+            status_code=428,
+            detail={
+                "code": "MASTER_PASSWORD_REQUIRED",
+                "message": "Sign in with an unlocked vault to import account passwords",
+            },
+        )
+    return master
 
 
 @router.post("/import/csv")
@@ -42,10 +63,14 @@ async def import_csv(
         content_str = content.decode('utf-8')
     except UnicodeDecodeError:
         raise HTTPException(status_code=400, detail="File must be UTF-8 encoded")
-    service = CsvImportService(db, get_encryption_service(), user_id)
+    service = CsvImportService(
+        db, get_encryption_service(), user_id, master_password=_import_master_password(db, current_user)
+    )
     try:
-        data = service.parse_csv(content_str, delimiter=delimiter)
-        stats = service.import_accounts(data)
+        # Parsing, per-row Defuse encryption and DB writes leave the event loop.
+        stats = await run_in_threadpool(
+            lambda: service.import_accounts(service.parse_csv(content_str, delimiter=delimiter))
+        )
         return {'format': 'csv', 'stats': stats, 'errors': service.errors[:10]}
     except Exception:
         logger.exception("CSV import failed")
@@ -76,11 +101,11 @@ async def import_xml(
         user_id,
         export_password=export_password,
         import_master_password=import_master_password,
-        current_master_password=current_master_password,
+        current_master_password=_import_master_password(db, current_user, current_master_password),
     )
     try:
-        data = service.parse_xml(content_str)
-        stats = service.import_accounts(data)
+        # Parsing, per-row Defuse encryption and DB writes leave the event loop.
+        stats = await run_in_threadpool(lambda: service.import_accounts(service.parse_xml(content_str)))
         return {'format': 'xml', 'stats': stats, 'errors': service.errors[:10]}
     except Exception:
         logger.exception("sysPass XML import failed")
@@ -102,10 +127,12 @@ async def import_keepass(
         content_str = content.decode('utf-8')
     except UnicodeDecodeError:
         raise HTTPException(status_code=400, detail="File must be UTF-8 encoded")
-    service = KeePassImportService(db, get_encryption_service(), user_id)
+    service = KeePassImportService(
+        db, get_encryption_service(), user_id, master_password=_import_master_password(db, current_user)
+    )
     try:
-        data = service.parse_keepass(content_str)
-        stats = service.import_accounts(data)
+        # Parsing, per-row Defuse encryption and DB writes leave the event loop.
+        stats = await run_in_threadpool(lambda: service.import_accounts(service.parse_keepass(content_str)))
         return {'format': 'keepass', 'stats': stats, 'errors': service.errors[:10]}
     except Exception:
         logger.exception("KeePass XML import failed")
@@ -113,7 +140,7 @@ async def import_keepass(
 
 
 @router.get("/export/csv")
-async def export_csv(
+def export_csv(
     account_ids: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_backup')),
@@ -131,7 +158,7 @@ async def export_csv(
 
 
 @router.get("/export/xml")
-async def export_xml(
+def export_xml(
     account_ids: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_backup')),
@@ -156,7 +183,7 @@ async def export_xml(
 
 
 @router.post("/export/xml/protected")
-async def export_xml_protected(
+def export_xml_protected(
     export_password: str = Form(...),
     master_password: str = Form(""),
     account_ids: str = Form(""),
@@ -197,7 +224,7 @@ async def export_xml_protected(
 
 
 @router.get("/export/keepass")
-async def export_keepass(
+def export_keepass(
     account_ids: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_backup')),
@@ -221,7 +248,7 @@ async def export_keepass(
 
 
 @router.post("/export/keepass/kdbx")
-async def export_keepass_kdbx(
+def export_keepass_kdbx(
     body: KdbxExportRequest,
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_backup')),
