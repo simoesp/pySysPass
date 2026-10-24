@@ -89,8 +89,9 @@ Compatibility should be treated as successful only when:
   matching history rows, encrypted custom fields, `masterPwd`, `lastupdatempass`).
   It is all-or-nothing in one transaction, backs up first, and verifies with the
   new password before commit. Upstream PHP decrypted a pySysPass-rotated vault
-  and accepted the new hash. Rotating `ENCRYPTION_KEY` itself (legacy rows, 2FA
-  state, session claims) is still unsupported.
+  and accepted the new hash. `ENCRYPTION_KEY` rotation is supported once no
+  legacy values remain (`python -m app.encryption_key check`), then
+  `end-sessions`.
 - ✅ Sign-in follows PHP `loadUserMPass()`: a user's `mPass` older than
   `lastupdatempass` (MPASS_CHANGED) or one that fails `Hash::checkHashKey()`
   against `masterPwd` (MPASS_WRONG) no longer unlocks the vault. Previously,
@@ -123,8 +124,10 @@ Compatibility should be treated as successful only when:
   after the vault is unlocked. Pending setup secrets stay outside PHP tables
   (`data/two-factor-pending.json`), so a row always means "enrolled". New
   secrets and recovery codes use PHP's formats.
-- Legacy pySysPass 2FA rows (JSON) stay readable until the user disables 2FA.
-  PHP cannot read them, so affected users should re-enroll. The enabled/enforced
+- ✅ `python -m app.encryption_key migrate` converts legacy pySysPass account,
+  history, and 2FA rows to the native formats; upstream PHP reads the converted
+  rows (CI). Legacy public links are reported and removed only on request,
+  never converted. The enabled/enforced
   policy now lives in runtime JSON. Saving the 2FA mode clears the old JSON in
   `Plugin.data` and sets PHP's `versionLevel`; until then PHP's plugin upgrade
   could fail on that row. PHP's per-plugin expiry warnings are not shown.

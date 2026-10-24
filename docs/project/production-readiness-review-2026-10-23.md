@@ -505,3 +505,23 @@ fix, `/ping` answers in under a second. With the route temporarily reverted to
 `async def`, both tests fail, so they detect blocking. Backend suites passed on SQLite and
 MySQL. Remaining: threadpool size (anyio default, 40 threads) bounds concurrent blocking
 requests per worker, and no load test has measured capacity.
+
+R8 / #58 and R5 / #56 follow-up (ENCRYPTION_KEY rotation and legacy formats):
+`python -m app.encryption_key` reports (`check`), converts (`migrate`), and finalizes
+(`end-sessions`) an `ENCRYPTION_KEY` change. `migrate` requires maintenance mode,
+`--confirm-stopped`, the master password (checked against `masterPwd`), and a successful
+backup. In one transaction it rewrites legacy account and history passwords as Defuse
+ciphertext under the master, with the current `mPassHash`, and legacy 2FA documents as
+native `AuthenticatorData`. Unconfirmed legacy setups are dropped, since PHP would have no
+row. It verifies each value before commit. Legacy public links are never converted:
+they showed metadata only, while native links reveal the password. They block migration
+until `--drop-legacy-links`. After migration nothing persisted depends on `ENCRYPTION_KEY`;
+it protects only session claims and pending 2FA setups, which `end-sessions` retires.
+
+Validation: 5 tests cover the inventory, refusing to convert links, conversion, wrong
+master or key with no writes, and the CLI. Upstream PHP decoded a migrated account and 2FA
+row. A rehearsal in the backend image against MySQL 8 seeded 20 legacy accounts and a
+legacy 2FA row under key A: `check` reported 21; `migrate` took a backup and converted
+all 21; `check` then reported 0; after switching to key B and `end-sessions`, all 20
+accounts and the 2FA secret were readable. Remaining: rotation is offline; SECRET_KEY
+rotation is only `end-sessions` plus the new value.

@@ -171,3 +171,32 @@ def test_php_authenticator_plugin_reads_python_2fa_enrollment(db_session, encryp
     assert php_state["recoveryCodes"] == codes[1:]
     assert php_state["expireDays"] == 0 and php_state["lastRecoveryTime"] > 0
     assert php_state["totpMatches"] is True
+
+
+def test_php_reads_values_migrated_from_legacy_formats(db_session, test_user):
+    """Legacy pySysPass account and 2FA rows become PHP-readable after migration."""
+    from app.core.security import EncryptionService
+    from app.models.account import PluginData
+    from app.services.auth_service import hash_master_key
+    from app.services.legacy_migration import LegacyFormatMigration
+
+    old = EncryptionService("legacy-encryption-key-32-bytes!!")
+    db_session.add(Config(parameter="masterPwd", value=hash_master_key(TEST_MASTER_PASSWORD)))
+    db_session.add(Account(id=80, name="legacy", userId=test_user.id, userEditId=test_user.id, userGroupId=1,
+                           clientId=900, categoryId=900, pass_=old.encrypt("was-legacy").encode(), key=b""))
+    vault = old.encrypt(json.dumps({"secret": "JBSWY3DPEHPK3PXP", "backup_codes": ["0123456789abcdef0123"]}))
+    db_session.add(PluginData(name="Authenticator", itemId=test_user.id,
+                              data=json.dumps({"enabled": True, "vault": vault}).encode(), key=b""))
+    db_session.commit()
+
+    LegacyFormatMigration(db_session, old.decrypt).migrate(TEST_MASTER_PASSWORD)
+    account = db_session.get(Account, 80)
+    row = db_session.query(PluginData).filter_by(name="Authenticator", itemId=test_user.id).one()
+    result = _php({
+        "master_password": TEST_MASTER_PASSWORD,
+        "accounts": [_ciphertext(account)],
+        "authenticator": [{"data": row.data.decode(), "key": row.key.decode()}],
+    })
+    assert result["accounts"] == ["was-legacy"]
+    assert result["authenticator"][0]["IV"] == "JBSWY3DPEHPK3PXP"
+    assert result["authenticator"][0]["recoveryCodes"] == ["0123456789abcdef0123"]

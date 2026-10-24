@@ -101,3 +101,31 @@ password are left unchanged, as in PHP.
 To undo the change, restore the backup the command reported, using the restore
 procedure above. Keep that archive and both passwords until users have signed in
 successfully.
+
+## Rotating ENCRYPTION_KEY or SECRET_KEY
+
+sysPass PHP data never depends on these keys: account passwords, 2FA state and
+public links are encrypted under the vault master password or the PHP password
+salt. Only values written by earlier pySysPass releases (legacy formats),
+session tokens, and pending 2FA setups use `ENCRYPTION_KEY`.
+
+1. Report legacy values: `python -m app.encryption_key check` (exit status 1
+   while any remain).
+2. If any remain, enable maintenance mode, stop every writer, and convert them:
+
+   ```bash
+   python -m app.encryption_key migrate --confirm-stopped
+   ```
+
+   The command backs up first, then rewrites legacy account and history
+   passwords and 2FA rows in the native sysPass formats in one transaction.
+   Legacy public links are not converted: a native link reveals the password
+   while a legacy one did not. The command stops until you rerun it with
+   `--drop-legacy-links`, which deletes them so owners can recreate them.
+3. Run `check` again and confirm it reports 0.
+4. Set the new `ENCRYPTION_KEY` (and/or `SECRET_KEY`), then run
+   `python -m app.encryption_key end-sessions` with the new configuration and
+   start the stack. Everyone signs in again; pending 2FA setups restart.
+
+Keep the old key until step 3 reports 0 and a test sign-in succeeds: legacy
+values cannot be read without it.
