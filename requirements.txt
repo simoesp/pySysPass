@@ -24,4 +24,5 @@ pyotp>=2.10.0
 # Utilities
 python-dotenv>=1.2.4
 schedule>=1.2.2
+Pillow>=12.3.0  # password-as-image (sysPass ImageUtil)
 ldap3>=2.9.1

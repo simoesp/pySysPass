@@ -7,6 +7,8 @@ from app.services.public_link_service import PublicLinkService, PublicLinksDisab
 from app.api.deps import reject_during_maintenance, require_any_permission
 from app.core.security import get_encryption_service
 from app.core.php_public_link import PublicLinkSnapshot
+from app.core.password_image import text_to_png_base64
+from app.services.runtime_policy import get_policy
 from app.services.account_service import AccountService, VaultRequiredError
 
 router = APIRouter()
@@ -78,6 +80,10 @@ def access_public_link(
 
     # Native PHP links serve the authenticated snapshot, including its password.
     # Legacy Python links retain their metadata-only response.
+    password = account.password if isinstance(account, PublicLinkSnapshot) else None
+    policy = get_policy(db)
+    # AccountController::viewLinkAction(): image only, no copyable text.
+    use_image = password is not None and (policy.publinks_image_enabled or policy.account_pass_to_image)
     return PublicLinkAccess(
         account_id=account.id,
         account_title=account.name,
@@ -86,7 +92,9 @@ def access_public_link(
         notes=account.notes,
         category_id=account.category_id if isinstance(account, PublicLinkSnapshot) else account.categoryId,
         client_id=account.client_id if isinstance(account, PublicLinkSnapshot) else account.clientId,
-        password=account.password if isinstance(account, PublicLinkSnapshot) else None,
+        password=None if use_image else password,
+        use_image=use_image,
+        password_image=text_to_png_base64(password) if use_image else None,
         category_name=account.category_name if isinstance(account, PublicLinkSnapshot) else None,
         client_name=account.client_name if isinstance(account, PublicLinkSnapshot) else None
     )

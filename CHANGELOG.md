@@ -40,6 +40,11 @@ Evidence for each item: `docs/project/production-readiness-review-2026-10-23.md`
   requires the `mgm_items_preset` permission, and every preset needs a user,
   group or profile scope. Presets saved by earlier releases are shown as legacy
   and ignored until saved again.
+- "Show password as image" (`account_pass_to_image`, PHP `accountPassToImage`),
+  a fixed password preset with `use_image`, and "Show password as image in
+  public link" (`publinks_image_enabled`) are now enforced: viewing returns a
+  PNG instead of the text, and public links then carry no text password.
+  Copying still returns the text, as in PHP. New runtime dependency: Pillow.
 
 ### Added
 - `/health/ready` readiness checks (configuration, database, schema, storage).
@@ -66,6 +71,8 @@ Evidence for each item: `docs/project/production-readiness-review-2026-10-23.md`
 - Password reset not setting PHP migration flags.
 - Reads of native ciphertext without a vault key raising 500.
 - `masterPwd` hashing for keys longer than 72 characters (now matches PHP).
+- The master password in session tokens is sealed with AES-256-GCM under a
+  derived, single-purpose key and bound to the user (was unauthenticated AES-CTR).
 
 ## [2.2.2] — 2026-10-23
 

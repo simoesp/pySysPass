@@ -81,6 +81,11 @@ class ItemPresetService:
             return ResolvedPreset(row.id, preset_type, bool(row.fixed), row.priority or 0, data)
         return None
 
+    def password_as_image(self, user_id: int) -> bool:
+        """AccountController::getPasswordPreset(): a fixed password preset with useImage."""
+        preset = self.get_for_user(presets.ACCOUNT_PASSWORD, user_id)
+        return bool(preset and preset.fixed and preset.data.get("use_image"))
+
     def create(self, preset_type: str,
                user_id: Optional[int] = None,
                user_group_id: Optional[int] = None,

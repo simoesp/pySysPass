@@ -288,3 +288,73 @@ def test_upload_enforces_php_mime_list(db_session, encryption_service, test_user
     config_xml.write_text("<config><filesAllowedMime></filesAllowedMime></config>")
     invalidate_policy_cache()
     assert upload("text/plain").json()["detail"] == "There aren't any allowed MIME types"
+
+
+# ── Password as image (ImageUtil::convertText) ───────────────────────────
+
+def _is_png_of(image_b64):
+    return base64.b64decode(image_b64).startswith(b"\x89PNG\r\n\x1a\n")
+
+
+def test_password_view_follows_php_image_rules(db_session, encryption_service, test_user, tmp_path, monkeypatch):
+    from app.core.syspass_runtime_config import clear_runtime_config_cache
+    from app.services.item_preset_service import ItemPresetService
+
+    _grant_all(db_session, test_user)
+    account = _account(db_session, encryption_service, test_user)
+    client = _client(db_session)
+
+    def fetch(purpose):
+        r = client.get(f"/api/v1/accounts/{account.id}/password", params={"purpose": purpose},
+                       headers=_bearer(test_user))
+        assert r.status_code == 200
+        return r.json()
+
+    assert fetch("view") == {"password": "secret", "use_image": False, "password_image": None}
+
+    _set(db_session, account_pass_to_image="true")
+    viewed = fetch("view")
+    assert viewed["password"] is None and viewed["use_image"] and _is_png_of(viewed["password_image"])
+    assert fetch("copy")["password"] == "secret"  # copyPass always returns the text
+
+    # Unset in pySysPass: the shared PHP config.xml decides.
+    db_session.query(Config).filter_by(parameter="account_pass_to_image").delete()
+    db_session.commit()
+    config_xml = tmp_path / "config.xml"
+    config_xml.write_text("<config><accountPassToImage>1</accountPassToImage></config>")
+    monkeypatch.setattr("app.core.syspass_runtime_config.settings.SYSPASS_CONFIG_XML_PATH", str(config_xml))
+    clear_runtime_config_cache()
+    invalidate_policy_cache()
+    assert fetch("view")["use_image"] is True
+    _set(db_session, account_pass_to_image="false")
+    assert fetch("view")["use_image"] is False
+
+    # A fixed password preset with useImage applies to its user; a non-fixed one does not.
+    preset = ItemPresetService(db_session).create("account.password", user_id=test_user.id, fixed=False,
+                                                  data={"length": 1, "use_image": True})
+    assert fetch("view")["use_image"] is False
+    ItemPresetService(db_session).update(preset["id"], fixed=True)
+    assert fetch("view")["use_image"] is True
+    assert fetch("copy")["password"] == "secret"
+    clear_runtime_config_cache()
+
+
+def test_public_link_serves_only_an_image_when_enabled(db_session, encryption_service, test_user, monkeypatch):
+    from app.core.syspass_runtime_config import clear_runtime_config_cache, settings as runtime_settings
+    from app.services.public_link_service import PublicLinkService
+
+    monkeypatch.setattr(runtime_settings, "SYSPASS_PASSWORD_SALT", "synthetic-link-salt")
+    clear_runtime_config_cache()
+    _set(db_session, publinks_enabled="true")
+    account = _account(db_session, encryption_service, test_user)
+    link = PublicLinkService(db_session).create_public_link(account.id, test_user.id,
+                                                             master_pass=TEST_MASTER_PASSWORD)
+    client = _client(db_session)
+    url = f"/api/v1/public-links/{link.hash.decode()}/access"
+    plain = client.get(url).json()
+    assert plain["password"] == "secret" and plain["use_image"] is False
+
+    _set(db_session, publinks_image_enabled="true")
+    shown = client.get(url).json()
+    assert shown["password"] is None and shown["use_image"] and _is_png_of(shown["password_image"])
+    clear_runtime_config_cache()

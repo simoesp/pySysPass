@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Body, Query, Request
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List, Literal, Optional
 from app.db.base import get_db
 from app.schemas.account import (
     AccountCreate, AccountResponse, AccountUpdate, PasswordResponse,
@@ -9,6 +9,9 @@ from app.schemas.account import (
 from app.services.account_service import AccountService, AccountValidationError, VaultRequiredError
 from app.services.account_audit_service import AccountAuditService
 from app.core.security import get_encryption_service
+from app.core.password_image import text_to_png_base64
+from app.services.item_preset_service import ItemPresetService
+from app.services.runtime_policy import get_policy
 from app.api.deps import (
     enforce_permissions,
     require_all_permissions,
@@ -204,9 +207,11 @@ def delete_account(
 def get_account_password(
     account_id: int,
     request: Request,
+    purpose: Literal["copy", "view"] = "copy",
     db: Session = Depends(get_db),
     current_user=Depends(account_view_pass),
 ):
+    """The password; ``purpose=view`` follows PHP viewPass's image rule, copy returns text as copyPass does."""
     try:
         password = AccountService(db, get_encryption_service()).get_decrypted_password(
             account_id, current_user["id"], master_pass=current_user.get("master_pass")
@@ -219,6 +224,9 @@ def get_account_password(
         account_id, "account.view.pass", current_user["id"],
         current_user.get("username"), _client_ip(request),
     )
+    if purpose == "view" and (get_policy(db).account_pass_to_image
+                              or ItemPresetService(db).password_as_image(current_user["id"])):
+        return PasswordResponse(use_image=True, password_image=text_to_png_base64(password))
     return PasswordResponse(password=password)
 
 

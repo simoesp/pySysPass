@@ -117,7 +117,10 @@ class AccountResponse(BaseModel):
 
 
 class PasswordResponse(BaseModel):
-    password: str
+    # With purpose=view and a password-as-image rule, only the image is sent.
+    password: Optional[str] = None
+    use_image: bool = False
+    password_image: Optional[str] = None  # base64 PNG
 
 
 class AccountAuditEntry(BaseModel):

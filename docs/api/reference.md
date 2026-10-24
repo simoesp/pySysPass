@@ -204,13 +204,25 @@ Account passwords are not returned in the normal account payload. They are retri
 
 - `GET /api/v1/accounts/{account_id}/password`
 
+Optional query parameter `purpose`: `copy` (default) or `view`. Copy always
+returns the text, as sysPass PHP `copyPass` does. View follows PHP `viewPass`:
+when `account_pass_to_image` is on (or, if unset, `accountPassToImage` in the
+shared PHP `config.xml`), or the user's fixed `account.password` preset sets
+`use_image`, the response carries a base64 PNG and no text.
+
 Response:
 
 ```json
 {
-  "password": "decrypted-secret"
+  "password": "decrypted-secret",
+  "use_image": false,
+  "password_image": null
 }
 ```
+
+With the image rule: `{"password": null, "use_image": true, "password_image": "iVBORw0KGgo..."}`.
+This is a display control against shoulder surfing and scraping, not an access
+control: anyone with `acc_view_pass` can still request `purpose=copy`.
 
 Account passwords are always stored as sysPass PHP writes them: Defuse
 ciphertext in `Account.pass` with a password-protected key in `Account.key`,
@@ -564,9 +576,16 @@ Example response:
   "url": "https://db.example.internal",
   "notes": "Primary production database",
   "category_id": 2,
-  "client_id": 4
+  "client_id": 4,
+  "password": "decrypted-secret",
+  "use_image": false,
+  "password_image": null
 }
 ```
+
+`password` is present for native sysPass links. When `publinks_image_enabled`
+or `account_pass_to_image` is on, as in PHP `viewLink`, `password` is null and
+`password_image` holds a base64 PNG; no text password is sent.
 
 Possible failures:
 

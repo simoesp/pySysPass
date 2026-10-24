@@ -29,6 +29,8 @@ class RuntimePolicy:
     files_allowed_exts: FrozenSet[str] = field(default_factory=frozenset)
     # None: no MIME rule configured. Empty: PHP refuses every upload.
     files_allowed_mime: Optional[FrozenSet[str]] = None
+    account_pass_to_image: bool = False
+    publinks_image_enabled: bool = False
 
     @property
     def max_file_bytes(self) -> int:
@@ -60,6 +62,16 @@ def _allowed_mime(raw: Optional[str]) -> Optional[FrozenSet[str]]:
     return None if items is None else frozenset(item.lower() for item in items)
 
 
+def _flag(config, key: str, php_key: str) -> bool:
+    # Unset in pySysPass: use the shared sysPass PHP config.xml value.
+    value = config.get(key)
+    if value is None:
+        from app.core.syspass_runtime_config import load_syspass_runtime_config
+
+        value = load_syspass_runtime_config().get(php_key)
+    return (value or "").strip().lower() in ("true", "1", "yes")
+
+
 def _load(db) -> RuntimePolicy:
     from app.services.config_service import ConfigService
 
@@ -72,6 +84,8 @@ def _load(db) -> RuntimePolicy:
         files_allowed_size_kb=max(1, min(int(size), MAX_FILE_SIZE_KB)),
         files_allowed_exts=_parse_extensions(config.get("files_allowed_exts")),
         files_allowed_mime=_allowed_mime(config.get("files_allowed_mime")),
+        account_pass_to_image=_flag(config, "account_pass_to_image", "accountPassToImage"),
+        publinks_image_enabled=_flag(config, "publinks_image_enabled", "publinksImageEnabled"),
     )
 
 

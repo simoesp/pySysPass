@@ -621,3 +621,13 @@ pre-GCM claims, and claims made under a previous `ENCRYPTION_KEY` all yield no v
 (the API then answers `428 MASTER_PASSWORD_REQUIRED`). Remaining: the browser still keeps
 the token in `localStorage`, so an XSS that reads it, combined with knowledge of
 `ENCRYPTION_KEY`, would expose the master password; the CSP is the main defence there.
+
+R9 / #52 follow-up (password as image): "Show password as image",
+"Show password as image in public link", and a fixed password preset's
+`useImage` were saved but never applied. They now follow PHP `viewPass` and
+`viewLink`: viewing returns a PNG (`purpose=view`), and public links send no
+text password. Copying returns text, as PHP `copyPass` does, so this remains a
+display control. Tests cover the global setting, the `config.xml` fallback,
+fixed and non-fixed presets, and public links. Pillow 13.0.0 is a new locked
+runtime dependency. Checked against upstream: the password preset `score` is
+not enforced in PHP 3.2.11 either, so it stays stored-only.

@@ -170,8 +170,15 @@ Compatibility should be treated as successful only when:
   Lookup follows PHP's `getByFilter()` score. Fixed presets are enforced as in
   PHP: session lifetime per client network, account privacy, default shares,
   and password policy. Earlier pySysPass rows (JSON, other type names) are shown
-  as legacy and not applied until resaved. Password `score` (strength meter) and
-  `use_image` are stored but not enforced.
+  as legacy and not applied until resaved. `use_image` is enforced as in PHP
+  `getPasswordPreset()` (fixed presets only): viewing a password returns an
+  image. `score` is stored only; sysPass PHP 3.2.11 does not enforce it either
+  (it feeds the edit form, and `PasswordValidator` never reads it).
+- ✅ Password-as-image settings: `account_pass_to_image` (falling back to PHP
+  `config.xml` `accountPassToImage`) and `publinks_image_enabled` (falling back
+  to `publinksImageEnabled`) follow PHP `viewPass` / `viewLink`. Copy still
+  returns text, as in PHP. The PNG is rendered with Pillow's bundled font, not
+  PHP's NotoSans, so it is not pixel-identical; no data is persisted.
 - Confirm user-group membership behavior matches PHP tables exactly.
 - ✅ Maintenance mode is enforced: sign-in, API (including API tokens), public
   links, password reset, and registration return 503. Deliberate divergence:
