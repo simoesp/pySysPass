@@ -567,3 +567,29 @@ real plugin install would. It enrolls the PHP admin through pySysPass: PHP's sig
 redirected to the plugin's 2FA step, rejected a wrong code, and accepted a current TOTP
 and a pySysPass recovery code. The suite passed three consecutive runs locally and runs
 in CI.
+
+R5 / #56 and R9 / #52 follow-up (item presets): pySysPass stored presets in a format
+PHP ignores and never applied them, while its API documentation claimed admin-only
+writes and PHP resolution. The write routes accepted any signed-in user: the
+`require_admin` helper in `item_presets.py` was a no-op. Now:
+
+- Rows use PHP's types, PHP-serialized `SP\DataModel\ItemPreset\*` objects, and PHP's
+  hash. A PHP-authored fixture covering all four types round-trips byte for byte with
+  matching hashes. In CI, PHP's `ItemPresetData::hydrate()` and getters read
+  pySysPass-written presets.
+- Lookup matches PHP `getByFilter()`: user, primary or secondary group, or profile, with
+  the highest priority plus scope bonus winning. A scope is required.
+- Fixed presets are enforced like PHP. A `session.timeout` preset sets the session
+  lifetime when the client address is in its network. `account.private` sets the privacy
+  flags. `account.permission` adds default shares, excluding the editor and their group.
+  `account.password` rejects passwords that miss the policy (422) and sets the expiry when
+  `account_expire_enabled`.
+- Management requires `mgm_items_preset`. The context endpoint returns only the caller's
+  own preset.
+
+Legacy pySysPass rows are listed as legacy and never applied until resaved. Password
+`score` and `use_image` are kept for PHP but not enforced. Validation: 9 preset tests
+plus a PHP round trip; 407 backend tests passed; MySQL subset and both browser suites
+passed. This round also fixed a CI startup race: the stack scripts waited for MySQL over
+its socket, which its first-run init server accepts before restarting. They now wait
+over TCP and keep the backend container for logs.

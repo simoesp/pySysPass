@@ -162,8 +162,16 @@ Compatibility should be treated as successful only when:
   Tokens bind to an HMAC of `User.pass`, so a password changed by sysPass PHP
   also ends pySysPass sessions. Revocation state lives in `data/sessions.json`,
   not in PHP tables.
-- PHP's per-user `SessionTimeout` item presets (serialized objects with
-  address/mask) are not applied; only the global timeout is.
+- ✅ Item presets use PHP's format: types `account.permission`,
+  `account.private`, `account.password`, and `session.timeout`;
+  PHP-serialized `SP\DataModel\ItemPreset\*` data; and PHP's
+  `sha1(type . ids . priority)` hash. A PHP-authored fixture round-trips byte
+  for byte, and PHP's `ItemPresetData::hydrate()` reads pySysPass rows (CI).
+  Lookup follows PHP's `getByFilter()` score. Fixed presets are enforced as in
+  PHP: session lifetime per client network, account privacy, default shares,
+  and password policy. Earlier pySysPass rows (JSON, other type names) are shown
+  as legacy and not applied until resaved. Password `score` (strength meter) and
+  `use_image` are stored but not enforced.
 - Confirm user-group membership behavior matches PHP tables exactly.
 - ✅ Maintenance mode is enforced: sign-in, API (including API tokens), public
   links, password reset, and registration return 503. Deliberate divergence:

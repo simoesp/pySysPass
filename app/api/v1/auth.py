@@ -296,7 +296,7 @@ def login(
                 )
 
     access_token = issue_session_token(
-        user, master_pass=master_pass, timeout_seconds=resolve_session_timeout(db),
+        user, master_pass=master_pass, timeout_seconds=resolve_session_timeout(db, user.id, ip),
     )
     elog.log_event("auth.login.success", f"User '{user.username}' logged in from {ip}",
                    user_id=user.id, login=user.username, ip=ip, level="INFO")
@@ -345,7 +345,7 @@ def logout(current_user: dict = Depends(get_current_user)):
 
 
 @router.post("/refresh", response_model=Token)
-def refresh_session(current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+def refresh_session(request: Request, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
     """Extend an active session by one inactivity window.
 
     The SPA calls this only after user input, so an idle browser still times
@@ -359,7 +359,7 @@ def refresh_session(current_user: dict = Depends(get_current_user), db: Session 
     token = issue_session_token(
         user,
         master_pass=current_user.get("master_pass"),
-        timeout_seconds=resolve_session_timeout(db),
+        timeout_seconds=resolve_session_timeout(db, user.id, _client_ip(request)),
         auth_time=session["auth_time"],
     )
     session_store.revoke_token(session["jti"], session["exp"] or time.time() + MAX_SESSION_SECONDS)

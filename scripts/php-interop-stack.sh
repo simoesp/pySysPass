@@ -15,7 +15,9 @@ case "${1:-}" in
     # PHP 7.3 in the sysPass image predates caching_sha2_password.
     docker run -d --rm --name interop-db --network "$NET" -e MYSQL_ROOT_PASSWORD=root \
       "$MYSQL_IMAGE" --default-authentication-plugin=mysql_native_password >/dev/null
-    until docker exec interop-db mysql -uroot -proot -e "select 1" >/dev/null 2>&1; do sleep 2; done
+    # TCP, not the socket: MySQL's first-run init server accepts socket clients
+    # only, then restarts; waiting on the socket races that restart.
+    until docker exec interop-db mysql --protocol=tcp -h127.0.0.1 -uroot -proot -e "select 1" >/dev/null 2>&1; do sleep 2; done
     # Optional AUTHENTICATOR_DIR: a sysPass/plugin-Authenticator checkout to
     # test 2FA. Copied in before first start: the image's entrypoint chowns the
     # sysPass tree, so a read-only bind mount would make it exit.
@@ -67,7 +69,7 @@ PY
     echo "$result" | grep -q '"status":0' || { echo "PHP install failed: $result" >&2; exit 1; }
     salt=$(docker exec interop-php sh -c \
       'sed -n "s:.*<passwordSalt>\(.*\)</passwordSalt>.*:\1:p" /var/www/html/sysPass/app/config/config.xml')
-    docker run -d --rm --name interop-py --network "$NET" -p 127.0.0.1:18401:8000 \
+    docker run -d --name interop-py --network "$NET" -p 127.0.0.1:18401:8000 \
       -e DATABASE_URL=mysql+pymysql://root:root@interop-db:3306/syspass -e DEBUG=false \
       -e SECRET_KEY="$(openssl rand -hex 24)" -e ENCRYPTION_KEY="$(openssl rand -hex 24)" \
       -e SYSPASS_PASSWORD_SALT="$salt" -e AUTO_INIT_DB_ON_STARTUP=false -e TRUSTED_PROXY_HOSTS='[]' \
@@ -76,7 +78,7 @@ PY
       curl -sf http://127.0.0.1:18401/health/ready >/dev/null && { echo "PHP + pySysPass ready"; exit 0; }
       sleep 2
     done
-    docker logs interop-py | tail -20
+    docker logs interop-py 2>&1 | tail -40
     exit 1
     ;;
   down)

@@ -54,12 +54,24 @@ def new_session_id() -> str:
     return secrets.token_urlsafe(18)
 
 
-def resolve_session_timeout(db) -> int:
-    """Effective inactivity timeout in seconds, like PHP's getSessionTimeout()."""
+def resolve_session_timeout(db, user_id: Optional[int] = None, client_ip: Optional[str] = None) -> int:
+    """Effective inactivity timeout in seconds, like PHP Init::getSessionLifeTime().
+
+    A ``session.timeout`` item preset for the user wins when the client address
+    is inside its network; otherwise the global ``session_timeout`` applies.
+    """
     from app.services.config_service import ConfigService
 
+    value = None
+    if user_id is not None and client_ip:
+        from app.core.php_item_presets import address_matches
+        from app.services.item_preset_service import ItemPresetService
+
+        preset = ItemPresetService(db).get_for_user("session.timeout", user_id)
+        if preset and address_matches(client_ip, preset.data.get("address"), preset.data.get("mask")):
+            value = int(preset.data.get("timeout") or 0) or None
     try:
-        value = int(ConfigService(db).get("session_timeout") or DEFAULT_SESSION_TIMEOUT)
+        value = value or int(ConfigService(db).get("session_timeout") or DEFAULT_SESSION_TIMEOUT)
     except (TypeError, ValueError):
         value = DEFAULT_SESSION_TIMEOUT
     if value <= 0:

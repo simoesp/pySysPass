@@ -546,6 +546,7 @@ class AccountService:
         plaintext = maybe_decrypt(data.password)
         user = self.db.query(User).filter(User.id == user_id).first()
         user_group_id = user.userGroupId if user else 1
+        pass_date_change = self._check_password_preset(plaintext, user_id, data.pass_date_change)
         enc_pass_bytes, enc_key_bytes = self._encrypt_native(plaintext, master_pass)
 
         account = Account(
@@ -564,8 +565,9 @@ class AccountService:
             isPrivateGroup=data.is_private_group,
             otherUserEdit=data.other_user_edit,
             otherUserGroupEdit=data.other_user_group_edit,
-            passDateChange=data.pass_date_change,
+            passDateChange=pass_date_change,
         )
+        self._apply_private_preset(account, user_id)
         self.db.add(account)
         self.db.flush()
         if data.tag_ids:
@@ -574,6 +576,8 @@ class AccountService:
             self._sync_shared_users(account.id, data.shared_users)
         if data.shared_groups:
             self._sync_shared_groups(account.id, data.shared_groups)
+        self.db.flush()
+        self._apply_permission_preset(account, user_id)
         self.db.commit()
         self.db.refresh(account)
         result = self._to_response(account, user_id, {user_group_id})
@@ -631,7 +635,9 @@ class AccountService:
             elif not data.is_favorite and existing_favorite:
                 self.db.delete(existing_favorite)
         if data.password:
-            account.pass_, account.key = self._encrypt_native(maybe_decrypt(data.password), master_pass)
+            plaintext = maybe_decrypt(data.password)
+            account.passDateChange = self._check_password_preset(plaintext, user_id, account.passDateChange)
+            account.pass_, account.key = self._encrypt_native(plaintext, master_pass)
             account.passDate = int(datetime.now().timestamp())
         account.userEditId = user_id
         if data.tag_ids is not None:
@@ -640,6 +646,9 @@ class AccountService:
             self._sync_shared_users(account_id, data.shared_users)
         if data.shared_groups is not None:
             self._sync_shared_groups(account_id, data.shared_groups)
+        self._apply_private_preset(account, user_id)
+        self.db.flush()
+        self._apply_permission_preset(account, user_id)
 
         self.db.commit()
         self.db.refresh(account)
@@ -657,6 +666,67 @@ class AccountService:
         self.db.commit()
         self._emit_hook("on_account_deleted", payload=payload, actor_user_id=user_id)
         return True
+
+    # ── Item presets (PHP AccountService / AccountPresetService) ─────────────
+
+    def _fixed_preset(self, preset_type: str, user_id: int) -> Optional[dict]:
+        from app.services.item_preset_service import ItemPresetService
+
+        resolved = ItemPresetService(self.db).get_for_user(preset_type, user_id)
+        return resolved.data if resolved is not None and resolved.fixed else None
+
+    def _check_password_preset(self, plaintext: str, user_id: int,
+                               pass_date_change: Optional[int]) -> Optional[int]:
+        """checkPasswordPreset(): enforce the policy; return the expiry to store."""
+        policy = self._fixed_preset("account.password", user_id)
+        if policy is None:
+            return pass_date_change
+        from app.core.php_item_presets import EXPIRE_TIME_MULTIPLIER, password_errors
+
+        error = password_errors(policy, plaintext or "")
+        if error:
+            raise AccountValidationError(error)
+        expire = int(policy.get("expire_days") or 0) * EXPIRE_TIME_MULTIPLIER
+        if expire > 0 and ConfigService(self.db)._bool_val("account_expire_enabled"):
+            deadline = int(datetime.now().timestamp()) + expire
+            if not pass_date_change or pass_date_change < deadline:
+                return deadline
+        return pass_date_change
+
+    def _apply_private_preset(self, account: Account, user_id: int) -> None:
+        """setPresetPrivate(): a fixed preset decides the privacy flags."""
+        preset = self._fixed_preset("account.private", user_id)
+        if preset is None:
+            return
+        user = self._get_user(user_id)
+        if account.userId == user_id:
+            account.isPrivate = bool(preset.get("private_user"))
+        if user is not None and user.userGroupId == account.userGroupId:
+            account.isPrivateGroup = bool(preset.get("private_group"))
+
+    def _apply_permission_preset(self, account: Account, user_id: int) -> None:
+        """addPresetPermissions(): a fixed preset adds default shares."""
+        preset = self._fixed_preset("account.permission", user_id)
+        if preset is None:
+            return
+        user = self._get_user(user_id)
+        own_group = user.userGroupId if user else None
+        users = {uid: False for uid in preset.get("users_view") or [] if uid != user_id}
+        users.update({uid: True for uid in preset.get("users_edit") or [] if uid != user_id})
+        groups = {gid: False for gid in preset.get("user_groups_view") or [] if gid != own_group}
+        groups.update({gid: True for gid in preset.get("user_groups_edit") or [] if gid != own_group})
+        existing_users = {s.userId for s in self.db.query(AccountToUser).filter(AccountToUser.accountId == account.id)}
+        existing_groups = {s.userGroupId for s in self.db.query(AccountToUserGroup)
+                           .filter(AccountToUserGroup.accountId == account.id)}
+        known_users = {row[0] for row in self.db.query(User.id).filter(User.id.in_(users))} if users else set()
+        known_groups = ({row[0] for row in self.db.query(UserGroup.id).filter(UserGroup.id.in_(groups))}
+                        if groups else set())
+        for uid, edit in users.items():
+            if uid in known_users and uid not in existing_users:
+                self.db.add(AccountToUser(accountId=account.id, userId=uid, isEdit=edit))
+        for gid, edit in groups.items():
+            if gid in known_groups and gid not in existing_groups:
+                self.db.add(AccountToUserGroup(accountId=account.id, userGroupId=gid, isEdit=edit))
 
     @staticmethod
     def _encrypt_native(plaintext: Optional[str], master_pass: Optional[str]) -> tuple:

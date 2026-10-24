@@ -1027,15 +1027,29 @@ PHP behaviour.
 
 ## Item Presets API
 
-JWT required; mutations are admin-only. Presets provide per-user/group
-defaults (permissions, private flags, session timeouts) resolved by
-specificity, as in sysPass PHP.
+Managing presets requires the `mgm_items_preset` profile permission, or
+application admin, as with PHP's item-preset ACL. Rows use sysPass PHP's format,
+so presets created in either application apply in both.
+
+| Type | Data (JSON in the API) | Applied when `fixed` |
+| --- | --- | --- |
+| `account.permission` | `users_view`, `users_edit`, `user_groups_view`, `user_groups_edit` (ID lists) | shares added on account create/update (not the editor or their group) |
+| `account.private` | `private_user`, `private_group` | privacy flags set on create/update |
+| `account.password` | `length`, `use_letters`, `use_lower`, `use_upper`, `use_numbers`, `use_symbols`, `regex`, `expire_days`, `score`, `use_image` | password rejected (422) unless it meets the policy; expiry set when `account_expire_enabled` |
+| `session.timeout` | `ip_address` (`a.b.c.d`, `/cidr` or `/mask`), `timeout` (seconds) | always: session lifetime for clients inside the network |
+
+A preset needs a user, group, or profile scope; there are no global presets.
+The preset with the highest `priority` plus scope bonus wins (user 3, group 2
+including secondary memberships, profile 1), as in PHP `getByFilter()`. Rows
+saved by earlier pySysPass releases are listed with `legacy: true` and are not
+applied until saved again with valid data. `score` and `use_image` are stored
+for PHP but not enforced by pySysPass.
 
 - `GET /api/v1/item-presets` — optional `?preset_type=` filter
 - `GET /api/v1/item-presets/types`
 - `GET /api/v1/item-presets/{preset_id}`
-- `GET /api/v1/item-presets/context/{preset_type}` — the preset that
-  applies to the calling user (most specific match wins)
+- `GET /api/v1/item-presets/context/{preset_type}` — any signed-in user: the
+  preset that applies to the caller
 - `POST /api/v1/item-presets`
 - `PUT /api/v1/item-presets/{preset_id}`
 - `DELETE /api/v1/item-presets/{preset_id}`

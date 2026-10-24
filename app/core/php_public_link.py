@@ -10,7 +10,11 @@ from app.core.defuse_compat import decrypt_with_password
 VAULT_CLASS = b'SP\\Core\\Crypt\\Vault'
 ACCOUNT_CLASS = b'SP\\DataModel\\AccountExtData'
 AUTHENTICATOR_CLASS = b'SP\\Modules\\Web\\Plugins\\Authenticator\\Models\\AuthenticatorData'
-ALLOWED_CLASSES = (VAULT_CLASS, ACCOUNT_CLASS, AUTHENTICATOR_CLASS)
+PRESET_CLASSES = tuple(
+    b'SP\\DataModel\\ItemPreset\\' + name
+    for name in (b'AccountPermission', b'AccountPrivate', b'SessionTimeout', b'Password')
+)
+ALLOWED_CLASSES = (VAULT_CLASS, ACCOUNT_CLASS, AUTHENTICATOR_CLASS) + PRESET_CLASSES
 MAX_SERIALIZED_BYTES = 4 * 1024 * 1024
 
 

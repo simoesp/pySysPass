@@ -33,6 +33,11 @@ Evidence for each item: `docs/project/production-readiness-review-2026-10-23.md`
 - Production startup fails without explicit, non-sample `SECRET_KEY` and
   `ENCRYPTION_KEY`; `DEBUG` defaults to false.
 - `GET /api/v1/tags/{id}` now requires authentication.
+- Item presets use sysPass PHP types (`account.permission`, `account.private`,
+  `account.password`, `session.timeout`) and are now enforced. Managing them
+  requires the `mgm_items_preset` permission, and every preset needs a user,
+  group or profile scope. Presets saved by earlier releases are shown as legacy
+  and ignored until saved again.
 
 ### Added
 - `/health/ready` readiness checks (configuration, database, schema, storage).

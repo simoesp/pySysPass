@@ -202,3 +202,32 @@ def test_php_reads_values_migrated_from_legacy_formats(db_session, test_user):
     assert result["accounts"] == ["was-legacy"]
     assert result["authenticator"][0]["IV"] == "JBSWY3DPEHPK3PXP"
     assert result["authenticator"][0]["recoveryCodes"] == ["0123456789abcdef0123"]
+
+
+def test_php_hydrates_item_presets_written_by_python(db_session, test_user):
+    """Item presets: PHP ItemPresetData::hydrate() and getHash() accept pySysPass rows."""
+    from app.models.account import ItemPreset
+    from app.services.item_preset_service import ItemPresetService
+
+    service = ItemPresetService(db_session)
+    service.create("account.permission", user_id=test_user.id, priority=4, fixed=True,
+                   data={"users_view": [2], "users_edit": [3], "user_groups_view": [1], "user_groups_edit": []})
+    service.create("account.private", user_group_id=1, data={"private_user": True, "private_group": True})
+    service.create("session.timeout", user_profile_id=1, priority=2, data={"ip_address": "10.1.0.0/16", "timeout": 600})
+    service.create("account.password", user_id=test_user.id, data={
+        "length": 12, "use_numbers": True, "use_letters": True, "use_symbols": False, "use_upper": True,
+        "use_lower": True, "use_image": False, "expire_days": 7, "score": 1, "regex": "[0-9]",
+    })
+    rows = db_session.query(ItemPreset).order_by(ItemPreset.id).all()
+    result = _php({"item_presets": [{
+        "type": r.type, "userId": r.userId, "userGroupId": r.userGroupId, "userProfileId": r.userProfileId,
+        "priority": r.priority, "data_base64": base64.b64encode(r.data).decode(),
+    } for r in rows]})
+
+    assert [p["hash"] for p in result["item_presets"]] == [r.hash.decode() for r in rows]
+    permission, private, timeout, password = (p["values"] for p in result["item_presets"])
+    assert (permission["getUsersView"], permission["getUsersEdit"], permission["getUserGroupsView"]) == ([2], [3], [1])
+    assert private == {"isPrivateUser": True, "isPrivateGroup": True}
+    assert (timeout["getAddress"], timeout["getMask"], timeout["getTimeout"]) == ("10.1.0.0", "255.255.0.0", 600)
+    assert (password["getLength"], password["getExpireTime"], password["getRegex"]) == (12, 7 * 86400, "[0-9]")
+    assert password["isUseNumbers"] is True and password["isUseSymbols"] is False

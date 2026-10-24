@@ -80,4 +80,31 @@ foreach ($input['authenticator'] ?? [] as $row) {
     ];
 }
 
+// ItemPreset rows: ItemPresetData::hydrate() and getHash(), as PHP's services use them.
+$presetClasses = [
+    'account.permission' => SP\DataModel\ItemPreset\AccountPermission::class,
+    'account.private' => SP\DataModel\ItemPreset\AccountPrivate::class,
+    'session.timeout' => SP\DataModel\ItemPreset\SessionTimeout::class,
+    'account.password' => SP\DataModel\ItemPreset\Password::class,
+];
+foreach ($input['item_presets'] ?? [] as $row) {
+    $preset = new SP\DataModel\ItemPresetData();
+    $preset->setType($row['type']);
+    foreach (['userId' => 'setUserId', 'userGroupId' => 'setUserGroupId', 'userProfileId' => 'setUserProfileId'] as $key => $setter) {
+        if ($row[$key] !== null) {
+            $preset->$setter($row[$key]);
+        }
+    }
+    $preset->setPriority($row['priority']);
+    $preset->setData(base64_decode($row['data_base64'], true));
+    $object = $preset->hydrate($presetClasses[$row['type']]);
+    $getters = [];
+    foreach (get_class_methods($object) as $method) {
+        if (preg_match('/^(get|is)[A-Z]/', $method) && (new ReflectionMethod($object, $method))->getNumberOfParameters() === 0) {
+            $getters[$method] = $object->$method();
+        }
+    }
+    $output['item_presets'][] = ['hash' => $preset->getHash(), 'values' => $getters];
+}
+
 echo json_encode($output, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . "\n";
