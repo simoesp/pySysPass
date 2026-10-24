@@ -43,12 +43,12 @@ services:
     container_name: pysyspass-external-frontend
     restart: unless-stopped
     ports:
-      - "${PYSYSPASS_FRONTEND_PORT:-8081}:80"
+      - "${PYSYSPASS_FRONTEND_PORT:-8081}:8080"
     depends_on:
       backend:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost/health"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
       interval: 10s
       timeout: 5s
       retries: 10

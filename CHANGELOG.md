@@ -10,6 +10,8 @@ changes alter behaviour for existing deployments, listed under **Upgrade notes**
 Evidence for each item: `docs/project/production-readiness-review-2026-10-23.md`.
 
 ### Upgrade notes
+- The frontend image runs nginx unprivileged (uid 101) on container port
+  8080 instead of 80; update custom port mappings and health checks.
 - The backend image runs as UID 10001. Volumes written by earlier (root) images
   need a one-time `chown -R 10001:10001` (see `docs/installation.md`); until
   then `/health/ready` reports `data directory not writable`.

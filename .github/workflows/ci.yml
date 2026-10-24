@@ -60,7 +60,7 @@ jobs:
         run: docker build --tag syspass-frontend:ci frontend
       - name: Verify effective SPA security headers
         run: |
-          docker run -d --name syspass-header-test --add-host backend:127.0.0.1 -p 127.0.0.1:18080:80 syspass-frontend:ci
+          docker run -d --name syspass-header-test --add-host backend:127.0.0.1 -p 127.0.0.1:18080:8080 syspass-frontend:ci
           python scripts/check-security-headers.py http://127.0.0.1:18080
       - name: Remove header test container
         if: always()

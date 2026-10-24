@@ -23,7 +23,7 @@ case "${1:-}" in
       -e SECRET_KEY="$(openssl rand -hex 24)" -e ENCRYPTION_KEY="$(openssl rand -hex 24)" \
       -e SYSPASS_PASSWORD_SALT="$(openssl rand -hex 30)" -e TRUSTED_PROXY_HOSTS='["172.31.91.10"]' \
       -e AUTO_INIT_DB_ON_STARTUP=true "$BACKEND_IMAGE" >/dev/null
-    docker run -d --rm --name e2e-frontend --network "$NET" --ip 172.31.91.10 -p "127.0.0.1:${PORT}:80" \
+    docker run -d --rm --name e2e-frontend --network "$NET" --ip 172.31.91.10 -p "127.0.0.1:${PORT}:8080" \
       "$FRONTEND_IMAGE" >/dev/null
     for _ in $(seq 1 90); do
       curl -sf "http://127.0.0.1:${PORT}/health/ready" >/dev/null && { echo "stack ready on :${PORT}"; exit 0; }

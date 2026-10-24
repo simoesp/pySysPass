@@ -603,3 +603,11 @@ test covers both sources and the empty-list refusal. An earlier draft of this ch
 the new function under the `lru_cache` decorator of `load_syspass_runtime_config`, which
 cached the list and dropped the config cache; the test exposed it and it was fixed
 before commit.
+
+R14 / #63 follow-up (frontend): the frontend image now builds on the official
+`nginxinc/nginx-unprivileged:1.27-alpine`, pinned by digest, the same nginx 1.27 line.
+Master and workers run as uid 101 and listen on 8080. The three stacks, the CI header
+check, and the e2e stack map their ports to 8080. Verified: every nginx process in the
+built image ran as `nginx`, the SPA header check passed, the browser suite passed (3
+tests), and all Compose files parsed. Existing custom deployments that map to container
+port 80 must change to 8080.

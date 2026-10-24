@@ -163,8 +163,9 @@ python scripts/check-requirements-lock.py
 CI fails when the lock no longer satisfies `requirements.txt`, tests run
 against the locked set, and pip-audit checks it. Dependabot updates the
 ranges and image digests but does not regenerate the lock; refresh it in the
-same pull request. The frontend's nginx master process still starts as root
-(workers run as `nginx`), and `Dockerfile.security` is an unmaintained
+same pull request. The frontend image is the official unprivileged nginx
+(uid 101) and listens on 8080 inside the container; the supplied stacks map
+their published ports to it. `Dockerfile.security` is an unmaintained
 scanning image, not a deployment artifact.
 
 ## First-run setup
