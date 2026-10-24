@@ -5,6 +5,7 @@ export default defineConfig({
   testDir: './tests',
   globalSetup: './global-setup.js',
   fullyParallel: false,
+  workers: 1,  // every test signs in as the same admin; 2FA changes rotate its sessions
   retries: 0,
   reporter: [['list']],
   use: {

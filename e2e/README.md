@@ -3,7 +3,12 @@
 Playwright tests that drive the real UI through nginx against a disposable
 stack: sign-in, account creation, password reveal through the clipboard,
 sign-out with server-side token revocation, failed sign-in, protected-route
-redirects, and response security headers.
+redirects, and response security headers. `settings-and-2fa.spec.js` turns on
+"Show password as image" in Settings and checks that the account page shows an
+image while copy still yields the text, then switches 2FA on in Settings,
+enrolls through the profile page with a computed TOTP, and signs in with a
+wrong and then a valid code. Each test restores the settings it changed. Tests
+run in one worker because they share the admin user.
 
 ```bash
 docker build -t pysyspass-backend:e2e . && docker build -t pysyspass-frontend:e2e frontend

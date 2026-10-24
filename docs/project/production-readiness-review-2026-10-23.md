@@ -654,3 +654,17 @@ Remaining difference: with no MIME list configured anywhere, pySysPass applies
 no MIME rule, while PHP's default empty list refuses every upload; changing that
 would block uploads on existing pySysPass deployments, so it is left as a
 documented divergence.
+
+#65 follow-up (browser coverage): `e2e/tests/settings-and-2fa.spec.js` adds two
+browser tests through nginx on a disposable stack. One saves "Show password as
+image" in Settings and checks the account page shows a PNG (copy still yields
+text). The other saves 2FA mode in Settings, enrolls in the profile dialog with a
+computed TOTP, and signs in with a wrong and then a valid code. All five browser
+tests passed twice in a row locally; the suite now runs in one worker because
+parallel files raced on the shared admin's sessions. Still uncovered in the
+browser: user, group and profile administration, import/export, backups.
+
+Observation (not changed): neither pySysPass nor the sysPass Authenticator
+plugin blocks reuse of a TOTP code inside its validity window (pySysPass accepts
+±1 step, PHP `Google2FA::verify_key()` ±4). Blocking replay needs a persisted
+last-used step, which the PHP plugin data does not store.
