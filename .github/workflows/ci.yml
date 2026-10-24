@@ -86,6 +86,8 @@ jobs:
       # Fail on known-vulnerable frontend dependencies.
       - run: npm audit --audit-level=high
         working-directory: frontend
+      - run: npm audit --audit-level=high
+        working-directory: e2e
       # Secrets scan across the full history (fetch-depth: 0 above), using
       # the repo's .gitleaks.toml allowlist for known sample/test data.
       - run: >-
@@ -123,6 +125,39 @@ jobs:
           PYSYSPASS_SUITE_MYSQL_URL: "mysql+pymysql://root:root@127.0.0.1:3306/"
           PYSYSPASS_MYSQL_TEST_URL: "mysql+pymysql://root:root@127.0.0.1:3306/"
         run: python -m pytest tests/ -q -rs
+
+  e2e-browser:
+    name: Browser acceptance tests (Playwright)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+      - name: Build images
+        run: |
+          docker build -t pysyspass-backend:e2e .
+          docker build -t pysyspass-frontend:e2e frontend
+      - name: Start disposable stack
+        run: scripts/e2e-stack.sh up
+      - run: npm ci
+        working-directory: e2e
+      - run: npx playwright install --with-deps chromium
+        working-directory: e2e
+      - run: npx playwright test
+        working-directory: e2e
+      - name: Upload traces
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-traces
+          path: e2e/test-results/
+          retention-days: 7
+      - name: Stop stack
+        if: always()
+        run: scripts/e2e-stack.sh down
 
   compat-php-reverse:
     name: PHP reads Python writes (sysPass 9d0e169)

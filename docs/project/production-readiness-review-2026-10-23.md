@@ -537,3 +537,14 @@ p50 148 ms. At 30 users with a mid-run backup, one worker held 46.5 req/s with p
 1 s; four workers (`WEB_CONCURRENCY`) reached 133.6 req/s with p95 300–520 ms. All runs
 had zero errors, and the backup took about 2.6 s during load. Limits: one host, datasets
 under 1,000 accounts, no remote-database latency, no slow SMTP/LDAP, no soak test.
+
+R16 / #65 fifth follow-up (browser acceptance): `e2e/` holds a Playwright suite (pinned
+`@playwright/test` 1.64.0, own lockfile, audited in CI) that drives the built frontend
+through nginx against MySQL 8 and the production backend image (`scripts/e2e-stack.sh`).
+It covers sign-in, creating an account through the dialog (category and client
+selection), revealing the password through the clipboard, and signing out. After sign-out
+the copied bearer token is rejected by the API (401). It also checks failed sign-in,
+redirects from protected routes, and the CSP/frame headers on SPA routes. All 3 tests
+passed locally in Chromium (8 s); the new CI job runs them and keeps traces on failure.
+Remaining: 2FA enrollment, settings, imports, and the admin pages have no browser
+coverage, and only Chromium is tested.

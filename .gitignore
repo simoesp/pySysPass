@@ -128,3 +128,8 @@ node_modules/
 logs/
 .DS_Store
 Thumbs.db
+
+# Playwright browser tests
+e2e/node_modules/
+e2e/test-results/
+e2e/playwright-report/
