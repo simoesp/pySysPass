@@ -64,6 +64,7 @@ SECTION_KEYS: dict[str, tuple[str, str]] = {
     "files_enabled": ("accounts", "files_enabled"),
     "files_allowed_size": ("accounts", "files_allowed_size"),
     "files_allowed_exts": ("accounts", "files_allowed_exts"),
+    "files_allowed_mime": ("accounts", "files_allowed_mime"),
     "publinks_enabled": ("accounts", "publinks_enabled"),
     "publinks_image_enabled": ("accounts", "publinks_image_enabled"),
     "publinks_max_time": ("accounts", "publinks_max_time"),

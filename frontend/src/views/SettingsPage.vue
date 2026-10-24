@@ -371,6 +371,8 @@
               hint="Checked against the decoded upload; 1 KB = 1000 bytes, as in sysPass PHP" />
             <q-input v-model="accounts.files_allowed_exts" label="Allowed extensions (comma-separated)" outlined dense
               hint="Leave empty to allow all. e.g. pdf,docx,png" />
+            <q-input v-model="accounts.files_allowed_mime" label="Allowed MIME types (comma-separated)" outlined dense
+              hint="sysPass PHP rule, e.g. application/pdf,image/png. Empty: use the PHP config.xml list if present" />
           </template>
 
           <q-separator />

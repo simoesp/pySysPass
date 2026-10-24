@@ -65,6 +65,13 @@ def upload_file(
         raise HTTPException(status_code=422, detail="File extension too long")
     if policy.files_allowed_exts and extension not in policy.files_allowed_exts:
         raise HTTPException(status_code=415, detail="File type not allowed")
+    # PHP AccountFileController: the declared MIME type must be allowed, and an
+    # empty list allows nothing. (PHP also retries with finfo detection.)
+    if policy.files_allowed_mime is not None:
+        if not policy.files_allowed_mime:
+            raise HTTPException(status_code=415, detail="There aren't any allowed MIME types")
+        if file_data.type.split(";")[0].strip().lower() not in policy.files_allowed_mime:
+            raise HTTPException(status_code=415, detail="File type not allowed")
 
     service = FileService(db)
 

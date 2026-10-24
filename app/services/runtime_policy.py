@@ -27,6 +27,8 @@ class RuntimePolicy:
     files_enabled: bool = True
     files_allowed_size_kb: int = DEFAULT_FILE_SIZE_KB
     files_allowed_exts: FrozenSet[str] = field(default_factory=frozenset)
+    # None: no MIME rule configured. Empty: PHP refuses every upload.
+    files_allowed_mime: Optional[FrozenSet[str]] = None
 
     @property
     def max_file_bytes(self) -> int:
@@ -47,6 +49,17 @@ def _parse_extensions(raw: Optional[str]) -> FrozenSet[str]:
     )
 
 
+def _allowed_mime(raw: Optional[str]) -> Optional[FrozenSet[str]]:
+    # An empty pySysPass value means "not set"; only PHP's config.xml can say
+    # "no MIME type is allowed".
+    if raw is not None and raw.strip():
+        return frozenset(part.strip().lower() for part in raw.split(",") if part.strip())
+    from app.core.syspass_runtime_config import load_syspass_xml_list
+
+    items = load_syspass_xml_list("filesAllowedMime")
+    return None if items is None else frozenset(item.lower() for item in items)
+
+
 def _load(db) -> RuntimePolicy:
     from app.services.config_service import ConfigService
 
@@ -58,6 +71,7 @@ def _load(db) -> RuntimePolicy:
         files_enabled=config._bool_val("files_enabled", True),
         files_allowed_size_kb=max(1, min(int(size), MAX_FILE_SIZE_KB)),
         files_allowed_exts=_parse_extensions(config.get("files_allowed_exts")),
+        files_allowed_mime=_allowed_mime(config.get("files_allowed_mime")),
     )
 
 

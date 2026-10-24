@@ -593,3 +593,13 @@ plus a PHP round trip; 407 backend tests passed; MySQL subset and both browser s
 passed. This round also fixed a CI startup race: the stack scripts waited for MySQL over
 its socket, which its first-run init server accepts before restarting. They now wait
 over TCP and keep the backend container for logs.
+
+R9 / #52 follow-up (attachment MIME types): uploads now apply PHP's MIME rule. The
+declared type must be in pySysPass's `files_allowed_mime` or, when that is unset, in PHP
+`config.xml` `filesAllowedMime` (read from its `<item>` list); an empty PHP list refuses
+everything, as in PHP. Standalone installs with neither keep the extension rule. PHP's
+libmagic fallback is not reproduced, so pySysPass only accepts listed declared types. A
+test covers both sources and the empty-list refusal. An earlier draft of this change put
+the new function under the `lru_cache` decorator of `load_syspass_runtime_config`, which
+cached the list and dropped the config cache; the test exposed it and it was fixed
+before commit.

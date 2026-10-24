@@ -258,3 +258,33 @@ def test_force_https_runs_after_trusted_proxy_normalization(monkeypatch):
     trusted = TestClient(replica, client=("127.0.0.1", 1234), follow_redirects=False)
     assert trusted.get("/probe", headers={"X-Forwarded-Proto": "https"}).status_code == 200
     assert trusted.get("/probe").status_code == 308
+
+
+def test_upload_enforces_php_mime_list(db_session, encryption_service, test_user, tmp_path, monkeypatch):
+    _grant_all(db_session, test_user)
+    account = _account(db_session, encryption_service, test_user)
+    client = _client(db_session)
+
+    def upload(mime):
+        body = {"name": "a.bin", "type": mime, "content": base64.b64encode(b"x").decode()}
+        return client.post(f"/api/v1/accounts/{account.id}/files", json=body, headers=_bearer(test_user))
+
+    assert upload("application/x-anything").status_code == 201  # no MIME rule anywhere
+
+    _set(db_session, files_allowed_mime="application/pdf, image/png")
+    assert upload("image/png").status_code == 201
+    assert upload("Image/PNG; charset=binary").status_code == 201
+    assert upload("text/html").status_code == 415
+
+    # Without a pySysPass value, PHP's config.xml list applies; empty means none.
+    _set(db_session, files_allowed_mime="")
+    config_xml = tmp_path / "config.xml"
+    config_xml.write_text("<config><filesAllowedMime><item type=\"filesAllowedMime\">text/plain</item>"
+                          "</filesAllowedMime></config>")
+    monkeypatch.setattr("app.core.syspass_runtime_config.settings.SYSPASS_CONFIG_XML_PATH", str(config_xml))
+    invalidate_policy_cache()
+    assert upload("text/plain").status_code == 201
+    assert upload("image/png").status_code == 415
+    config_xml.write_text("<config><filesAllowedMime></filesAllowedMime></config>")
+    invalidate_policy_cache()
+    assert upload("text/plain").json()["detail"] == "There aren't any allowed MIME types"
