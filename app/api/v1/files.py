@@ -7,6 +7,7 @@ from app.schemas.file import FileCreate, FileResponse, FileUploadResponse
 from app.services.file_service import FileService
 from app.api.deps import require_any_permission
 from app.core.security import get_encryption_service
+from app.core.mime_detect import detect_mime
 from app.services.account_service import AccountService
 from app.services.history_service import HistoryService
 from app.services.runtime_policy import get_policy
@@ -65,13 +66,18 @@ def upload_file(
         raise HTTPException(status_code=422, detail="File extension too long")
     if policy.files_allowed_exts and extension not in policy.files_allowed_exts:
         raise HTTPException(status_code=415, detail="File type not allowed")
-    # PHP AccountFileController: the declared MIME type must be allowed, and an
-    # empty list allows nothing. (PHP also retries with finfo detection.)
+    # PHP AccountFileController::checkAllowedMimeType(): the declared type, or
+    # else the type detected from the content (stored instead); an empty list
+    # allows nothing.
+    file_type = file_data.type
     if policy.files_allowed_mime is not None:
         if not policy.files_allowed_mime:
             raise HTTPException(status_code=415, detail="There aren't any allowed MIME types")
-        if file_data.type.split(";")[0].strip().lower() not in policy.files_allowed_mime:
-            raise HTTPException(status_code=415, detail="File type not allowed")
+        if file_type.split(";")[0].strip().lower() not in policy.files_allowed_mime:
+            detected = detect_mime(content)
+            if detected not in policy.files_allowed_mime:
+                raise HTTPException(status_code=415, detail="File type not allowed")
+            file_type = detected
 
     service = FileService(db)
 
@@ -79,7 +85,7 @@ def upload_file(
     file = service.create_file(
         account_id=account_id,
         name=file_data.name,
-        file_type=file_data.type,
+        file_type=file_type,
         size=len(content),
         content=content,
         extension=extension

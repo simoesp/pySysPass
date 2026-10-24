@@ -61,6 +61,9 @@ Evidence for each item: `docs/project/production-readiness-review-2026-10-23.md`
 - Credentials are always written as native sysPass Defuse ciphertext; public
   links as native PHP Vaults; 2FA enrollments as PHP Authenticator plugin data.
 - Force HTTPS, maintenance mode and attachment limits are enforced server-side.
+  When the declared MIME type is not allowed, the type detected from the
+  content (libmagic, as PHP fileinfo) is tried and stored, as in PHP. The
+  backend image now installs `libmagic1`.
 - Logout, password changes (from either application) and 2FA changes revoke sessions.
 - Backups fail closed; runtime JSON config writes are locked and atomic.
 - Container builds use an allowlist, a hash-pinned `requirements.lock` and

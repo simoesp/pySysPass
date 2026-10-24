@@ -10,10 +10,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# mysqldump/mysql are required for fail-closed backups and offline restore.
+# mysqldump/mysql are required for fail-closed backups and offline restore;
+# libmagic1 provides PHP fileinfo's MIME detection for attachments.
 # Every Python dependency ships wheels, so no compiler or headers are needed.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends default-mysql-client \
+    && apt-get install -y --no-install-recommends default-mysql-client libmagic1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Fixed unprivileged identity; mounted volumes must be owned by it

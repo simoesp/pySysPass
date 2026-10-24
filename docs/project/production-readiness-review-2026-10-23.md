@@ -641,3 +641,16 @@ full-history gitleaks scan passed. Still open: PHP's finfo MIME detection is
 not reproduced (the declared type is checked), there is no soak or
 large-dataset test, and pySysPass UI browser tests do not cover 2FA, settings
 or most admin pages.
+
+R9 / #52 follow-up (attachment MIME detection): PHP
+`AccountFileController::checkAllowedMimeType()` accepts an upload whose
+declared type is not allowed if `mime_content_type()` detects an allowed type,
+and stores the detected type. pySysPass now does the same, using the system
+libmagic through ctypes (`app/core/mime_detect.py`; `libmagic1` added to the
+backend image and verified inside the built image as UID 10001). Without
+libmagic it falls back to the declared type only and logs a warning. A test
+covers detection, refusal, an allowed declared type, and the no-libmagic path.
+Remaining difference: with no MIME list configured anywhere, pySysPass applies
+no MIME rule, while PHP's default empty list refuses every upload; changing that
+would block uploads on existing pySysPass deployments, so it is left as a
+documented divergence.

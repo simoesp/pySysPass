@@ -358,3 +358,29 @@ def test_public_link_serves_only_an_image_when_enabled(db_session, encryption_se
     shown = client.get(url).json()
     assert shown["password"] is None and shown["use_image"] and _is_png_of(shown["password_image"])
     clear_runtime_config_cache()
+
+
+def test_upload_falls_back_to_detected_mime_like_php(db_session, encryption_service, test_user, monkeypatch):
+    from app.core import mime_detect
+    from app.models.account import AccountFile
+
+    if not mime_detect.available():
+        pytest.skip("libmagic is not installed")
+    _grant_all(db_session, test_user)
+    account = _account(db_session, encryption_service, test_user)
+    client = _client(db_session)
+    pdf = b"%PDF-1.4\n%synthetic\n"
+
+    def upload(mime, content):
+        body = {"name": "doc.pdf", "type": mime, "content": base64.b64encode(content).decode()}
+        return client.post(f"/api/v1/accounts/{account.id}/files", json=body, headers=_bearer(test_user))
+
+    _set(db_session, files_allowed_mime="application/pdf")
+    accepted = upload("application/x-unknown", pdf)  # declared type not allowed; content is
+    assert accepted.status_code == 201
+    assert db_session.get(AccountFile, accepted.json()["id"]).type == "application/pdf"  # PHP stores the detected type
+    assert upload("application/x-unknown", b"plain text\n").status_code == 415
+    assert upload("application/pdf", b"plain text\n").status_code == 201  # an allowed declared type wins, as in PHP
+
+    monkeypatch.setattr("app.api.v1.files.detect_mime", lambda content: None)  # no libmagic
+    assert upload("application/x-unknown", pdf).status_code == 415

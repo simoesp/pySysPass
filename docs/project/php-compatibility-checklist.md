@@ -189,12 +189,16 @@ Compatibility should be treated as successful only when:
 - ✅ Attachments follow PHP: `files_enabled` gates upload and listing, the
   decoded size is compared with `files_allowed_size` × 1000 bytes (maximum
   16384 KB), and the stored extension is the upper-cased file-name suffix.
-  The declared MIME type must be in the allowed list, as in PHP: pySysPass's
-  `files_allowed_mime`, otherwise PHP `config.xml` `filesAllowedMime`, where an
-  empty PHP list refuses every upload. With neither configured, only the
-  pySysPass `files_allowed_exts` rule applies. Divergence: PHP also retries
-  with libmagic detection (finfo); pySysPass checks the declared type only,
-  which is stricter.
+  The MIME rule follows PHP `checkAllowedMimeType()`: the declared type is
+  accepted if allowed, otherwise the type libmagic detects from the content
+  (PHP `mime_content_type()`), which is then stored instead. The allowed list
+  is pySysPass's `files_allowed_mime`, otherwise PHP `config.xml`
+  `filesAllowedMime`, where an empty PHP list refuses every upload. The image
+  installs `libmagic1`; without libmagic only the declared type is checked.
+  Detection results can differ from PHP's where the magic databases differ
+  (PHP's fileinfo bundles its own). Divergence: with no list configured in
+  either place, pySysPass applies no MIME rule (only `files_allowed_exts`),
+  whereas PHP's default empty list refuses every upload.
 - Compare admin, account-admin, disabled-user, and forced-password-change behavior with upstream sysPass flows.
 
 ### 4. Account And Sharing Behavior
