@@ -22,7 +22,8 @@ the official sysPass 3.2.11 image is installed with its own installer, and
 pySysPass joins the PHP-created database with the same password salt. The test
 signs in to pySysPass as the PHP-created admin (unlocking a PHP-authored vault),
 writes an account and a public link through the pySysPass API, then opens the
-link and the account's "view password" dialog in the PHP web UI.
+link and the account's "view password" dialog in the PHP web UI. A second test
+imports a password-protected pySysPass XML export through PHP's Import screen.
 
 ```bash
 docker build -t pysyspass-backend:e2e .

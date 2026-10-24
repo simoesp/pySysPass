@@ -51,3 +51,56 @@ test('PHP shows passwords and public links written by pySysPass', async ({ page,
   expect((await dialog.json()).status).toBe(0)
   await expect.poll(async () => (await page.content()).includes(SECRET)).toBe(true)
 })
+
+test('PHP imports a password-protected XML export written by pySysPass', async ({ page, request }) => {
+  const login = await request.post(`${PY}/auth/login`, {
+    form: { username: 'phpadmin', password: 'PhpAdmin-Pass-2026' },
+  })
+  const headers = { Authorization: `Bearer ${(await login.json()).access_token}` }
+  const stamp = Date.now()
+  const client = await (await request.post(`${PY}/clients`, { headers, data: { name: `Export Client ${stamp}` } })).json()
+  const category = await (await request.post(`${PY}/categories`, { headers, data: { name: `Export Category ${stamp}` } })).json()
+  const title = `Exported by pySysPass ${stamp}`
+  const secret = `Export-秘密-${stamp}`
+  const account = await (await request.post(`${PY}/accounts`, {
+    headers,
+    data: { title, login: 'export-user', password: secret, client_id: client.id, category_id: category.id, is_public: true },
+  })).json()
+
+  const exported = await request.post(`${PY}/import-export/export/xml/protected`, {
+    headers,
+    form: { export_password: 'Export-File-Pass-2026', master_password: 'Php-Master-Pass-2026', account_ids: String(account.id) },
+  })
+  expect(exported.status()).toBe(200)
+  const xml = (await exported.json()).content
+  // Only the export holds the account now.
+  expect((await request.delete(`${PY}/accounts/${account.id}`, { headers })).status()).toBe(204)
+
+  await page.goto(`${PHP}/index.php`)
+  await page.fill('#user', 'phpadmin')
+  await page.fill('#pass', 'PhpAdmin-Pass-2026')
+  await page.click('#btnLogin')
+  await page.waitForURL(/r=index/)
+  // The config view loads through sysPass's menu, which also wires the uploader.
+  await page.locator('[data-route="configManager/index"]').first().click()
+  await expect(page.locator('#importPwd')).toBeAttached()
+  // Open whichever tab holds the import form.
+  const tab = await page.locator('#importPwd').evaluate(input => input.closest('[id^="tabs-"]').id)
+  await page.locator(`a[href="#${tab}"]`).click()
+  await page.fill('#importPwd', 'Export-File-Pass-2026')
+  await page.fill('#importMasterPwd', 'Php-Master-Pass-2026')
+  const imported = page.waitForResponse(response => response.url().includes('configImport/import'))
+  await page.setInputFiles('#inFile', { name: 'pysyspass-export.xml', mimeType: 'text/xml', buffer: Buffer.from(xml) })
+  const importResult = await (await imported).json()
+  expect(importResult.status, JSON.stringify(importResult)).toBe(0)
+
+  // The imported account is a PHP row now; PHP's own dialog decrypts it.
+  await page.goto(`${PHP}/index.php?r=index`)
+  const search = await request.get(`${PY}/accounts/search`, { headers, params: { q: title } })
+  const [copy] = await search.json()
+  expect(copy && copy.title).toBe(title)
+  const viewPass = page.waitForResponse(response => response.url().includes('viewPass'))
+  await page.locator(`[data-action-route="account/viewPass"][data-item-id="${copy.id}"]`).first().click()
+  expect((await (await viewPass).json()).status).toBe(0)
+  await expect.poll(async () => (await page.content()).includes(secret)).toBe(true)
+})

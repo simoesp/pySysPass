@@ -226,8 +226,10 @@ Compatibility should be treated as successful only when:
   PHP-authored vault, then writes an account and a public link. PHP's
   `viewLink` page and `account/viewPass` dialog show the password, and PHP
   updates the counters.
-- Importing a complete Python-generated XML export through the PHP UI is not
-  yet automated.
+- ✅ A password-protected XML export written by pySysPass imports through the
+  PHP web UI's own Import screen (export and master passwords). After the
+  source account is deleted in pySysPass, PHP's view-password dialog decrypts
+  the imported copy (same CI job).
 - ✅ CSV, XML, and KeePass imports follow upstream PHP (`CsvImportBase`,
   `KeepassImport`, master `9d0e169`): CSV/XML rows without a client or category
   are rejected and reported, and KeePass entries get the `KeePass` client and a

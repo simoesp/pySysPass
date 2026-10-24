@@ -559,6 +559,7 @@ the PHP-authored `mPass`/`mKey`, and writes an account and a native public link 
 its API. PHP's `viewLink` page then rendered the snapshot with the password, client and
 category, and incremented `countViews` and the account's view and decrypt counters. PHP's
 own sign-in, search, and `account/viewPass` dialog decrypted and showed the password. The
-test passed locally and runs in a new CI job. Not covered: 2FA through the PHP plugin UI
-(the plugin is not in the official image), and importing a pySysPass XML export through
-the PHP UI.
+test passed locally and runs in a new CI job. A second test exports an account as password-protected XML
+through pySysPass and deletes it there. It then imports the file through PHP's own Import
+screen and confirms that PHP's view-password dialog decrypts the imported copy. Not covered:
+2FA through the PHP plugin UI (the plugin is not in the official image).
