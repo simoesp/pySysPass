@@ -611,3 +611,13 @@ check, and the e2e stack map their ports to 8080. Verified: every nginx process 
 built image ran as `nginx`, the SPA header check passed, the browser suite passed (3
 tests), and all Compose files parsed. Existing custom deployments that map to container
 port 80 must change to 8080.
+
+R7 / #51 follow-up (vault claim): session tokens previously carried the master password
+encrypted with unauthenticated AES-CTR under `ENCRYPTION_KEY` truncated or zero-padded to
+32 bytes (the separate observation recorded with R7). The claim now uses AES-256-GCM
+under a key derived from `ENCRYPTION_KEY` with HKDF-SHA256 and a purpose label, with the
+user ID as associated data. A test shows tampered claims, claims moved to another user,
+pre-GCM claims, and claims made under a previous `ENCRYPTION_KEY` all yield no vault key
+(the API then answers `428 MASTER_PASSWORD_REQUIRED`). Remaining: the browser still keeps
+the token in `localStorage`, so an XSS that reads it, combined with knowledge of
+`ENCRYPTION_KEY`, would expose the master password; the CSP is the main defence there.

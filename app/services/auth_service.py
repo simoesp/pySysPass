@@ -150,30 +150,47 @@ def get_master_password_hash_row(db) -> Optional[Config]:
     return db.query(Config).filter(Config.parameter == "masterPwd").first()
 
 
-def _encrypt_short(plaintext: str) -> str:
-    """Encrypt a short string (master password) with ENCRYPTION_KEY for JWT embedding."""
-    import os
+_VAULT_CLAIM_INFO = b"pysyspass session vault claim v2"
+
+
+def _vault_claim_key() -> bytes:
+    """A dedicated key for the session vault claim, derived from ENCRYPTION_KEY."""
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
+    return HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=_VAULT_CLAIM_INFO).derive(
+        settings.ENCRYPTION_KEY.encode("utf-8")
+    )
+
+
+def _encrypt_short(plaintext: str, user_id=None) -> str:
+    """Encrypt the master password for the session token (AES-256-GCM).
+
+    The token is readable by whoever holds it, so the claim is encrypted with
+    an authenticated cipher under a key used for nothing else, bound to the
+    user ID so it cannot be moved into another user's token.
+    """
     import base64
-    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    import os
 
-    key = settings.ENCRYPTION_KEY.encode()[:32].ljust(32, b'\x00')
-    iv  = os.urandom(16)
-    ct  = Cipher(algorithms.AES(key), modes.CTR(iv)).encryptor()
-    enc = ct.update(plaintext.encode()) + ct.finalize()
-    return base64.b64encode(iv + enc).decode()
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    nonce = os.urandom(12)
+    sealed = AESGCM(_vault_claim_key()).encrypt(nonce, plaintext.encode("utf-8"), str(user_id).encode())
+    return "g2:" + base64.urlsafe_b64encode(nonce + sealed).decode()
 
 
-def _decrypt_short(token_value: str) -> Optional[str]:
-    """Decrypt a value that was encrypted by _encrypt_short."""
+def _decrypt_short(token_value: str, user_id=None) -> Optional[str]:
+    """Decrypt a claim made by _encrypt_short; None when it does not verify."""
     try:
         import base64
-        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
-        raw = base64.b64decode(token_value)
-        iv, enc = raw[:16], raw[16:]
-        key = settings.ENCRYPTION_KEY.encode()[:32].ljust(32, b'\x00')
-        dec = Cipher(algorithms.AES(key), modes.CTR(iv)).decryptor()
-        return (dec.update(enc) + dec.finalize()).decode()
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+        if not token_value.startswith("g2:"):
+            return None
+        raw = base64.urlsafe_b64decode(token_value[3:])
+        return AESGCM(_vault_claim_key()).decrypt(raw[:12], raw[12:], str(user_id).encode()).decode("utf-8")
     except Exception:
         return None
 
@@ -195,7 +212,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None,
     to_encode["is_admin_app"] = bool(app_admin)
     to_encode["is_admin_acc"] = bool(account_admin)
     if master_pass is not None:
-        to_encode["mpass"] = _encrypt_short(master_pass)
+        to_encode["mpass"] = _encrypt_short(master_pass, to_encode.get("user_id"))
     encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm="HS256")
     return encoded_jwt
 
@@ -237,7 +254,7 @@ def decode_token(token: str) -> Optional[dict]:
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
         if "mpass" in payload:
-            payload["master_pass"] = _decrypt_short(payload["mpass"])
+            payload["master_pass"] = _decrypt_short(payload["mpass"], payload.get("user_id"))
         return payload
     except jwt.PyJWTError:
         return None

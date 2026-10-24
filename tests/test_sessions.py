@@ -247,3 +247,20 @@ def test_corrupt_session_store_does_not_lock_everyone_out(tmp_path):
     assert store.is_revoked({"jti": "abc", "user_id": 1, "iat": time.time()}) is False
     store.revoke_token("abc", time.time() + 60)
     assert store.is_revoked({"jti": "abc", "user_id": 1, "iat": time.time()}) is True
+
+
+def test_vault_claim_is_authenticated_and_bound_to_the_user(monkeypatch):
+    import base64
+
+    from app.services import auth_service
+
+    claim = auth_service._encrypt_short("vault-master", user_id=2)
+    assert claim.startswith("g2:") and "vault-master" not in claim
+    assert auth_service._decrypt_short(claim, user_id=2) == "vault-master"
+    assert auth_service._decrypt_short(claim, user_id=3) is None  # moved into another user's token
+    raw = bytearray(base64.urlsafe_b64decode(claim[3:]))
+    raw[-1] ^= 1
+    assert auth_service._decrypt_short("g2:" + base64.urlsafe_b64encode(bytes(raw)).decode(), user_id=2) is None
+    assert auth_service._decrypt_short("bm90LWdjbQ==", user_id=2) is None  # pre-GCM claims are ignored
+    monkeypatch.setattr(auth_service.settings, "ENCRYPTION_KEY", "another-encryption-key-32-bytes!")
+    assert auth_service._decrypt_short(claim, user_id=2) is None
