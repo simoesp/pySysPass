@@ -677,3 +677,17 @@ dominated latency; it is now paged (behaviour change for API clients). A
 which this run cannot classify. The run also found that several workers racing
 to bootstrap an empty database stopped the server; bootstrap is now serialized
 with a database lock and covered by a MySQL test (CI "Schema bootstrap on MySQL 8").
+
+#65 follow-up (admin browser coverage): `e2e/tests/admin.spec.js` drives the
+profile, group, user, import/export and backup pages. It found two UI bugs, now
+fixed:
+- The Settings import always sent `user_id=1`, so imports were owned by user 1
+  whoever ran them, and failed if that user did not exist. `user_id` is now
+  optional and defaults to the caller, as PHP `ConfigImportController`
+  (`import_defaultuser`) does; unknown users return 422 (API test added).
+- The import result read a stats key the API never returns and always showed
+  "Imported: 0 accounts".
+
+All eight browser tests passed twice on a fresh disposable stack. The import
+default group still follows the owner's primary group, not a separate PHP-style
+`import_defaultgroup` choice.

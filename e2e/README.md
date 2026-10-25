@@ -8,7 +8,11 @@ redirects, and response security headers. `settings-and-2fa.spec.js` turns on
 image while copy still yields the text, then switches 2FA on in Settings,
 enrolls through the profile page with a computed TOTP, and signs in with a
 wrong and then a valid code. Each test restores the settings it changed. Tests
-run in one worker because they share the admin user.
+run in one worker because they share the admin user. `admin.spec.js` creates a
+profile, group and user through their pages and signs in as that user (first
+sign-in unlocks the vault; admin APIs return 403), imports a CSV from Settings
+and checks the admin owns the result, downloads the XML export (passwords stay
+ciphertext), and creates and downloads a full backup.
 
 ```bash
 docker build -t pysyspass-backend:e2e . && docker build -t pysyspass-frontend:e2e frontend

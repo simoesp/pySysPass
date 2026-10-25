@@ -28,6 +28,14 @@ class KdbxExportRequest(BaseModel):
     account_ids: Optional[list[int]] = None
 
 
+def _import_owner(db: Session, current_user: dict, user_id: Optional[int]) -> int:
+    """ConfigImportController: import_defaultuser, defaulting to the caller."""
+    owner = current_user["id"] if user_id is None else user_id
+    if db.get(User, owner) is None:
+        raise HTTPException(status_code=422, detail="Unknown import user")
+    return owner
+
+
 def _import_master_password(db: Session, current_user: dict, supplied: str = "") -> str:
     """Vault key used to store imported passwords in the PHP Defuse format."""
     master = current_user.get("master_pass")
@@ -51,7 +59,7 @@ def _import_master_password(db: Session, current_user: dict, supplied: str = "")
 async def import_csv(
     file: UploadFile = File(...),
     delimiter: str = Form(','),
-    user_id: int = Form(...),
+    user_id: Optional[int] = Form(None),
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_import')),
 ):
@@ -64,7 +72,8 @@ async def import_csv(
     except UnicodeDecodeError:
         raise HTTPException(status_code=400, detail="File must be UTF-8 encoded")
     service = CsvImportService(
-        db, get_encryption_service(), user_id, master_password=_import_master_password(db, current_user)
+        db, get_encryption_service(), _import_owner(db, current_user, user_id),
+        master_password=_import_master_password(db, current_user),
     )
     try:
         # Parsing, per-row Defuse encryption and DB writes leave the event loop.
@@ -80,7 +89,7 @@ async def import_csv(
 @router.post("/import/xml")
 async def import_xml(
     file: UploadFile = File(...),
-    user_id: int = Form(...),
+    user_id: Optional[int] = Form(None),
     export_password: str = Form(""),
     import_master_password: str = Form(""),
     current_master_password: str = Form(""),
@@ -98,7 +107,7 @@ async def import_xml(
     service = XmlImportService(
         db,
         get_encryption_service(),
-        user_id,
+        _import_owner(db, current_user, user_id),
         export_password=export_password,
         import_master_password=import_master_password,
         current_master_password=_import_master_password(db, current_user, current_master_password),
@@ -115,7 +124,7 @@ async def import_xml(
 @router.post("/import/keepass")
 async def import_keepass(
     file: UploadFile = File(...),
-    user_id: int = Form(...),
+    user_id: Optional[int] = Form(None),
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_import')),
 ):
@@ -128,7 +137,8 @@ async def import_keepass(
     except UnicodeDecodeError:
         raise HTTPException(status_code=400, detail="File must be UTF-8 encoded")
     service = KeePassImportService(
-        db, get_encryption_service(), user_id, master_password=_import_master_password(db, current_user)
+        db, get_encryption_service(), _import_owner(db, current_user, user_id),
+        master_password=_import_master_password(db, current_user),
     )
     try:
         # Parsing, per-row Defuse encryption and DB writes leave the event loop.

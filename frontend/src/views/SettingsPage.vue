@@ -523,7 +523,10 @@
 
           <div v-if="importResult" class="q-mt-md">
             <q-banner rounded :class="importResult.errors?.length ? 'bg-warning text-black' : 'bg-positive text-white'">
-              <div>Imported: {{ importResult.stats?.accounts_imported ?? 0 }} accounts</div>
+              <div>
+                Imported: {{ importResult.stats?.success ?? 0 }} accounts
+                ({{ importResult.stats?.skipped ?? 0 }} skipped, {{ importResult.stats?.failed ?? 0 }} failed)
+              </div>
               <div v-if="importResult.errors?.length">
                 Errors ({{ importResult.errors.length }}):
                 <ul>
@@ -1065,7 +1068,7 @@ async function doImport() {
   try {
     const form = new FormData()
     form.append('file', importFile.value)
-    form.append('user_id', '1')
+    // Owner defaults to the signed-in user on the server, as in sysPass PHP.
     if (importFormat.value === 'csv') form.append('delimiter', csvDelimiter.value)
     const r = await api.post(`/import-export/import/${importFormat.value}`, form, {
       headers: { 'Content-Type': 'multipart/form-data' },

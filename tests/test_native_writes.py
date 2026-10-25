@@ -87,6 +87,20 @@ def test_imports_require_an_unlocked_vault(db_session, test_user):
     assert service.get_decrypted_password(stored.id, master_pass=TEST_MASTER_PASSWORD) == "secret"
 
 
+def test_import_owner_defaults_to_the_caller_like_php(db_session, test_user):
+    # PHP ConfigImportController: import_defaultuser defaults to the session user.
+    _grant_all(db_session, test_user)
+    client = _client(db_session)
+    headers = _bearer(issue_session_token(test_user, master_pass=TEST_MASTER_PASSWORD))
+    csv = ("rows.csv", b"name,client,category,password\nowned,Acme,Ops,secret\n", "text/csv")
+    response = client.post("/api/v1/import-export/import/csv", files={"file": csv}, headers=headers)
+    assert response.status_code == 200, response.text
+    assert db_session.query(Account).filter_by(name="owned").one().userId == test_user.id
+    unknown = client.post("/api/v1/import-export/import/csv", files={"file": csv}, data={"user_id": 9999},
+                          headers=headers)
+    assert unknown.status_code == 422
+
+
 def test_xml_import_rejects_a_target_master_that_is_not_the_vault(db_session, test_user):
     _grant_all(db_session, test_user)
     db_session.add(Config(parameter="masterPwd", value=get_password_hash(TEST_MASTER_PASSWORD)))

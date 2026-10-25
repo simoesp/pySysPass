@@ -76,6 +76,10 @@ Evidence for each item: `docs/project/production-readiness-review-2026-10-23.md`
 - Password reset not setting PHP migration flags.
 - Reads of native ciphertext without a vault key raising 500.
 - `masterPwd` hashing for keys longer than 72 characters (now matches PHP).
+- Imports from Settings were always owned by user ID 1, and the result always
+  showed "Imported: 0 accounts". The owner (`user_id`) is now optional and
+  defaults to the signed-in user, as PHP `import_defaultuser` does; unknown users
+  return 422. The result shows imported, skipped and failed counts.
 - With `WEB_CONCURRENCY` > 1 and `AUTO_INIT_DB_ON_STARTUP`, workers raced to
   bootstrap an empty database; the losers crashed and uvicorn stopped. The
   bootstrap now runs under a database lock (MySQL `GET_LOCK`).
