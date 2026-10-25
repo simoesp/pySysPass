@@ -11,7 +11,7 @@ router = APIRouter()
 
 
 @router.get("/user-profiles", response_model=List[UserProfileResponse])
-async def list_user_profiles(
+def list_user_profiles(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -19,7 +19,7 @@ async def list_user_profiles(
 
 
 @router.post("/user-profiles", response_model=UserProfileResponse, status_code=status.HTTP_201_CREATED)
-async def create_user_profile(
+def create_user_profile(
     profile: UserProfileCreate,
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('mgm_profiles')),
@@ -28,7 +28,7 @@ async def create_user_profile(
 
 
 @router.get("/user-profiles/{profile_id}", response_model=UserProfileResponse)
-async def get_user_profile(
+def get_user_profile(
     profile_id: int,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
@@ -40,7 +40,7 @@ async def get_user_profile(
 
 
 @router.put("/user-profiles/{profile_id}", response_model=UserProfileResponse)
-async def update_user_profile(
+def update_user_profile(
     profile_id: int,
     profile: UserProfileUpdate,
     db: Session = Depends(get_db),
@@ -53,7 +53,7 @@ async def update_user_profile(
 
 
 @router.delete("/user-profiles/{profile_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_user_profile(
+def delete_user_profile(
     profile_id: int,
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('mgm_profiles')),

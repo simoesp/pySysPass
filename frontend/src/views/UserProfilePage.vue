@@ -225,10 +225,12 @@ async function changePassword() {
   }
   savingPw.value = true
   try {
-    await api.post(`/users/${userId.value}/password`, {
+    const r = await api.post(`/users/${userId.value}/password`, {
       current_password: pw.value.current,
       new_password: pw.value.new_pass,
     })
+    // The change revokes every older session; keep this one with the new token.
+    if (r.data?.access_token) store.setToken(r.data.access_token)
     pw.value = { current: '', new_pass: '', confirm: '' }
     Notify.create({ message: 'Password changed', color: 'positive' })
   } catch (e) {
@@ -279,6 +281,7 @@ async function confirmTfa() {
   tfaBusy.value = true
   try {
     const r = await api.post('/2fa/enable', { code: tfaCode.value.trim() })
+    if (r.data?.access_token) store.setToken(r.data.access_token)
     tfaBackupCodes.value = r.data.backup_codes || []
     tfaStep.value = 3
     loadTfaStatus()
@@ -298,7 +301,8 @@ function askDisableTfa() {
     persistent: true,
   }).onOk(async (password) => {
     try {
-      await api.post('/2fa/disable', { password })
+      const r = await api.post('/2fa/disable', { password })
+      if (r.data?.access_token) store.setToken(r.data.access_token)
       Notify.create({ message: '2FA disabled', color: 'positive' })
       loadTfaStatus()
     } catch (e) {

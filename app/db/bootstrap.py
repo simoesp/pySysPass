@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import contextlib
+import hashlib
 import logging
+import tempfile
 from pathlib import Path
 from typing import Iterable
 import re
 
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine
 
 from app.core.config import settings
@@ -227,7 +230,44 @@ def bootstrap_database(engine_obj: Engine = engine) -> bool:
     return True
 
 
+BOOTSTRAP_LOCK_SECONDS = 300
+
+
+@contextlib.contextmanager
+def _bootstrap_lock(engine_obj: Engine):
+    """Serialize bootstrap across workers (WEB_CONCURRENCY) and containers.
+
+    Every uvicorn worker runs the startup hook; without this, workers racing
+    on a virgin database all apply the schema and the losers crash.
+    """
+    if engine_obj.dialect.name == "mysql":
+        with engine_obj.connect() as connection:
+            acquired = connection.execute(
+                text("SELECT GET_LOCK('pysyspass_bootstrap', :wait)"), {"wait": BOOTSTRAP_LOCK_SECONDS}
+            ).scalar()
+            if acquired != 1:
+                raise RuntimeError("Timed out waiting for another process to bootstrap the database")
+            try:
+                yield
+            finally:
+                connection.execute(text("SELECT RELEASE_LOCK('pysyspass_bootstrap')"))
+        return
+    import fcntl
+
+    key = hashlib.sha256(str(engine_obj.url).encode()).hexdigest()[:16]
+    with open(Path(tempfile.gettempdir()) / f"pysyspass-bootstrap-{key}.lock", "w") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+
+
 def bootstrap_database_on_startup(engine_obj: Engine = engine) -> bool:
     if not settings.AUTO_INIT_DB_ON_STARTUP:
         return False
-    return bootstrap_database(engine_obj=engine_obj)
+    if not database_requires_bootstrap(engine_obj):
+        return False
+    with _bootstrap_lock(engine_obj):
+        # Re-checked under the lock: another worker may have finished it.
+        return bootstrap_database(engine_obj=engine_obj)

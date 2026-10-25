@@ -44,7 +44,7 @@ class LdapImportBody(BaseModel):
 
 
 @router.post("/ldap/test-connection")
-async def test_ldap_connection(
+def test_ldap_connection(
     body: LdapTestBody,
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_general')),
@@ -70,7 +70,7 @@ async def test_ldap_connection(
 
 
 @router.get("/ldap/users")
-async def list_ldap_users(
+def list_ldap_users(
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_general')),
 ) -> List[Dict]:
@@ -87,7 +87,7 @@ async def list_ldap_users(
 
 
 @router.post("/ldap/import")
-async def import_ldap_users(
+def import_ldap_users(
     body: LdapImportBody,
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_general')),

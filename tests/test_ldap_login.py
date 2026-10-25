@@ -19,6 +19,15 @@ def runtime_config(tmp_path, monkeypatch):
     return runtime_path
 
 
+@pytest.fixture(autouse=True)
+def ldap_groups(db_session):
+    # Default groups the LDAP settings below point at (real FKs on MySQL).
+    from app.models.account import UserGroup
+
+    db_session.add_all([UserGroup(id=2, name="LDAP users"), UserGroup(id=3, name="LDAP staff")])
+    db_session.commit()
+
+
 @pytest.fixture
 def ldap_enabled(runtime_config):
     runtime_json_config.set_runtime_config_value("ldap_enabled", "true")

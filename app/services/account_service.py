@@ -1,10 +1,10 @@
 from typing import List, Optional, Set
 from datetime import datetime
 from sqlalchemy import and_, or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from app.models.account import (
     Account, AccountHistory, AccountToTag, AccountToFavorite, AccountToUser, AccountToUserGroup,
-    User, UserGroup, UserToUserGroup
+    Category, Client, Tag, User, UserGroup, UserToUserGroup
 )
 from app.schemas.account import (
     AccountCreate, AccountUpdate, AccountResponse,
@@ -28,23 +28,87 @@ class ServiceResult(dict):
             raise AttributeError(name) from exc
 
 
+class AccountValidationError(ValueError):
+    """Request data references rows the PHP schema requires to exist."""
+
+
+class VaultRequiredError(RuntimeError):
+    """A credential write needs the vault master password.
+
+    sysPass PHP stores Account.pass/key as Defuse ciphertext under the master
+    password. Without it pySysPass would have to write a Python-only format
+    that PHP cannot read, so the write is refused instead.
+    """
+
+
 class AccountService:
     def __init__(self, db: Session, encryption: EncryptionService):
         self.db = db
         self.encryption = encryption
         self._full_group_access: Optional[bool] = None
         self._global_search: Optional[bool] = None
+        # Per-request caches. A service instance lives for one request, so
+        # reusing these rows avoids N+1 queries when building account lists.
+        self._users: dict = {}
+        self._groups: dict = {}
+        self._favorites: Optional[Set[int]] = None
 
     # ── Internal helpers ──────────────────────────────────────────────────
 
     def _is_favorited(self, account_id: int, user_id: int) -> bool:
+        if self._favorites is not None:
+            return account_id in self._favorites
         return self.db.query(AccountToFavorite).filter(
             AccountToFavorite.accountId == account_id,
             AccountToFavorite.userId == user_id,
         ).first() is not None
 
     def _get_user(self, user_id: int) -> Optional[User]:
-        return self.db.query(User).filter(User.id == user_id).first()
+        if user_id not in self._users:
+            self._users[user_id] = self.db.query(User).filter(User.id == user_id).first()
+        return self._users[user_id]
+
+    def _get_group(self, group_id: int) -> Optional[UserGroup]:
+        if group_id not in self._groups:
+            self._groups[group_id] = self.db.query(UserGroup).filter(UserGroup.id == group_id).first()
+        return self._groups[group_id]
+
+    def _prefetch_for_listing(self, accounts: List[Account], user_id: int) -> None:
+        """Load everything _to_response needs for many accounts in a few queries."""
+        ids = [a.id for a in accounts]
+        if not ids:
+            self._favorites = set()
+            return
+        self._favorites = {
+            row[0] for row in self.db.query(AccountToFavorite.accountId).filter(
+                AccountToFavorite.userId == user_id, AccountToFavorite.accountId.in_(ids)
+            ).all()
+        }
+        user_ids = {s.userId for a in accounts for s in a.sharedUsers or []} - set(self._users)
+        for user in self.db.query(User).filter(User.id.in_(user_ids)).all() if user_ids else []:
+            self._users[user.id] = user
+        for missing in user_ids - set(self._users):
+            self._users[missing] = None
+        group_ids = {s.userGroupId for a in accounts for s in a.sharedUserGroups or []} - set(self._groups)
+        for group in self.db.query(UserGroup).filter(UserGroup.id.in_(group_ids)).all() if group_ids else []:
+            self._groups[group.id] = group
+        for missing in group_ids - set(self._groups):
+            self._groups[missing] = None
+
+    def _listing_responses(self, accounts: List[Account], user_id: int, group_ids: Set[int]) -> List[dict]:
+        self._prefetch_for_listing(accounts, user_id)
+        try:
+            return [self._to_response(a, user_id, group_ids) for a in accounts]
+        finally:
+            self._favorites = None  # only valid while this listing is built
+
+    def _listing_query(self):
+        # Eager-load the per-account collections shown in listings.
+        return self.db.query(Account).options(
+            selectinload(Account.tags).selectinload(AccountToTag.tag),
+            selectinload(Account.sharedUsers),
+            selectinload(Account.sharedUserGroups),
+        )
 
     def _get_user_group_ids(self, user_id: int) -> Set[int]:
         user = self._get_user(user_id)
@@ -234,7 +298,7 @@ class AccountService:
     def _get_shared_users(self, account: Account) -> List[SharedUserInfo]:
         result = []
         for atu in (account.sharedUsers or []):
-            user = self.db.query(User).filter(User.id == atu.userId).first()
+            user = self._get_user(atu.userId)
             if user:
                 result.append(SharedUserInfo(
                     user_id=user.id,
@@ -246,7 +310,7 @@ class AccountService:
     def _get_shared_groups(self, account: Account) -> List[SharedGroupInfo]:
         result = []
         for atg in (account.sharedUserGroups or []):
-            group = self.db.query(UserGroup).filter(UserGroup.id == atg.userGroupId).first()
+            group = self._get_group(atg.userGroupId)
             if group:
                 result.append(SharedGroupInfo(
                     group_id=group.id,
@@ -255,19 +319,52 @@ class AccountService:
                 ))
         return result
 
+    def _missing_ids(self, model, ids) -> List[int]:
+        wanted = set(ids)
+        if not wanted:
+            return []
+        found = {row[0] for row in self.db.query(model.id).filter(model.id.in_(wanted)).all()}
+        return sorted(wanted - found)
+
+    def _validate_references(
+        self,
+        client_id: Optional[int] = None,
+        category_id: Optional[int] = None,
+        tag_ids: Optional[List[int]] = None,
+        shared_users: Optional[List[SharedUserEntry]] = None,
+        shared_groups: Optional[List[SharedGroupEntry]] = None,
+    ) -> None:
+        """Reject references the canonical MySQL foreign keys would refuse.
+
+        Mirrors sysPass PHP AccountForm validation (client and category are
+        mandatory) and turns FK violations into validation errors instead of
+        database errors.
+        """
+        checks = (
+            ("client", Client, [client_id] if client_id is not None else []),
+            ("category", Category, [category_id] if category_id is not None else []),
+            ("tag", Tag, tag_ids or []),
+            ("user", User, [e.user_id for e in shared_users or []]),
+            ("user group", UserGroup, [e.group_id for e in shared_groups or []]),
+        )
+        for label, model, ids in checks:
+            missing = self._missing_ids(model, ids)
+            if missing:
+                raise AccountValidationError(f"Unknown {label} id: {', '.join(map(str, missing))}")
+
     def _sync_tags(self, account_id: int, tag_ids: List[int]):
         self.db.query(AccountToTag).filter(AccountToTag.accountId == account_id).delete()
-        for tid in tag_ids:
+        for tid in dict.fromkeys(tag_ids):
             self.db.add(AccountToTag(accountId=account_id, tagId=tid))
 
     def _sync_shared_users(self, account_id: int, entries: List[SharedUserEntry]):
         self.db.query(AccountToUser).filter(AccountToUser.accountId == account_id).delete()
-        for e in entries:
+        for e in {e.user_id: e for e in entries}.values():
             self.db.add(AccountToUser(accountId=account_id, userId=e.user_id, isEdit=e.is_edit))
 
     def _sync_shared_groups(self, account_id: int, entries: List[SharedGroupEntry]):
         self.db.query(AccountToUserGroup).filter(AccountToUserGroup.accountId == account_id).delete()
-        for e in entries:
+        for e in {e.group_id: e for e in entries}.values():
             self.db.add(AccountToUserGroup(accountId=account_id, userGroupId=e.group_id, isEdit=e.is_edit))
 
     def _to_response(self, account: Account, user_id: int, group_ids: Optional[Set[int]] = None) -> ServiceResult:
@@ -368,14 +465,14 @@ class AccountService:
     ) -> List[dict]:
         group_ids = self._get_user_group_ids(user_id)
         accounts = (
-            self.db.query(Account)
+            self._listing_query()
             .filter(*self._list_filters(user_id, group_ids, q, category_id, client_id, tag_id))
-            .order_by(Account.dateAdd.desc())
+            .order_by(Account.dateAdd.desc(), Account.id.desc())  # id: stable pages for equal dates
             .offset(skip)
             .limit(limit)
             .all()
         )
-        return [self._to_response(a, user_id, group_ids) for a in accounts]
+        return self._listing_responses(accounts, user_id, group_ids)
 
     def count_accounts(
         self,
@@ -431,30 +528,29 @@ class AccountService:
         self.db.refresh(account)
         return self._to_response(account, user_id or account.userId, group_ids)
 
-    def search_accounts(self, user_id: int, query: str) -> List[dict]:
+    def search_accounts(self, user_id: int, query: str, skip: int = 0, limit: int = 100) -> List[dict]:
         group_ids = self._get_user_group_ids(user_id)
         accounts = (
-            self.db.query(Account)
+            self._listing_query()
             .filter(*self._list_filters(user_id, group_ids, q=query))
+            .order_by(Account.dateAdd.desc(), Account.id.desc())
+            .offset(skip)
+            .limit(limit)
             .all()
         )
-        return [self._to_response(a, user_id, group_ids) for a in accounts]
+        return self._listing_responses(accounts, user_id, group_ids)
 
     # ── Mutations ─────────────────────────────────────────────────────────
 
     def create_account(self, data: AccountCreate, user_id: int, master_pass: Optional[str] = None) -> dict:
+        self._validate_references(
+            data.client_id, data.category_id, data.tag_ids, data.shared_users, data.shared_groups
+        )
         plaintext = maybe_decrypt(data.password)
         user = self.db.query(User).filter(User.id == user_id).first()
         user_group_id = user.userGroupId if user else 1
-
-        if master_pass and plaintext:
-            pass_hex, key_hex = encrypt_account_pass(plaintext, master_pass)
-            enc_pass_bytes = pass_hex.encode()
-            enc_key_bytes = key_hex.encode()
-        else:
-            enc_raw = self.encryption.encrypt(plaintext)
-            enc_pass_bytes = enc_raw.encode() if isinstance(enc_raw, str) else enc_raw
-            enc_key_bytes = b''
+        pass_date_change = self._check_password_preset(plaintext, user_id, data.pass_date_change)
+        enc_pass_bytes, enc_key_bytes = self._encrypt_native(plaintext, master_pass)
 
         account = Account(
             name=data.title,
@@ -472,8 +568,9 @@ class AccountService:
             isPrivateGroup=data.is_private_group,
             otherUserEdit=data.other_user_edit,
             otherUserGroupEdit=data.other_user_group_edit,
-            passDateChange=data.pass_date_change,
+            passDateChange=pass_date_change,
         )
+        self._apply_private_preset(account, user_id)
         self.db.add(account)
         self.db.flush()
         if data.tag_ids:
@@ -482,6 +579,8 @@ class AccountService:
             self._sync_shared_users(account.id, data.shared_users)
         if data.shared_groups:
             self._sync_shared_groups(account.id, data.shared_groups)
+        self.db.flush()
+        self._apply_permission_preset(account, user_id)
         self.db.commit()
         self.db.refresh(account)
         result = self._to_response(account, user_id, {user_group_id})
@@ -497,6 +596,11 @@ class AccountService:
             return None
         if not self._can_edit_account(account, user_id, group_ids):
             return None
+        self._validate_references(
+            data.client_id, data.category_id, data.tag_ids, data.shared_users, data.shared_groups
+        )
+        if data.password and not master_pass:
+            raise VaultRequiredError("Master password required to change an account password")
 
         # sysPass PHP saves the complete pre-update account state in the same
         # transaction, so password and metadata changes can be restored.
@@ -535,13 +639,8 @@ class AccountService:
                 self.db.delete(existing_favorite)
         if data.password:
             plaintext = maybe_decrypt(data.password)
-            if master_pass and plaintext:
-                pass_hex, key_hex = encrypt_account_pass(plaintext, master_pass)
-                account.pass_ = pass_hex.encode()
-                account.key = key_hex.encode()
-            else:
-                enc = self.encryption.encrypt(plaintext)
-                account.pass_ = enc.encode() if isinstance(enc, str) else enc
+            account.passDateChange = self._check_password_preset(plaintext, user_id, account.passDateChange)
+            account.pass_, account.key = self._encrypt_native(plaintext, master_pass)
             account.passDate = int(datetime.now().timestamp())
         account.userEditId = user_id
         if data.tag_ids is not None:
@@ -550,6 +649,9 @@ class AccountService:
             self._sync_shared_users(account_id, data.shared_users)
         if data.shared_groups is not None:
             self._sync_shared_groups(account_id, data.shared_groups)
+        self._apply_private_preset(account, user_id)
+        self.db.flush()
+        self._apply_permission_preset(account, user_id)
 
         self.db.commit()
         self.db.refresh(account)
@@ -568,6 +670,75 @@ class AccountService:
         self._emit_hook("on_account_deleted", payload=payload, actor_user_id=user_id)
         return True
 
+    # ── Item presets (PHP AccountService / AccountPresetService) ─────────────
+
+    def _fixed_preset(self, preset_type: str, user_id: int) -> Optional[dict]:
+        from app.services.item_preset_service import ItemPresetService
+
+        resolved = ItemPresetService(self.db).get_for_user(preset_type, user_id)
+        return resolved.data if resolved is not None and resolved.fixed else None
+
+    def _check_password_preset(self, plaintext: str, user_id: int,
+                               pass_date_change: Optional[int]) -> Optional[int]:
+        """checkPasswordPreset(): enforce the policy; return the expiry to store."""
+        policy = self._fixed_preset("account.password", user_id)
+        if policy is None:
+            return pass_date_change
+        from app.core.php_item_presets import EXPIRE_TIME_MULTIPLIER, password_errors
+
+        error = password_errors(policy, plaintext or "")
+        if error:
+            raise AccountValidationError(error)
+        expire = int(policy.get("expire_days") or 0) * EXPIRE_TIME_MULTIPLIER
+        if expire > 0 and ConfigService(self.db)._bool_val("account_expire_enabled"):
+            deadline = int(datetime.now().timestamp()) + expire
+            if not pass_date_change or pass_date_change < deadline:
+                return deadline
+        return pass_date_change
+
+    def _apply_private_preset(self, account: Account, user_id: int) -> None:
+        """setPresetPrivate(): a fixed preset decides the privacy flags."""
+        preset = self._fixed_preset("account.private", user_id)
+        if preset is None:
+            return
+        user = self._get_user(user_id)
+        if account.userId == user_id:
+            account.isPrivate = bool(preset.get("private_user"))
+        if user is not None and user.userGroupId == account.userGroupId:
+            account.isPrivateGroup = bool(preset.get("private_group"))
+
+    def _apply_permission_preset(self, account: Account, user_id: int) -> None:
+        """addPresetPermissions(): a fixed preset adds default shares."""
+        preset = self._fixed_preset("account.permission", user_id)
+        if preset is None:
+            return
+        user = self._get_user(user_id)
+        own_group = user.userGroupId if user else None
+        users = {uid: False for uid in preset.get("users_view") or [] if uid != user_id}
+        users.update({uid: True for uid in preset.get("users_edit") or [] if uid != user_id})
+        groups = {gid: False for gid in preset.get("user_groups_view") or [] if gid != own_group}
+        groups.update({gid: True for gid in preset.get("user_groups_edit") or [] if gid != own_group})
+        existing_users = {s.userId for s in self.db.query(AccountToUser).filter(AccountToUser.accountId == account.id)}
+        existing_groups = {s.userGroupId for s in self.db.query(AccountToUserGroup)
+                           .filter(AccountToUserGroup.accountId == account.id)}
+        known_users = {row[0] for row in self.db.query(User.id).filter(User.id.in_(users))} if users else set()
+        known_groups = ({row[0] for row in self.db.query(UserGroup.id).filter(UserGroup.id.in_(groups))}
+                        if groups else set())
+        for uid, edit in users.items():
+            if uid in known_users and uid not in existing_users:
+                self.db.add(AccountToUser(accountId=account.id, userId=uid, isEdit=edit))
+        for gid, edit in groups.items():
+            if gid in known_groups and gid not in existing_groups:
+                self.db.add(AccountToUserGroup(accountId=account.id, userGroupId=gid, isEdit=edit))
+
+    @staticmethod
+    def _encrypt_native(plaintext: Optional[str], master_pass: Optional[str]) -> tuple:
+        """Account.pass/key as PHP Crypt::encrypt() writes them (Defuse)."""
+        if not master_pass:
+            raise VaultRequiredError("Master password required to store account passwords")
+        pass_hex, key_hex = encrypt_account_pass(plaintext or '', master_pass)
+        return pass_hex.encode(), key_hex.encode()
+
     def _decrypt_account_pass(self, account: Account, master_pass: Optional[str]) -> Optional[str]:
         """
         Dispatch to defuse decryption for PHP-created accounts, or to the
@@ -578,12 +749,17 @@ class AccountService:
         key_raw  = account.key   if isinstance(account.key,   bytes) else (account.key or b'').encode()
         key_ascii = key_raw.decode('ascii', errors='ignore')
         # defuse KeyProtectedByPassword header \xDE\xF1\x00\x00 encodes to "def10000"
-        if key_ascii.startswith('def10000') and master_pass:
+        if key_ascii.startswith('def10000'):
+            # Native (PHP or pySysPass) ciphertext: only the vault key opens it.
+            # Never hand Defuse data to the legacy Python decryptor.
+            if not master_pass:
+                raise VaultRequiredError("Master password required to decrypt account passwords")
+            from app.core.defuse_compat import decrypt_account_pass
             try:
-                from app.core.defuse_compat import decrypt_account_pass
                 return decrypt_account_pass(pass_raw.decode('ascii'), key_ascii, master_pass)
             except Exception:
-                pass
+                return None
+        # Legacy rows written by earlier pySysPass releases (empty key).
         return self.encryption.decrypt(pass_raw.decode())
 
     def get_decrypted_password(self, account_id: int, user_id: Optional[int] = None,
@@ -595,9 +771,11 @@ class AccountService:
         account = query.first()
         if not account or not account.pass_:
             return None
+        password = self._decrypt_account_pass(account, master_pass)
+        if password is None:
+            return None
         account.countDecrypt = (account.countDecrypt or 0) + 1
         self.db.commit()
-        password = self._decrypt_account_pass(account, master_pass)
         self._emit_hook(
             "on_password_decrypted",
             actor_user_id=user_id,
@@ -634,17 +812,22 @@ class AccountService:
         if not source:
             return None
 
+        if not master_pass:
+            raise VaultRequiredError("Master password required to copy account passwords")
         plaintext = None
         if source.pass_:
             plaintext = self._decrypt_account_pass(source, master_pass)
+        enc_pass, enc_key = self._encrypt_native(plaintext or '', master_pass)
 
         user = self.db.query(User).filter(User.id == user_id).first()
         copy = Account(
-            name=f'{source.name} (copy)',
+            # Account.name is varchar(100) in the PHP schema.
+            name=f'{source.name[:93]} (copy)',
             notes=source.notes,
             login=source.login,
             url=source.url,
-            key=b'',
+            pass_=enc_pass,
+            key=enc_key,
             categoryId=source.categoryId,
             clientId=source.clientId,
             userId=user_id,
@@ -656,10 +839,6 @@ class AccountService:
             otherUserGroupEdit=source.otherUserGroupEdit,
             passDateChange=source.passDateChange,
         )
-        if plaintext:
-            enc = self.encryption.encrypt(plaintext)
-            copy.pass_ = enc.encode() if isinstance(enc, str) else enc
-
         self.db.add(copy)
         self.db.flush()
 

@@ -1,0 +1,45 @@
+{
+    "source": {
+        "application": "sysPass",
+        "upstream_commit": "9d0e169d2163897238877fb65130db47fe1ddcfa",
+        "authored_by": "Native ItemPresetData::getHash() and serialize() of SP\\DataModel\\ItemPreset objects"
+    },
+    "presets": [
+        {
+            "type": "account.permission",
+            "userId": 7,
+            "userGroupId": null,
+            "userProfileId": null,
+            "priority": 5,
+            "hash": "c0995152710eb550cd063d35b855c3eda3f1b2b2",
+            "data_base64": "Tzo0MToiU1BcRGF0YU1vZGVsXEl0ZW1QcmVzZXRcQWNjb3VudFBlcm1pc3Npb24iOjQ6e3M6NTI6IgBTUFxEYXRhTW9kZWxcSXRlbVByZXNldFxBY2NvdW50UGVybWlzc2lvbgB1c2Vyc1ZpZXciO2E6Mjp7aTowO2k6MztpOjE7aTo0O31zOjUyOiIAU1BcRGF0YU1vZGVsXEl0ZW1QcmVzZXRcQWNjb3VudFBlcm1pc3Npb24AdXNlcnNFZGl0IjthOjE6e2k6MDtpOjU7fXM6NTc6IgBTUFxEYXRhTW9kZWxcSXRlbVByZXNldFxBY2NvdW50UGVybWlzc2lvbgB1c2VyR3JvdXBzVmlldyI7YToxOntpOjA7aToyO31zOjU3OiIAU1BcRGF0YU1vZGVsXEl0ZW1QcmVzZXRcQWNjb3VudFBlcm1pc3Npb24AdXNlckdyb3Vwc0VkaXQiO2E6MTp7aTowO2k6Njt9fQ=="
+        },
+        {
+            "type": "account.private",
+            "userId": null,
+            "userGroupId": 2,
+            "userProfileId": null,
+            "priority": 0,
+            "hash": "080d3c0f648b8855b9ffaf4d175e913959826778",
+            "data_base64": "TzozODoiU1BcRGF0YU1vZGVsXEl0ZW1QcmVzZXRcQWNjb3VudFByaXZhdGUiOjI6e3M6NTE6IgBTUFxEYXRhTW9kZWxcSXRlbVByZXNldFxBY2NvdW50UHJpdmF0ZQBwcml2YXRlVXNlciI7YjoxO3M6NTI6IgBTUFxEYXRhTW9kZWxcSXRlbVByZXNldFxBY2NvdW50UHJpdmF0ZQBwcml2YXRlR3JvdXAiO2I6MDt9"
+        },
+        {
+            "type": "session.timeout",
+            "userId": null,
+            "userGroupId": null,
+            "userProfileId": 3,
+            "priority": 1,
+            "hash": "6d6cff7a90e70006f190e9d491aeeb67d0ce2baf",
+            "data_base64": "TzozODoiU1BcRGF0YU1vZGVsXEl0ZW1QcmVzZXRcU2Vzc2lvblRpbWVvdXQiOjM6e3M6NDc6IgBTUFxEYXRhTW9kZWxcSXRlbVByZXNldFxTZXNzaW9uVGltZW91dABhZGRyZXNzIjtzOjEyOiIxOTIuMTY4LjEwLjAiO3M6NDQ6IgBTUFxEYXRhTW9kZWxcSXRlbVByZXNldFxTZXNzaW9uVGltZW91dABtYXNrIjtzOjEzOiIyNTUuMjU1LjI1NS4wIjtzOjQ3OiIAU1BcRGF0YU1vZGVsXEl0ZW1QcmVzZXRcU2Vzc2lvblRpbWVvdXQAdGltZW91dCI7aTo5MDA7fQ=="
+        },
+        {
+            "type": "account.password",
+            "userId": 7,
+            "userGroupId": null,
+            "userProfileId": null,
+            "priority": 0,
+            "hash": "763c4865d064be7038c2852998a2bca591d777bd",
+            "data_base64": "TzozMjoiU1BcRGF0YU1vZGVsXEl0ZW1QcmVzZXRcUGFzc3dvcmQiOjEwOntzOjQwOiIAU1BcRGF0YU1vZGVsXEl0ZW1QcmVzZXRcUGFzc3dvcmQAbGVuZ3RoIjtpOjE0O3M6NDQ6IgBTUFxEYXRhTW9kZWxcSXRlbVByZXNldFxQYXNzd29yZAB1c2VOdW1iZXJzIjtiOjE7czo0NDoiAFNQXERhdGFNb2RlbFxJdGVtUHJlc2V0XFBhc3N3b3JkAHVzZUxldHRlcnMiO2I6MTtzOjQ0OiIAU1BcRGF0YU1vZGVsXEl0ZW1QcmVzZXRcUGFzc3dvcmQAdXNlU3ltYm9scyI7YjoxO3M6NDI6IgBTUFxEYXRhTW9kZWxcSXRlbVByZXNldFxQYXNzd29yZAB1c2VVcHBlciI7YjoxO3M6NDI6IgBTUFxEYXRhTW9kZWxcSXRlbVByZXNldFxQYXNzd29yZAB1c2VMb3dlciI7YjoxO3M6NDI6IgBTUFxEYXRhTW9kZWxcSXRlbVByZXNldFxQYXNzd29yZAB1c2VJbWFnZSI7YjowO3M6NDQ6IgBTUFxEYXRhTW9kZWxcSXRlbVByZXNldFxQYXNzd29yZABleHBpcmVUaW1lIjtpOjI1OTIwMDA7czozOToiAFNQXERhdGFNb2RlbFxJdGVtUHJlc2V0XFBhc3N3b3JkAHNjb3JlIjtpOjI7czozOToiAFNQXERhdGFNb2RlbFxJdGVtUHJlc2V0XFBhc3N3b3JkAHJlZ2V4IjtzOjEyOiJbQS1aXS4qWzAtOV0iO30="
+        }
+    ]
+}

@@ -14,9 +14,10 @@ This document describes the current `pySysPass` HTTP API as implemented by the F
 ### Public endpoints
 
 - `GET /`
-- `GET /health`
+- `GET /health`, `GET /health/live`, `GET /health/ready`
 - `POST /api/v1/auth/register`
 - `POST /api/v1/auth/login`
+- `POST /api/v1/auth/refresh`, `POST /api/v1/auth/logout`
 - Password-reset endpoints
 - `GET /api/v1/security/public-key`
 - `GET /api/v1/public-links/{hash}/access`
@@ -137,6 +138,34 @@ Successful response:
 }
 ```
 
+### Sessions, refresh, and logout
+
+Session tokens follow sysPass PHP session semantics:
+
+- They expire after the `session_timeout` setting (seconds of inactivity;
+  default 300, clamped to 60–86400). `POST /api/v1/auth/refresh` with a valid
+  session token returns a new token for one more window and revokes the old
+  one. The web UI refreshes only after real user input, so an idle browser
+  times out even while it polls. No session lasts more than 24 hours after
+  login.
+- `POST /api/v1/auth/logout` (204) revokes the presented token server-side.
+  A copied bearer stops working.
+- Changing or resetting a user's password, whether in pySysPass or in sysPass
+  PHP, invalidates every token issued before the change. Enabling or disabling
+  2FA revokes the user's other sessions. Those self-service responses
+  (`POST /users/{id}/password` for your own account, `POST /2fa/enable`,
+  `POST /2fa/disable`) include an `access_token` that replaces the caller's
+  token.
+- Changing `SECRET_KEY` invalidates all tokens. Tokens issued before this
+  change (without session claims) are rejected; users sign in again.
+- Revoked token IDs live in `data/sessions.json` until they expire. This is
+  deployment state, not PHP data. Backends that share it must share `/app/data`.
+  Deleting it forgets only revocations of tokens that have not yet expired.
+
+Per-user `SessionTimeout` item presets are not applied yet. PHP stores them as
+serialized objects with an address/mask condition, and pySysPass does not read
+that format.
+
 Possible special error flows:
 
 - `401 Incorrect username or password`
@@ -175,13 +204,36 @@ Account passwords are not returned in the normal account payload. They are retri
 
 - `GET /api/v1/accounts/{account_id}/password`
 
+Optional query parameter `purpose`: `copy` (default) or `view`. Copy always
+returns the text, as sysPass PHP `copyPass` does. View follows PHP `viewPass`:
+when `account_pass_to_image` is on (or, if unset, `accountPassToImage` in the
+shared PHP `config.xml`), or the user's fixed `account.password` preset sets
+`use_image`, the response carries a base64 PNG and no text.
+
 Response:
 
 ```json
 {
-  "password": "decrypted-secret"
+  "password": "decrypted-secret",
+  "use_image": false,
+  "password_image": null
 }
 ```
+
+With the image rule: `{"password": null, "use_image": true, "password_image": "iVBORw0KGgo..."}`.
+This is a display control against shoulder surfing and scraping, not an access
+control: anyone with `acc_view_pass` can still request `purpose=copy`.
+
+Account passwords are always stored as sysPass PHP writes them: Defuse
+ciphertext in `Account.pass` with a password-protected key in `Account.key`,
+under the vault master password. Any request that has to encrypt or decrypt
+one therefore needs a session with an unlocked vault, and otherwise returns
+`428` with code `MASTER_PASSWORD_REQUIRED`. That covers creating an account,
+changing or reading its stored secret, copying it, every import format, and
+public-link creation. sysPass API tokens carry no vault key, so
+token callers cannot do these; metadata-only edits still work. Rows written
+in the legacy Python format by earlier releases (empty `Account.key`) stay
+readable and are not rewritten.
 
 ## Common Response Patterns
 
@@ -330,7 +382,9 @@ Used by the frontend for server-side pagination.
 
 `GET /api/v1/accounts/search?q=postgres`
 
-The current implementation searches within the user’s accessible account set.
+Searches within the user’s accessible account set. Optional `skip` (default 0)
+and `limit` (default 100, maximum 500) page the results, newest first, as
+`GET /accounts` does. Earlier releases returned every match.
 
 #### Toggle favourite
 
@@ -468,15 +522,28 @@ Account-scoped management routes also exist alongside the ones below:
 
 `POST /api/v1/accounts/{account_id}/public-links`
 
+Links are written in the native sysPass format, so sysPass PHP can open them:
+`PublicLink.data` holds a `SP\Core\Crypt\Vault` with the account snapshot,
+keyed by `sha1(passwordSalt . hash)`. Creation therefore needs:
+
+- `publinks_enabled` turned on (as in PHP, where the action is hidden otherwise): `403` otherwise
+- a session with an unlocked vault, to decrypt the account password for the snapshot:
+  `428` `MASTER_PASSWORD_REQUIRED` otherwise (API tokens never carry one)
+- the sysPass password salt in runtime configuration: `400` otherwise
+
 Example request:
 
 ```json
 {
   "account_id": 101,
-  "expire": 3600,
-  "password": "optional-link-password"
+  "expire": 3600
 }
 ```
+
+`expire` (seconds) defaults to the `publinks_max_time` setting (PHP default
+600). `password` is deprecated: PHP links have no access password, so any
+value is rejected with `400`. Existing password-protected links created by
+earlier pySysPass releases can still be opened with `?password=`.
 
 Example response:
 
@@ -486,10 +553,12 @@ Example response:
   "account_id": 101,
   "hash": "3d1b0f4f...",
   "expire": 3600,
-  "has_password": true,
+  "has_password": false,
   "date_add": "2026-06-30T13:15:00"
 }
 ```
+
+The hash is 60 hexadecimal characters (30 random bytes), as PHP generates.
 
 ### Access a public link
 
@@ -509,9 +578,16 @@ Example response:
   "url": "https://db.example.internal",
   "notes": "Primary production database",
   "category_id": 2,
-  "client_id": 4
+  "client_id": 4,
+  "password": "decrypted-secret",
+  "use_image": false,
+  "password_image": null
 }
 ```
+
+`password` is present for native sysPass links. When `publinks_image_enabled`
+or `account_pass_to_image` is on, as in PHP `viewLink`, `password` is null and
+`password_image` holds a base64 PNG; no text password is sent.
 
 Possible failures:
 
@@ -972,15 +1048,29 @@ PHP behaviour.
 
 ## Item Presets API
 
-JWT required; mutations are admin-only. Presets provide per-user/group
-defaults (permissions, private flags, session timeouts) resolved by
-specificity, as in sysPass PHP.
+Managing presets requires the `mgm_items_preset` profile permission, or
+application admin, as with PHP's item-preset ACL. Rows use sysPass PHP's format,
+so presets created in either application apply in both.
+
+| Type | Data (JSON in the API) | Applied when `fixed` |
+| --- | --- | --- |
+| `account.permission` | `users_view`, `users_edit`, `user_groups_view`, `user_groups_edit` (ID lists) | shares added on account create/update (not the editor or their group) |
+| `account.private` | `private_user`, `private_group` | privacy flags set on create/update |
+| `account.password` | `length`, `use_letters`, `use_lower`, `use_upper`, `use_numbers`, `use_symbols`, `regex`, `expire_days`, `score`, `use_image` | password rejected (422) unless it meets the policy; expiry set when `account_expire_enabled` |
+| `session.timeout` | `ip_address` (`a.b.c.d`, `/cidr` or `/mask`), `timeout` (seconds) | always: session lifetime for clients inside the network |
+
+A preset needs a user, group, or profile scope; there are no global presets.
+The preset with the highest `priority` plus scope bonus wins (user 3, group 2
+including secondary memberships, profile 1), as in PHP `getByFilter()`. Rows
+saved by earlier pySysPass releases are listed with `legacy: true` and are not
+applied until saved again with valid data. `score` and `use_image` are stored
+for PHP but not enforced by pySysPass.
 
 - `GET /api/v1/item-presets` — optional `?preset_type=` filter
 - `GET /api/v1/item-presets/types`
 - `GET /api/v1/item-presets/{preset_id}`
-- `GET /api/v1/item-presets/context/{preset_type}` — the preset that
-  applies to the calling user (most specific match wins)
+- `GET /api/v1/item-presets/context/{preset_type}` — any signed-in user: the
+  preset that applies to the caller
 - `POST /api/v1/item-presets`
 - `PUT /api/v1/item-presets/{preset_id}`
 - `DELETE /api/v1/item-presets/{preset_id}`
@@ -1045,8 +1135,23 @@ Response entries: `id`, `action` (`account.view` / `account.view.pass` /
 
 ## Health
 
-`GET /health` (no `/api/v1` prefix, unauthenticated) returns
-`{ "status": "healthy" }`; used by the compose healthchecks.
+All health endpoints are unauthenticated and have no `/api/v1` prefix.
+
+- `GET /health` and `GET /health/live` — liveness. Always return
+  `{ "status": "healthy" }` while the process serves requests; they do not
+  check dependencies.
+- `GET /health/ready` — readiness, used by the backend container health checks.
+  Returns 200 `{ "status": "ready", "checks": {...} }` only when the effective
+  production configuration is valid and the runtime JSON config parses, the
+  database answers `SELECT 1`, every canonical sysPass table and both account
+  views exist, and the data, runtime-config, and backup directories are
+  writable. Otherwise it returns 503 with `"status": "not_ready"`. Each check
+  has a 3-second timeout (the schema check runs only after the database check
+  passes). Results contain only fixed check names and generic reasons such as
+  `database unreachable`; details go to the server log.
+
+The schema check confirms the canonical tables and views are present. It does
+not compare column definitions or verify encrypted data.
 
 ## Recommended Usage
 

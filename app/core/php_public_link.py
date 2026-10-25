@@ -9,6 +9,12 @@ from app.core.defuse_compat import decrypt_with_password
 
 VAULT_CLASS = b'SP\\Core\\Crypt\\Vault'
 ACCOUNT_CLASS = b'SP\\DataModel\\AccountExtData'
+AUTHENTICATOR_CLASS = b'SP\\Modules\\Web\\Plugins\\Authenticator\\Models\\AuthenticatorData'
+PRESET_CLASSES = tuple(
+    b'SP\\DataModel\\ItemPreset\\' + name
+    for name in (b'AccountPermission', b'AccountPrivate', b'SessionTimeout', b'Password')
+)
+ALLOWED_CLASSES = (VAULT_CLASS, ACCOUNT_CLASS, AUTHENTICATOR_CLASS) + PRESET_CLASSES
 MAX_SERIALIZED_BYTES = 4 * 1024 * 1024
 
 
@@ -81,7 +87,7 @@ class _Reader:
         name = None
         if kind == b'O':
             name = self._string()
-            if name not in (VAULT_CLASS, ACCOUNT_CLASS):
+            if name not in ALLOWED_CLASSES:
                 raise ValueError('Unsupported PHP object class')
             self._expect(b':')
         count = self._number(b':')
@@ -164,3 +170,80 @@ def read_public_link_snapshot(data: bytes, link_hash: bytes, password_salt: str,
         category_name=string(b'categoryName', True), client_name=string(b'clientName', True),
         password=string(b'pass'),
     )
+
+
+# ── Native writer ─────────────────────────────────────────────────────────
+#
+# Mirrors PHP PublicLinkService::getSecuredLinkData(): AccountRepository::
+# getDataForLink() fetches id, name, login, pass, key, url, notes, clientName and
+# categoryName with PDO::FETCH_CLASS into AccountExtData (column values arrive as
+# strings or NULL; every other property keeps its class default), the password
+# is decrypted and key set to null, and the serialized object is stored with
+# Vault::saveData() under PublicLinkKey (sha1(passwordSalt . hash)).
+
+# (property, default) in PHP declaration order: AccountData, then AccountExtData.
+_ACCOUNT_EXT_DATA_PROPERTIES = (
+    ('id', 0), ('userId', 0), ('userGroupId', 0), ('userEditId', 0), ('name', ''),
+    ('clientId', 0), ('categoryId', 0), ('login', ''), ('url', ''), ('pass', ''),
+    ('key', ''), ('notes', ''), ('otherUserEdit', False), ('otherUserGroupEdit', False),
+    ('dateAdd', 0), ('dateEdit', 0), ('countView', 0), ('countDecrypt', 0),
+    ('isPrivate', 0), ('isPrivateGroup', 0), ('passDate', 0), ('passDateChange', 0),
+    ('parentId', 0), ('usersId', []), ('userGroupsId', []), ('tags', []),
+    ('categoryName', ''), ('clientName', ''), ('userGroupName', ''), ('userName', ''),
+    ('userLogin', ''), ('userEditName', ''), ('userEditLogin', ''), ('publicLinkHash', ''),
+)
+
+
+def php_serialize(value) -> bytes:
+    """PHP serialize() for the scalar/array subset the link snapshot uses."""
+    if value is None:
+        return b'N;'
+    if isinstance(value, bool):
+        return b'b:1;' if value else b'b:0;'
+    if isinstance(value, int):
+        return b'i:%d;' % value
+    if isinstance(value, str):
+        value = value.encode('utf-8')
+    if isinstance(value, bytes):
+        return b's:%d:"%s";' % (len(value), value)
+    if isinstance(value, (list, tuple)):
+        value = dict(enumerate(value))
+    if isinstance(value, dict):
+        body = b''.join(php_serialize(k) + php_serialize(v) for k, v in value.items())
+        return b'a:%d:{%s}' % (len(value), body)
+    raise TypeError(f'Cannot PHP-serialize {type(value).__name__}')
+
+
+def _php_object(class_name: bytes, properties: list) -> bytes:
+    body = b''.join(php_serialize(name) + php_serialize(value) for name, value in properties)
+    return b'O:%d:"%s":%d:{%s}' % (len(class_name), class_name, len(properties), body)
+
+
+def build_link_snapshot(
+    *, account_id: int, name: str, login: str | None, url: str | None, notes: str | None,
+    password: str, client_name: str, category_name: str,
+) -> bytes:
+    """Serialize the AccountExtData that PHP getDataForLink() would produce."""
+    fetched = {
+        'id': str(account_id), 'name': name, 'login': login, 'url': url, 'notes': notes,
+        'pass': password, 'key': None, 'clientName': client_name, 'categoryName': category_name,
+    }
+    properties = [(prop, fetched.get(prop, default)) for prop, default in _ACCOUNT_EXT_DATA_PROPERTIES]
+    return _php_object(ACCOUNT_CLASS, properties)
+
+
+def write_public_link_vault(snapshot: bytes, link_hash: bytes, password_salt: str, time_set: int) -> bytes:
+    """Return the serialized SP\\Core\\Crypt\\Vault PHP stores in PublicLink.data."""
+    from app.core.defuse_compat import encrypt_with_password
+
+    if not password_salt:
+        raise ValueError('PHP password salt is unavailable')
+    seed = hashlib.sha1(password_salt.encode('utf-8') + link_hash).hexdigest()  # nosec B324 -- PHP format
+    ciphertext, key = encrypt_with_password(snapshot.decode('utf-8'), seed)
+    private = b'\x00' + VAULT_CLASS + b'\x00'
+    return _php_object(VAULT_CLASS, [
+        (private + b'data', ciphertext.encode('ascii')),
+        (private + b'key', key.encode('ascii')),
+        (private + b'timeSet', int(time_set)),
+        (private + b'timeUpdated', 0),
+    ])

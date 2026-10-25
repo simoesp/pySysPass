@@ -1,29 +1,40 @@
 """Backup Service - Database and file backups"""
-from typing import Optional, Dict
 import os
-import re
-import subprocess
-import zipfile
 import shutil
+import subprocess
+import tempfile
+import uuid
+import zipfile
 from datetime import datetime
 from pathlib import Path
+from typing import Dict, Optional
+
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import ArgumentError
 
 
 def _parse_db_url(db_url: str) -> Optional[Dict]:
     """Extract host/port/user/password/dbname from a SQLAlchemy URL."""
-    m = re.match(
-        r"[^:]+://(?P<user>[^:]+):(?P<password>[^@]*)@(?P<host>[^:/]+)(?::(?P<port>\d+))?/(?P<db>[^?]+)",
-        db_url,
-    )
-    if not m:
+    try:
+        url = make_url(db_url)
+    except (ArgumentError, TypeError):
+        return None
+    if url.get_backend_name() not in ("mysql", "mariadb") or not url.host or not url.database or not url.username:
+        return None
+    # Never silently drop TLS or connection options when handing off to a CLI.
+    if set(url.query) - {"charset"}:
         return None
     return {
-        "user": m.group("user"),
-        "password": m.group("password"),
-        "host": m.group("host"),
-        "port": int(m.group("port") or 3306),
-        "db": m.group("db"),
+        "user": url.username,
+        "password": url.password or "",
+        "host": url.host,
+        "port": url.port or 3306,
+        "db": url.database,
     }
+
+
+def _mysql_client(*names: str) -> Optional[str]:
+    return next((path for name in names if (path := shutil.which(name))), None)
 
 
 class BackupService:
@@ -31,7 +42,7 @@ class BackupService:
 
     def __init__(self, backup_dir: str = "./backups"):
         self.backup_dir = Path(backup_dir).resolve()
-        self.backup_dir.mkdir(parents=True, exist_ok=True)
+        self.backup_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
 
     def resolve_backup_path(self, filename: str) -> Path:
         """Select an existing direct-child ZIP without building a user path."""
@@ -62,23 +73,27 @@ class BackupService:
     def _try_mysqldump(self, db_url: str, dest: Path) -> bool:
         """Run mysqldump if available. Returns True on success."""
         params = _parse_db_url(db_url)
-        if not params or not shutil.which("mysqldump"):
+        binary = _mysql_client("mysqldump", "mariadb-dump")
+        if not params or not binary:
             return False
         env = {**os.environ, "MYSQL_PWD": params["password"]}
         cmd = [
-            "mysqldump",
+            binary,
+            "--single-transaction", "--quick", "--skip-lock-tables", "--hex-blob",
             f"-h{params['host']}",
             f"-P{params['port']}",
             f"-u{params['user']}",
-            params["db"],
+            "--", params["db"],
         ]
         try:
-            result = subprocess.run(  # nosec B603
-                cmd, capture_output=True, text=True, timeout=120, env=env
-            )
-            if result.returncode == 0:
-                dest.write_text(result.stdout, encoding="utf-8")
+            with dest.open("wb") as output:
+                os.chmod(dest, 0o600)
+                result = subprocess.run(  # nosec B603
+                    cmd, stdout=output, stderr=subprocess.DEVNULL, timeout=120, env=env
+                )
+            if result.returncode == 0 and dest.stat().st_size > 0:
                 return True
+            dest.unlink(missing_ok=True)
         except (subprocess.TimeoutExpired, OSError):
             pass
         return False
@@ -86,20 +101,21 @@ class BackupService:
     def _try_mysql_restore(self, db_url: str, source: Path) -> bool:
         """Restore a MySQL dump if the mysql client is available."""
         params = _parse_db_url(db_url)
-        if not params or not shutil.which("mysql") or not source.exists():
+        binary = _mysql_client("mysql", "mariadb")
+        if not params or not binary or not source.exists():
             return False
         env = {**os.environ, "MYSQL_PWD": params["password"]}
         cmd = [
-            "mysql",
+            binary,
             f"-h{params['host']}",
             f"-P{params['port']}",
             f"-u{params['user']}",
-            params["db"],
+            "--", params["db"],
         ]
         try:
             with source.open("rb") as dump_file:
                 result = subprocess.run(  # nosec B603
-                    cmd, stdin=dump_file, capture_output=True, timeout=120, env=env
+                    cmd, stdin=dump_file, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120, env=env
                 )
             return result.returncode == 0
         except (subprocess.TimeoutExpired, OSError):
@@ -115,7 +131,7 @@ class BackupService:
                     normalized = name.strip("/")
                     if normalized == "database.sql":
                         db_included = True
-                    if normalized.startswith("data/"):
+                    if normalized == "data" or normalized.startswith("data/"):
                         data_included = True
                     if db_included and data_included:
                         break
@@ -140,47 +156,54 @@ class BackupService:
                 if (member.external_attr >> 16) & 0o170000 == 0o120000:
                     raise RuntimeError("Backup archive contains symbolic links")
                 if member.is_dir():
-                    dest_path.mkdir(parents=True, exist_ok=True)
+                    dest_path.mkdir(parents=True, exist_ok=True, mode=0o700)
                     continue
-                dest_path.parent.mkdir(parents=True, exist_ok=True)
+                dest_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
                 with archive.open(member, "r") as source, dest_path.open("wb") as dest:
+                    os.chmod(dest_path, 0o600)
                     shutil.copyfileobj(source, dest)
 
     # ── Public API ───────────────────────────────────────────────────────────
 
     def create_full_backup(self, db_url: str = None, include_files: bool = True) -> Dict:
-        """Create a full backup (DB dump if possible + data directory)."""
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup_name = f"syspass_full_backup_{timestamp}"
-        staging = self.backup_dir / backup_name
-        staging.mkdir(parents=True, exist_ok=True)
-
-        db_included = False
+        """Publish an archive only after every requested payload succeeds."""
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_name = f"syspass_full_backup_{stamp}_{uuid.uuid4().hex}"
+        staging = Path(tempfile.mkdtemp(prefix=".backup-", dir=self.backup_dir))
+        partial_archive = Path(str(staging) + ".zip")
         try:
-            if db_url:
-                dump_dest = staging / "database.sql"
-                db_included = self._try_mysqldump(db_url, dump_dest)
-
+            if db_url and not self._try_mysqldump(db_url, staging / "database.sql"):
+                raise RuntimeError("Requested database dump failed; no backup was published")
             data_dir = Path("./data")
-            if include_files and data_dir.exists():
-                shutil.copytree(data_dir, staging / "data", dirs_exist_ok=True)
-
-            archive_path = self.backup_dir / f"{backup_name}.zip"
+            data_included = include_files and data_dir.is_dir()
+            if data_included:
+                if data_dir.is_symlink() or any(path.is_symlink() for path in data_dir.rglob("*")):
+                    raise RuntimeError("Runtime data contains symbolic links; backup refused")
+                shutil.copytree(data_dir, staging / "data")
+            if not db_url and not data_included:
+                raise RuntimeError("No database or runtime data to back up")
+            partial_archive.touch(mode=0o600, exist_ok=False)
             shutil.make_archive(str(staging), "zip", staging)
-            shutil.rmtree(staging)
-
+            os.chmod(partial_archive, 0o600)
+            with zipfile.ZipFile(partial_archive) as archive:
+                if archive.testzip() is not None:
+                    raise RuntimeError("Backup archive verification failed")
+            archive_path = self.backup_dir / f"{backup_name}.zip"
+            partial_archive.replace(archive_path)
             stat = archive_path.stat()
             return {
                 "filename": archive_path.name,
                 "path": str(archive_path),
                 "size": stat.st_size,
                 "created_at": datetime.fromtimestamp(stat.st_ctime).isoformat(),
-                "db_included": db_included,
+                "db_included": bool(db_url),
+                "data_included": data_included,
             }
         except Exception as exc:
-            if staging.exists():
-                shutil.rmtree(staging)
             raise RuntimeError(f"Backup failed: {exc}") from exc
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+            partial_archive.unlink(missing_ok=True)
 
     def create_database_backup(self, db_dump_path: str) -> str:
         """Create a database-only backup"""
@@ -196,36 +219,15 @@ class BackupService:
 
     def create_data_backup(self) -> str:
         """Backup data directory (RSA keys, etc.)"""
-        data_dir = Path("./data")
-        if not data_dir.exists():
-            raise FileNotFoundError("Data directory not found")
-
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup_name = f"syspass_data_backup_{timestamp}"
-        backup_path = self.backup_dir / backup_name
-
-        try:
-            shutil.copytree(data_dir, backup_path)
-
-            # Create archive
-            archive_path = self.backup_dir / f"{backup_name}.zip"
-            shutil.make_archive(str(backup_path), 'zip', backup_path)
-
-            # Clean up
-            shutil.rmtree(backup_path)
-
-            return str(archive_path)
-
-        except Exception as e:
-            if backup_path.exists():
-                shutil.rmtree(backup_path)
-            raise Exception(f"Data backup failed: {str(e)}")
+        return self.create_full_backup(include_files=True)["path"]
 
     def list_backups(self) -> list:
         """List all available backups"""
         backups = []
 
         for file in self.backup_dir.glob("*.zip"):
+            if file.name.startswith(".") or file.is_symlink():
+                continue
             stat = file.stat()
             contents = self._inspect_archive(file)
             backups.append({
@@ -241,57 +243,87 @@ class BackupService:
         backups.sort(key=lambda x: x['created_at'], reverse=True)
         return backups
 
-    def restore_backup(self, filename: str, db_url: Optional[str] = None) -> Dict:
-        """Restore from a backup archive."""
+    def restore_backup(self, filename: str, db_url: Optional[str] = None, *, offline: bool = False) -> Dict:
+        """Restore with writers stopped; preserve the mounted data directory."""
+        if not offline:
+            raise RuntimeError("Restore requires the offline recovery command with all application writers stopped")
         archive_path = self.resolve_backup_path(filename)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        restore_dir = self.backup_dir / f"restore_{timestamp}"
-        staged_data_dir = self.backup_dir / f"data_restore_{timestamp}"
-        rollback_data_dir = self.backup_dir / f"data_rollback_{timestamp}"
-        target_data = Path("./data")
-
+        work = Path(tempfile.mkdtemp(prefix=".restore-", dir=self.backup_dir))
+        target = Path("./data")
+        data_work = None
+        moved_original = []
+        installed = []
+        database_attempted = False
+        keep_recovery = False
         try:
-            restore_dir.mkdir(parents=True, exist_ok=True)
-            self._extract_archive(archive_path, restore_dir)
-
-            db_file = restore_dir / "database.sql"
-            data_dir = restore_dir / "data"
-            db_restored = False
-            data_restored = False
-
-            if db_file.exists():
+            payload = work / "payload"
+            self._extract_archive(archive_path, payload)
+            dump = payload / "database.sql"
+            data = payload / "data"
+            if not dump.is_file() and not data.is_dir():
+                raise RuntimeError("Archive contains no database or runtime data")
+            if dump.is_file():
                 if not db_url:
                     raise RuntimeError("Database restore requires a configured DATABASE_URL")
-                if not self._try_mysql_restore(db_url, db_file):
+                if not self._try_mysqldump(db_url, work / "rollback.sql"):
+                    raise RuntimeError("Cannot capture recovery database snapshot; nothing was restored")
+            if data.is_dir():
+                if target.is_symlink():
+                    raise RuntimeError("Runtime data directory must not be a symbolic link")
+                target.mkdir(parents=True, exist_ok=True, mode=0o700)
+                # Stage on the same filesystem as the mounted directory's contents.
+                data_work = Path(tempfile.mkdtemp(prefix=".restore-", dir=target)).resolve()
+                shutil.copytree(data, data_work / "new")
+                (data_work / "original").mkdir()
+                for child in list(target.iterdir()):
+                    if child.name == data_work.name:
+                        continue
+                    child.replace(data_work / "original" / child.name)
+                    moved_original.append(child.name)
+                for child in (data_work / "new").iterdir():
+                    child.replace(target / child.name)
+                    installed.append(child.name)
+            if dump.is_file():
+                database_attempted = True
+                if not self._try_mysql_restore(db_url, dump):
                     raise RuntimeError("Failed to restore database dump with mysql client")
-                db_restored = True
-
-            if data_dir.exists():
-                shutil.copytree(data_dir, staged_data_dir)
-                if target_data.exists():
-                    target_data.replace(rollback_data_dir)
-                staged_data_dir.replace(target_data)
-                data_restored = True
-                if rollback_data_dir.exists():
-                    shutil.rmtree(rollback_data_dir)
-
             return {
                 "filename": archive_path.name,
-                "db_restored": db_restored,
-                "data_restored": data_restored,
+                "db_restored": dump.is_file(),
+                "data_restored": data.is_dir(),
             }
-
         except Exception as exc:
-            if staged_data_dir.exists():
-                shutil.rmtree(staged_data_dir, ignore_errors=True)
-            if rollback_data_dir.exists() and not target_data.exists():
-                rollback_data_dir.replace(target_data)
-            raise RuntimeError(f"Restore failed: {exc}") from exc
+            rollback_errors = []
+            if database_attempted:
+                try:
+                    if not self._try_mysql_restore(db_url, work / "rollback.sql"):
+                        rollback_errors.append("database rollback failed")
+                except Exception:
+                    rollback_errors.append("database rollback failed")
+            if data_work is not None:
+                try:
+                    for name in installed:
+                        path = target / name
+                        if path.is_dir() and not path.is_symlink():
+                            shutil.rmtree(path)
+                        else:
+                            path.unlink(missing_ok=True)
+                    for name in moved_original:
+                        (data_work / "original" / name).replace(target / name)
+                except OSError:
+                    rollback_errors.append("runtime data rollback failed")
+            if rollback_errors:
+                keep_recovery = True
+                raise RuntimeError(
+                    f"Restore failed; {'; '.join(rollback_errors)}. Keep applications stopped. "
+                    f"Recovery material retained at {work} and {data_work}"
+                ) from exc
+            raise RuntimeError(f"Restore failed; original state recovered where modified: {exc}") from exc
         finally:
-            if restore_dir.exists():
-                shutil.rmtree(restore_dir, ignore_errors=True)
-            if rollback_data_dir.exists():
-                shutil.rmtree(rollback_data_dir, ignore_errors=True)
+            if not keep_recovery:
+                shutil.rmtree(work, ignore_errors=True)
+                if data_work is not None:
+                    shutil.rmtree(data_work, ignore_errors=True)
 
     def delete_backup(self, filename: str) -> bool:
         """Delete a backup file"""
@@ -307,6 +339,8 @@ class BackupService:
         deleted_count = 0
 
         for file in self.backup_dir.glob("*.zip"):
+            if file.name.startswith(".") or file.is_symlink():
+                continue
             stat = file.stat()
             file_date = datetime.fromtimestamp(stat.st_ctime)
 

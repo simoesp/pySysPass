@@ -1,0 +1,28 @@
+{
+    "source": {
+        "application": "sysPass plugin-Authenticator",
+        "syspass_commit": "9d0e169d2163897238877fb65130db47fe1ddcfa",
+        "plugin_commit": "b3046617b51656999fe7e277a1ec4a4d7e374732",
+        "defuse_version": "2.4.0",
+        "authored_by": "Native AuthenticatorData, serialize() and EncryptedModel encryption; synthetic user"
+    },
+    "master_password": "authenticator-fixture-master-not-a-secret",
+    "plugin_data": {
+        "name": "Authenticator",
+        "itemId": 7,
+        "data": "def50200de92c5d190027ec71a698db7452e867b85e45128a59bdfe19563ddacde70ea57bd5ab3d54217aa739509c0aedc75fbfb00504f4e03c0946d63ec4fb0982fefefa21bc25a979f422fda39d7517380a70f1086d9fa1bb6a53a24016fa391cc23017f1f56707f01dcedcb9e80c6d09de6ca549aa96de32af7da85398423dec73de08e4192ddf9bc7594cc1b04a6294fd33c989cc1023f494d24ec2688f661813cb4cc85134121d70f75c40a8e70575576bfca4ea0b5b1ce0ccb3fb638ffeb189371180d0d7501e28f7a214bad352d367d7fc9256280a59a4fac8eb30ef54635468bbef2202cf6b3d5fa1f9257541605a8265ba0f5896430ca2e95f2096e6aed4c6ab3f654b23d2fc2e536ee333a543de4644ba47dc43f1dce71949423fcf231c9863eaad66317eff83f857a19a0ca5cccee01ca2d6950c2bf0cff333d810587a004d7d7ade5f8ecd8e8599ffd86d36dbc246c6f075f49fc2cf05bba790cf744c6e3be037c9e9a894e7e66c5092e43e92c44f947ed05e07dfde813c524e206dcfee70667f36dcb5ae4527ad5931739c3b70984b2",
+        "key": "def10000def502004c4c5246a20a033947776444dc573d160d29c9a86d866fd80497fc37c8be0ff6d1a66d6eaad7d38280a1c773b32ce8cd96408e2753f52878a0e168a0886f524770ab1cd67b0e9df5958b6e19a37d304dc3fcbf3a252314bac1523ab84e19a56327466ad4bdd2d8a567a5b6d2b188eb89445351ae30dcb897b384328f4c43686054b52df0d4f8590c196e833e99f1e4b775b5f0f64a476759357b582f7851b3ef4f600c179e1460a165fea44f6ad4319b0d71487be9eae579f767b6f27d4a829d53250db750d162c6cf0d9bc6cca909ff3c338936cd37b60e9c269bf32253464202728a8817cf1dd347e7ae367d5e5f8649317f5f75a03129"
+    },
+    "expected": {
+        "userId": 7,
+        "IV": "JBSWY3DPEHPK3PXP",
+        "twofaEnabled": true,
+        "expireDays": 90,
+        "date": 1788742791,
+        "recoveryCodes": [
+            "0123456789abcdef0123",
+            "fedcba9876543210fedc"
+        ],
+        "lastRecoveryTime": 1788742800
+    }
+}

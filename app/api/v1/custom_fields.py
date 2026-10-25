@@ -115,7 +115,7 @@ class CustomFieldValueResponse(BaseModel):
 
 # Custom Field Type Endpoints
 @router.get("/types", response_model=List[dict])
-async def get_custom_field_types(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+def get_custom_field_types(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     """Get all custom field types"""
     service = CustomFieldTypeService(db, get_encryption_service())
     types = service.get_all()
@@ -131,7 +131,7 @@ async def get_custom_field_types(db: Session = Depends(get_db), current_user=Dep
 
 
 @router.post("/types", response_model=dict)
-async def create_custom_field_type(
+def create_custom_field_type(
     data: CustomFieldTypeCreate,
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('mgm_custom_fields')),
@@ -159,7 +159,7 @@ async def create_custom_field_type(
 
 
 @router.put("/types/{type_id}", response_model=dict)
-async def update_custom_field_type(
+def update_custom_field_type(
     type_id: int,
     data: CustomFieldTypeUpdate,
     db: Session = Depends(get_db),
@@ -189,7 +189,7 @@ async def update_custom_field_type(
 
 
 @router.delete("/types/{type_id}")
-async def delete_custom_field_type(
+def delete_custom_field_type(
     type_id: int,
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('mgm_custom_fields')),
@@ -204,7 +204,7 @@ async def delete_custom_field_type(
 
 # Custom Field Definition Endpoints
 @router.get("/definitions", response_model=List[dict])
-async def get_custom_field_definitions(
+def get_custom_field_definitions(
     type_id: Optional[int] = None,
     module_id: Optional[int] = None,
     db: Session = Depends(get_db),
@@ -240,7 +240,7 @@ async def get_custom_field_definitions(
 
 
 @router.post("/definitions", response_model=dict)
-async def create_custom_field_definition(
+def create_custom_field_definition(
     data: CustomFieldDefCreate,
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('mgm_custom_fields')),
@@ -279,7 +279,7 @@ async def create_custom_field_definition(
 
 
 @router.put("/definitions/{def_id}", response_model=dict)
-async def update_custom_field_definition(
+def update_custom_field_definition(
     def_id: int,
     data: CustomFieldDefUpdate,
     db: Session = Depends(get_db),
@@ -317,7 +317,7 @@ async def update_custom_field_definition(
 
 
 @router.delete("/definitions/{def_id}")
-async def delete_custom_field_definition(
+def delete_custom_field_definition(
     def_id: int,
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('mgm_custom_fields')),
@@ -333,7 +333,7 @@ async def delete_custom_field_definition(
 # ── Module reference ──────────────────────────────────────────────────────────
 
 @router.get("/modules")
-async def get_modules(current_user=Depends(get_current_user)):
+def get_modules(current_user=Depends(get_current_user)):
     """Return the module ID → label mapping so the frontend knows which ID to use per entity."""
     return [{"id": k, "label": v} for k, v in MODULE_LABELS.items()]
 
@@ -343,7 +343,7 @@ async def get_modules(current_user=Depends(get_current_user)):
 # routes (/values/{module_id}/{item_id}) to avoid shadowing.
 
 @router.get("/values/account/{account_id}", response_model=List[dict])
-async def get_account_custom_field_values(
+def get_account_custom_field_values(
     account_id: int,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
@@ -355,7 +355,7 @@ async def get_account_custom_field_values(
 
 
 @router.get("/values/{module_id}/{item_id}", response_model=List[dict])
-async def get_item_custom_field_values(
+def get_item_custom_field_values(
     module_id: int,
     item_id: int,
     db: Session = Depends(get_db),
@@ -368,7 +368,7 @@ async def get_item_custom_field_values(
 
 
 @router.post("/values", response_model=dict)
-async def set_custom_field_value(
+def set_custom_field_value(
     data: CustomFieldValueCreate,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
@@ -403,7 +403,7 @@ async def set_custom_field_value(
 
 
 @router.delete("/values/account/{def_id}/{account_id}")
-async def delete_account_custom_field_value(
+def delete_account_custom_field_value(
     def_id: int,
     account_id: int,
     db: Session = Depends(get_db),
@@ -419,7 +419,7 @@ async def delete_account_custom_field_value(
 
 
 @router.delete("/values/{def_id}/{module_id}/{item_id}")
-async def delete_custom_field_value(
+def delete_custom_field_value(
     def_id: int,
     module_id: int,
     item_id: int,

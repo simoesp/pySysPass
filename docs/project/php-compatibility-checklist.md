@@ -58,19 +58,82 @@ Compatibility should be treated as successful only when:
   physical table stops repair rather than being dropped. Revision `002` requires
   an online database connection so existing objects can be inspected.
 - Remove or isolate Python-only behavior that implies extra persisted fields not present in PHP tables.
-- Replace the explicit compatibility exception for Python-only
-  `AccountHistory.action`, `oldValue`, and `newValue` fields with non-persisted
-  or PHP-compatible behavior.
-- Remove the explicit nullability exceptions after account creation and test
-  fixtures always supply the PHP-required user profile, hash, client, and
-  category values.
+- ✅ No Python-only `AccountHistory` columns are mapped; the Python-only column
+  exception map is empty (`action` is a computed, non-persisted property).
+- ✅ `Account.clientId`/`categoryId` and the matching `AccountHistory` columns
+  are `NOT NULL` in the ORM, as in PHP, and their nullability exceptions were
+  removed. The API requires both IDs, as PHP `AccountForm::checkCommon()` does,
+  and returns 422 for missing or unknown client/category/tag/user/group IDs
+  and for values longer than the PHP columns. Deleting a client or category
+  still used by an account or history row returns 409 (PHP's FKs restrict it;
+  the ORM previously nulled the references). Verified on MySQL 8.0.46 by
+  `tests/test_mysql_account_references.py`, which also runs in CI.
+- ✅ `User.name`, `User.userProfileId`, and `User.hashSalt` are `NOT NULL` in
+  the ORM, as in PHP, and their parity exceptions are gone. Only the `id`
+  columns of `User`, `UserGroup`, and `UserProfile` remain listed; they are
+  assigned explicitly, as in PHP.
+- ✅ The entire backend suite also runs on MySQL 8, against a database
+  bootstrapped from `schemas/dbstructure.sql` (`PYSYSPASS_SUITE_MYSQL_URL`, CI
+  job "Backend tests on canonical MySQL 8"). Real foreign keys, `NOT NULL`
+  columns, and strict lengths therefore apply to every test.
 
 ### 2. Encryption And Secret Handling
 
+- Password reset and administrator password edits now use the existing PHP
+  `isChangedPass` migration flow. Regression coverage begins with PHP-authored
+  `mPass`/`mKey`, verifies they remain unchanged at password replacement, then
+  verifies recovery with the previous login password. No schema changes are used.
+- The online encryption-key rotation route still refuses requests. The vault
+  master password is changed offline with `python -m app.rotate_master_password`,
+  which follows PHP `MasterPassService::changeMasterPassword()` (accounts,
+  matching history rows, encrypted custom fields, `masterPwd`, `lastupdatempass`).
+  It is all-or-nothing in one transaction, backs up first, and verifies with the
+  new password before commit. Upstream PHP decrypted a pySysPass-rotated vault
+  and accepted the new hash. `ENCRYPTION_KEY` rotation is supported once no
+  legacy values remain (`python -m app.encryption_key check`), then
+  `end-sessions`.
+- ✅ Sign-in follows PHP `loadUserMPass()`: a user's `mPass` older than
+  `lastupdatempass` (MPASS_CHANGED) or one that fails `Hash::checkHashKey()`
+  against `masterPwd` (MPASS_WRONG) no longer unlocks the vault. Previously,
+  after a PHP master change, pySysPass would have kept using the old master and
+  written ciphertext PHP users could not open.
+- ✅ `masterPwd` hashing matches PHP `Hash::hashKey()`, including SHA-256
+  pre-hashing of keys longer than 72 characters.
 - ✅ The offline sysPass 3.2.11 fixture verifies PHP-created login/master bcrypt
   hashes, decrypts PHP-created `User.mPass`/`User.mKey`, and decrypts a password
   written by PHP's `account/saveCreate` endpoint from `Account.pass`/`Account.key`.
-- Add the reverse round trip: verify Python-produced encrypted values with PHP.
+- ✅ Reverse round trip: every pySysPass credential write (account API
+  create/update/copy, CSV/KeePass/XML import, public links) is decoded by the
+  upstream sysPass PHP classes (`Crypt::decrypt`, `Vault::getData`,
+  `PublicLinkKey`, `Util::unserialize`) at commit `9d0e169` with Defuse 2.4.0
+  in `tests/compatibility/test_php_reverse_roundtrip.py`, a CI job. The PHP
+  runtime is the class library, not the web UI; a UI-level check is still open.
+- ✅ Writes without the vault master password are refused (`428`) instead of
+  falling back to the Python AES format. Native-format rows are never passed to
+  the legacy decryptor. Legacy Python rows stay readable and are not rewritten.
+- ✅ Public links are created natively: a PHP-serialized `Vault` holding the
+  `AccountExtData` that `getDataForLink()` would produce. Its serializer
+  reproduces the PHP-authored fixture byte for byte. PHP links have no access
+  password, so new links cannot have one; legacy password links stay readable.
+- ✅ Built-in 2FA writes the PHP Authenticator plugin's own format: a
+  `PluginData` row per enrolled user holding serialized `AuthenticatorData`,
+  Defuse-encrypted under the vault master password (plugin commit `b304661`).
+  The upstream plugin decodes pySysPass enrollments, and its TOTP check accepts
+  them (CI). A PHP-authored row is a committed fixture; Python reproduces its
+  bytes and signs in with its TOTP and recovery codes. Through the PHP web UI,
+  with the plugin installed in the official 3.2.11 image, PHP's own 2FA step
+  rejects a wrong code for a pySysPass enrollment and accepts a current TOTP
+  and a pySysPass recovery code (CI). As in PHP, 2FA is checked
+  after the vault is unlocked. Pending setup secrets stay outside PHP tables
+  (`data/two-factor-pending.json`), so a row always means "enrolled". New
+  secrets and recovery codes use PHP's formats.
+- ✅ `python -m app.encryption_key migrate` converts legacy pySysPass account,
+  history, and 2FA rows to the native formats; upstream PHP reads the converted
+  rows (CI). Legacy public links are reported and removed only on request,
+  never converted. The enabled/enforced
+  policy now lives in runtime JSON. Saving the 2FA mode clears the old JSON in
+  `Plugin.data` and sets PHP's `versionLevel`; until then PHP's plugin upgrade
+  could fail on that row. PHP's per-plugin expiry warnings are not shown.
 - Confirm temporary master password and password-reset flows do not diverge from PHP semantics where shared data is involved.
 
 ### 3. Auth, Permissions, And Profiles
@@ -93,7 +156,49 @@ Compatibility should be treated as successful only when:
   ACL-relevant rows for all 100 accounts and ten users. CI reconstructs the
   corpus without MySQL or secret payloads and checks both the secure default
   and PHP's optional full-group-access behavior.
+- ✅ Sessions follow PHP's inactivity timeout (`session_timeout`, default 300
+  seconds, from runtime JSON or the `Config` table; PHP's `config.xml`
+  `sessionTimeout` is not read) and end on logout.
+  Tokens bind to an HMAC of `User.pass`, so a password changed by sysPass PHP
+  also ends pySysPass sessions. Revocation state lives in `data/sessions.json`,
+  not in PHP tables.
+- ✅ Item presets use PHP's format: types `account.permission`,
+  `account.private`, `account.password`, and `session.timeout`;
+  PHP-serialized `SP\DataModel\ItemPreset\*` data; and PHP's
+  `sha1(type . ids . priority)` hash. A PHP-authored fixture round-trips byte
+  for byte, and PHP's `ItemPresetData::hydrate()` reads pySysPass rows (CI).
+  Lookup follows PHP's `getByFilter()` score. Fixed presets are enforced as in
+  PHP: session lifetime per client network, account privacy, default shares,
+  and password policy. Earlier pySysPass rows (JSON, other type names) are shown
+  as legacy and not applied until resaved. `use_image` is enforced as in PHP
+  `getPasswordPreset()` (fixed presets only): viewing a password returns an
+  image. `score` is stored only; sysPass PHP 3.2.11 does not enforce it either
+  (it feeds the edit form, and `PasswordValidator` never reads it).
+- ✅ Password-as-image settings: `account_pass_to_image` (falling back to PHP
+  `config.xml` `accountPassToImage`) and `publinks_image_enabled` (falling back
+  to `publinksImageEnabled`) follow PHP `viewPass` / `viewLink`. Copy still
+  returns text, as in PHP. The PNG is rendered with Pillow's bundled font, not
+  PHP's NotoSans, so it is not pixel-identical; no data is persisted.
 - Confirm user-group membership behavior matches PHP tables exactly.
+- ✅ Maintenance mode is enforced: sign-in, API (including API tokens), public
+  links, password reset, and registration return 503. Deliberate divergence:
+  PHP admits only the maintenance task's lock holder, while pySysPass admits
+  application administrators so maintenance can be switched off in the UI.
+- ✅ Force HTTPS redirects plain HTTP (308), like PHP `HttpUtil::checkHttps()`,
+  after trusted-proxy scheme normalization.
+- ✅ Attachments follow PHP: `files_enabled` gates upload and listing, the
+  decoded size is compared with `files_allowed_size` × 1000 bytes (maximum
+  16384 KB), and the stored extension is the upper-cased file-name suffix.
+  The MIME rule follows PHP `checkAllowedMimeType()`: the declared type is
+  accepted if allowed, otherwise the type libmagic detects from the content
+  (PHP `mime_content_type()`), which is then stored instead. The allowed list
+  is pySysPass's `files_allowed_mime`, otherwise PHP `config.xml`
+  `filesAllowedMime`, where an empty PHP list refuses every upload. The image
+  installs `libmagic1`; without libmagic only the declared type is checked.
+  Detection results can differ from PHP's where the magic databases differ
+  (PHP's fileinfo bundles its own). Divergence: with no list configured in
+  either place, pySysPass applies no MIME rule (only `files_allowed_exts`),
+  whereas PHP's default empty list refuses every upload.
 - Compare admin, account-admin, disabled-user, and forced-password-change behavior with upstream sysPass flows.
 
 ### 4. Account And Sharing Behavior
@@ -139,10 +244,26 @@ Compatibility should be treated as successful only when:
   account `pass`/`key` ciphertext, and uses PHP-compatible Defuse encryption for
   protected exports. PHP's own DOM/Defuse runtime verified a Python export's
   SHA-1/HMAC integrity fields and decrypted all four sections.
-- Importing a complete Python-generated export through the PHP UI remains an
-  open mutation test; run it against an isolated database before calling the
-  reverse application-level round trip complete.
-- Add fixture-based checks for KeePass and CSV mappings where compatibility claims are made.
+- ✅ Application-level round trip through the PHP web UI (CI job "sysPass PHP
+  web UI reads pySysPass data"): the official sysPass 3.2.11 image is
+  installed by its own installer, and pySysPass joins the PHP-created database
+  with the same salt. pySysPass signs in as the PHP-created admin, unlocking a
+  PHP-authored vault, then writes an account and a public link. PHP's
+  `viewLink` page and `account/viewPass` dialog show the password, and PHP
+  updates the counters.
+- ✅ A password-protected XML export written by pySysPass imports through the
+  PHP web UI's own Import screen (export and master passwords). After the
+  source account is deleted in pySysPass, PHP's view-password dialog decrypts
+  the imported copy (same CI job).
+- ✅ CSV, XML, and KeePass imports follow upstream PHP (`CsvImportBase`,
+  `KeepassImport`, master `9d0e169`): CSV/XML rows without a client or category
+  are rejected and reported, and KeePass entries get the `KeePass` client and a
+  category named after their parent group, including root-group entries
+  (previously uncategorized). A failing row is rolled back to a savepoint so
+  later rows still import. Python's header-based CSV and per-entry `client`
+  KeePass field remain Python conveniences, not PHP formats.
+- Add PHP-authored KeePass and CSV fixtures before claiming byte-level format
+  parity; the external KeePass fixture test still skips without `../phpSysPass`.
 
 ### 6. Runtime Configuration Compatibility
 
@@ -196,6 +317,8 @@ Compatibility should be treated as successful only when:
 - ✅ A separate MySQL 8 bootstrap job asserts all 27 physical tables and both
   canonical account views, checks that the views are queryable, and verifies
   bootstrap idempotence.
+- ✅ The MySQL job also runs API and import tests on a disposable database
+  bootstrapped from the canonical schema (`tests/test_mysql_account_references.py`).
 - The upstream-checkout freshness and external KeePass fixture checks skip
   when their external files are unavailable. Supply pinned fixtures before
   claiming that those checks run in every CI build.
@@ -224,3 +347,13 @@ fixture provenance, and snapshot/deletion behavior.
 Full public-link format parity remains incomplete: Python creation still
 writes the legacy format, and native writes plus live PHP UI round trips
 remain open. No encrypted payloads are migrated.
+
+
+Backup recovery follow-up: a MySQL 8 rehearsal restores the canonical schema and
+a Category row using container dump/import clients without adding schema fields.
+Mounted runtime files restore offline. This is recovery coverage, not proof of
+full PHP runtime or encrypted payload parity; external fixture skips remain.
+
+Runtime JSON writes now serialize and replace atomically without changing key
+names, grouped values, or XML/cache fallback precedence. Regression tests preserve
+the existing PHP password salt and unrecognized document sections during updates.

@@ -1,14 +1,15 @@
 import pytest
 
 from app.models.account import Account, AccountHistory, Config
-from app.schemas.account import AccountCreate, AccountUpdate
+from app.schemas.account import AccountUpdate
+from tests.account_refs import account_create, TEST_MASTER_PASSWORD
 from app.services.account_service import AccountService
 from app.services.history_service import HistoryService
 
 
 def _create_account(db_session, encryption_service, user, title="Test Account", password="secret"):
     return AccountService(db_session, encryption_service).create_account(
-        AccountCreate(title=title, password=password), user.id
+        account_create(title=title, password=password), user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
 
@@ -26,7 +27,7 @@ async def test_account_update_creates_php_compatible_preupdate_snapshot(
     updated = AccountService(db_session, encryption_service).update_account(
         created.id,
         AccountUpdate(title="Updated Title", password="new-secret"),
-        test_user.id,
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     rows = HistoryService(db_session).get_account_history(created.id, test_user.id)
@@ -48,8 +49,8 @@ async def test_multiple_updates_create_ordered_restore_snapshots(
 ):
     created = _create_account(db_session, encryption_service, test_user, title="Version 1")
     service = AccountService(db_session, encryption_service)
-    service.update_account(created.id, AccountUpdate(title="Version 2"), test_user.id)
-    service.update_account(created.id, AccountUpdate(title="Version 3"), test_user.id)
+    service.update_account(created.id, AccountUpdate(title="Version 2"), test_user.id, master_pass=TEST_MASTER_PASSWORD)
+    service.update_account(created.id, AccountUpdate(title="Version 3"), test_user.id, master_pass=TEST_MASTER_PASSWORD)
 
     rows = HistoryService(db_session).get_account_history(created.id, test_user.id)
     assert [row.name for row in rows] == ["Version 2", "Version 1"]
@@ -83,7 +84,7 @@ async def test_view_and_decrypt_counts_use_php_account_counters(
     accounts = AccountService(db_session, encryption_service)
     accounts.get_account(created.id, test_user.id)
     accounts.get_account(created.id, test_user.id)
-    accounts.get_decrypted_password(created.id, test_user.id)
+    accounts.get_decrypted_password(created.id, test_user.id, master_pass=TEST_MASTER_PASSWORD)
 
     history = HistoryService(db_session)
     assert history.get_account_view_count(created.id) == 2
@@ -119,10 +120,10 @@ def test_history_api_returns_snapshots_to_shared_users(
     from app.api.v1 import history as history_api
     from app.db.base import get_db
     from app.models.account import User
-    from app.services.auth_service import create_access_token, get_password_hash
+    from app.services.auth_service import issue_session_token, get_password_hash
 
     viewer = User(
-        username="history-viewer",
+        name="history-viewer", username="history-viewer",
         email="history-viewer@example.com",
         password=get_password_hash("testpassword"),
         isUserAdmin=False,
@@ -135,16 +136,16 @@ def test_history_api_returns_snapshots_to_shared_users(
     db_session.refresh(viewer)
 
     created = AccountService(db_session, encryption_service).create_account(
-        AccountCreate(
+        account_create(
             title="Shared History Version 1",
             password="secret",
             is_public=True,
             shared_users=[{"user_id": viewer.id, "is_edit": False}],
         ),
-        test_user.id,
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
     AccountService(db_session, encryption_service).update_account(
-        created.id, AccountUpdate(title="Shared History Version 2"), test_user.id
+        created.id, AccountUpdate(title="Shared History Version 2"), test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     app = FastAPI()
@@ -154,7 +155,7 @@ def test_history_api_returns_snapshots_to_shared_users(
         yield db_session
 
     app.dependency_overrides[get_db] = override_get_db
-    token = create_access_token({"user_id": viewer.id, "username": viewer.username})
+    token = issue_session_token(viewer, master_pass=TEST_MASTER_PASSWORD)
     response = TestClient(app).get(
         f"/api/v1/accounts/{created.id}/history",
         headers={"Authorization": f"Bearer {token}"},
@@ -206,7 +207,7 @@ async def test_history_visibility_follows_snapshot_group(
     history.create_snapshot(acc_row, is_modify=True)  # snapshot from group-21 era
 
     viewer = User(
-        username="era-b-viewer", email="erab@example.com",
+        name="era-b-viewer", userProfileId=1, hashSalt=b"s" * 32, username="era-b-viewer", email="erab@example.com",
         password=get_password_hash("x"), userGroupId=21,
     )
     db_session.add(viewer)

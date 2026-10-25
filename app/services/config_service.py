@@ -1,6 +1,12 @@
-from sqlalchemy.orm import Session
 from typing import Optional, Dict
-from app.core.runtime_json_config import get_runtime_config_value, set_runtime_config_value
+
+from sqlalchemy.orm import Session
+
+from app.core.runtime_json_config import (
+    get_runtime_config_value,
+    set_runtime_config_value,
+    set_runtime_config_values,
+)
 from app.models.account import Config
 from app.schemas.config import (
     GeneralSettings, MailSettings, LdapSettings, AllSettings,
@@ -30,8 +36,10 @@ class ConfigService:
         self.db.commit()
 
     def set_many(self, params: Dict[str, Optional[str]]) -> None:
+        handled = set_runtime_config_values(params)
         for k, v in params.items():
-            self.set(k, v)
+            if k not in handled:
+                self.set(k, v)
 
     def get_all(self) -> Dict[str, Optional[str]]:
         rows = self.db.query(Config).all()
@@ -48,7 +56,7 @@ class ConfigService:
             "ldap_defaultgroup", "ldap_defaultprofile", "account_count", "account_link",
             "account_pass_to_image", "account_full_group_access", "account_expire_enabled",
             "account_expire_time", "global_search", "results_as_cards", "demo_enabled",
-            "files_enabled", "files_allowed_size", "files_allowed_exts", "publinks_enabled",
+            "files_enabled", "files_allowed_size", "files_allowed_exts", "files_allowed_mime", "publinks_enabled",
             "publinks_image_enabled", "publinks_max_time", "publinks_max_views",
             "wiki_enabled", "wiki_pageurl", "wiki_searchurl", "wiki_filter",
             "dokuwiki_enabled", "dokuwiki_url", "dokuwiki_url_base", "dokuwiki_user",
@@ -189,6 +197,7 @@ class ConfigService:
             files_enabled=self._bool_val("files_enabled", True),
             files_allowed_size=self._int_val("files_allowed_size", 1024),
             files_allowed_exts=self.get("files_allowed_exts"),
+            files_allowed_mime=self.get("files_allowed_mime"),
             publinks_enabled=self._bool_val("publinks_enabled"),
             publinks_image_enabled=self._bool_val("publinks_image_enabled"),
             publinks_max_time=self._int_val("publinks_max_time", 600),
@@ -212,6 +221,7 @@ class ConfigService:
             "files_enabled": str(s.files_enabled).lower() if s.files_enabled is not None else "true",
             "files_allowed_size": str(s.files_allowed_size) if s.files_allowed_size is not None else "1024",
             "files_allowed_exts": s.files_allowed_exts,
+            "files_allowed_mime": s.files_allowed_mime,
             "publinks_enabled": str(s.publinks_enabled).lower() if s.publinks_enabled is not None else "false",
             "publinks_image_enabled":
                 str(s.publinks_image_enabled).lower() if s.publinks_image_enabled is not None else "false",

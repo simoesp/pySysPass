@@ -12,7 +12,7 @@ router = APIRouter()
 account_history_view = require_any_permission("acc_view_history", account_admin=True)
 
 @router.get("/accounts/{account_id}/history", response_model=List[AccountHistoryResponse])
-async def get_account_history(
+def get_account_history(
     account_id: int,
     skip: int = 0,
     limit: int = 100,
@@ -30,7 +30,7 @@ async def get_account_history(
     )
 
 @router.get("/users/{user_id}/history", response_model=List[AccountHistoryResponse])
-async def get_user_history(
+def get_user_history(
     user_id: int,
     skip: int = 0,
     limit: int = 100,
@@ -45,7 +45,7 @@ async def get_user_history(
     return service.get_user_history(user_id, limit, skip)
 
 @router.get("/accounts/{account_id}/history/decrypt-count")
-async def get_decrypt_count(
+def get_decrypt_count(
     account_id: int,
     db: Session = Depends(get_db),
     current_user = Depends(account_history_view)
@@ -62,7 +62,7 @@ async def get_decrypt_count(
     return {"account_id": account_id, "decrypt_count": count}
 
 @router.get("/accounts/{account_id}/history/view-count")
-async def get_view_count(
+def get_view_count(
     account_id: int,
     db: Session = Depends(get_db),
     current_user = Depends(account_history_view)

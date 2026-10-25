@@ -148,7 +148,7 @@ async def test_get_group_members_with_details(db_session, test_user):
     service.add_user_to_group(test_user.id, group.id)
 
     other_user = User(
-        username="otheruser",
+        name="otheruser", userProfileId=1, hashSalt=b"s" * 32, username="otheruser",
         email="other@example.com",
         password=get_password_hash("password"),
         isUserAdmin=False,

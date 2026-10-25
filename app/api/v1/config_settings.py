@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from app.db.base import get_db
@@ -9,6 +9,7 @@ from app.schemas.config import (
     TemporaryMasterPasswordStatus,
 )
 from app.services.config_service import ConfigService
+from app.services.runtime_policy import MAX_FILE_SIZE_KB, invalidate_policy_cache
 from app.services.temporary_master_password_service import TemporaryMasterPasswordService
 from app.api.deps import require_admin, require_permission
 
@@ -38,7 +39,7 @@ def require_master_pass(current_user: dict):
 
 
 @router.get("/settings", response_model=AllSettings)
-async def get_all_settings(
+def get_all_settings(
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_general')),
 ):
@@ -47,7 +48,7 @@ async def get_all_settings(
 
 
 @router.get("/settings/general", response_model=GeneralSettings)
-async def get_general_settings(
+def get_general_settings(
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_general')),
 ):
@@ -55,18 +56,28 @@ async def get_general_settings(
 
 
 @router.put("/settings/general", response_model=GeneralSettings)
-async def save_general_settings(
+def save_general_settings(
     settings: GeneralSettings,
+    request: Request,
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_general')),
 ):
     svc = ConfigService(db)
+    # Force HTTPS redirects every plain-HTTP request. Turning it on from a
+    # connection that is not itself HTTPS (or whose proxy does not report
+    # it) would lock every user out, so require proof that HTTPS works.
+    if settings.https_enabled and not svc.get_general_settings().https_enabled and request.url.scheme != "https":
+        raise HTTPException(
+            status_code=400,
+            detail="Enable Force HTTPS from an HTTPS connection; this request arrived over HTTP.",
+        )
     svc.save_general_settings(settings)
+    invalidate_policy_cache()
     return svc.get_general_settings()
 
 
 @router.get("/settings/mail", response_model=MailSettings)
-async def get_mail_settings(
+def get_mail_settings(
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_general')),
 ):
@@ -74,7 +85,7 @@ async def get_mail_settings(
 
 
 @router.put("/settings/mail", response_model=MailSettings)
-async def save_mail_settings(
+def save_mail_settings(
     settings: MailSettings,
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_general')),
@@ -85,7 +96,7 @@ async def save_mail_settings(
 
 
 @router.get("/settings/ldap", response_model=LdapSettings)
-async def get_ldap_settings(
+def get_ldap_settings(
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_general')),
 ):
@@ -93,7 +104,7 @@ async def get_ldap_settings(
 
 
 @router.put("/settings/ldap", response_model=LdapSettings)
-async def save_ldap_settings(
+def save_ldap_settings(
     settings: LdapSettings,
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_general')),
@@ -104,7 +115,7 @@ async def save_ldap_settings(
 
 
 @router.get("/settings/accounts", response_model=AccountsSettings)
-async def get_accounts_settings(
+def get_accounts_settings(
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_general')),
 ):
@@ -112,18 +123,22 @@ async def get_accounts_settings(
 
 
 @router.put("/settings/accounts", response_model=AccountsSettings)
-async def save_accounts_settings(
+def save_accounts_settings(
     settings: AccountsSettings,
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_general')),
 ):
+    if settings.files_allowed_size is not None and not 1 <= settings.files_allowed_size <= MAX_FILE_SIZE_KB:
+        # Same ceiling as sysPass PHP ConfigAccountController (16384 KB).
+        raise HTTPException(status_code=422, detail=f"files_allowed_size must be 1-{MAX_FILE_SIZE_KB} KB")
     svc = ConfigService(db)
     svc.save_accounts_settings(settings)
+    invalidate_policy_cache()
     return svc.get_accounts_settings()
 
 
 @router.get("/settings/wiki", response_model=WikiSettings)
-async def get_wiki_settings(
+def get_wiki_settings(
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_general')),
 ):
@@ -131,7 +146,7 @@ async def get_wiki_settings(
 
 
 @router.put("/settings/wiki", response_model=WikiSettings)
-async def save_wiki_settings(
+def save_wiki_settings(
     settings: WikiSettings,
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_general')),
@@ -142,7 +157,7 @@ async def save_wiki_settings(
 
 
 @router.post("/settings/mail/test")
-async def send_test_email(
+def send_test_email(
     body: dict,
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_general')),
@@ -168,7 +183,7 @@ async def send_test_email(
 
 
 @router.get("/settings/two-factor")
-async def get_two_factor_settings(
+def get_two_factor_settings(
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_general')),
 ):
@@ -177,7 +192,7 @@ async def get_two_factor_settings(
 
 
 @router.put("/settings/two-factor")
-async def save_two_factor_settings(
+def save_two_factor_settings(
     body: dict,
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_general')),
@@ -191,7 +206,7 @@ async def save_two_factor_settings(
 
 
 @router.get("/settings/info", response_model=SystemInfo)
-async def get_system_info(
+def get_system_info(
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_general')),
 ):
@@ -199,7 +214,7 @@ async def get_system_info(
 
 
 @router.get("/settings/encryption", response_model=EncryptionStatus)
-async def get_encryption_status(
+def get_encryption_status(
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_encryption')),
 ):
@@ -225,7 +240,7 @@ async def get_encryption_status(
 
 
 @router.get("/settings/encryption/temp-master", response_model=TemporaryMasterPasswordStatus)
-async def get_temp_master_password_status(
+def get_temp_master_password_status(
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_encryption')),
 ):
@@ -233,7 +248,7 @@ async def get_temp_master_password_status(
 
 
 @router.post("/settings/encryption/temp-master", response_model=TemporaryMasterPasswordCreateResponse)
-async def create_temp_master_password(
+def create_temp_master_password(
     body: TemporaryMasterPasswordCreateRequest,
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('config_encryption')),
@@ -257,71 +272,21 @@ async def create_temp_master_password(
 
 
 @router.post("/settings/encryption/rekey")
-async def rekey_encryption(
+def rekey_encryption(
     body: RekeyRequest,
     db: Session = Depends(get_db),
     current_user=Depends(require_admin),
 ):
-    """Re-encrypt all stored passwords with a new key.
+    """Online rotation stays disabled: it cannot stop other writers or sessions.
 
-    Decrypts every Account.pass_ and AccountHistory.pass_ with current_key,
-    re-encrypts with new_key, then persists new_key in the Config table.
-    The ENCRYPTION_KEY environment variable must also be updated before the
-    next application restart so the runtime picks up the new key.
+    The vault master password is changed offline with
+    ``python -m app.rotate_master_password`` (docs/backup-recovery.md).
     """
-    from app.core.security import EncryptionService
-    from app.models.account import Account, AccountHistory
-
-    if body.new_key != body.new_key_confirm:
-        raise HTTPException(status_code=422, detail="New keys do not match")
-    if len(body.new_key) < 16:
-        raise HTTPException(status_code=422, detail="New key must be at least 16 characters")
-    if body.current_key == body.new_key:
-        raise HTTPException(status_code=422, detail="New key must differ from the current key")
-
-    old_enc = EncryptionService(body.current_key)
-    new_enc = EncryptionService(body.new_key)
-
-    # Re-key accounts
-    accounts = db.query(Account).filter(Account.pass_.is_not(None)).all()
-    errors = []
-    rekey_count = 0
-
-    for acc in accounts:
-        try:
-            raw = acc.pass_ if isinstance(acc.pass_, bytes) else acc.pass_.encode()
-            plaintext = old_enc.decrypt(raw.decode())
-            acc.pass_ = new_enc.encrypt(plaintext).encode()
-            rekey_count += 1
-        except Exception as e:
-            errors.append(f"Account {acc.id}: {e}")
-
-    # Re-key account history snapshots
-    history_rows = db.query(AccountHistory).filter(AccountHistory.pass_.is_not(None)).all()
-    history_count = 0
-    for row in history_rows:
-        try:
-            raw = row.pass_ if isinstance(row.pass_, bytes) else row.pass_.encode()
-            plaintext = old_enc.decrypt(raw.decode())
-            row.pass_ = new_enc.encrypt(plaintext).encode()
-            history_count += 1
-        except Exception as e:
-            errors.append(f"History {row.id}: {e}")
-
-    if errors:
-        db.rollback()
-        raise HTTPException(
-            status_code=400,
-            detail=f"Re-key failed — current key may be wrong. Errors: {errors[:5]}"
-        )
-
-    # Persist new key in Config table
-    ConfigService(db).set("encryption_key", body.new_key)
-    db.commit()
-
-    return {
-        "message": "Re-key completed successfully",
-        "accounts_rekeyed": rekey_count,
-        "history_rekeyed": history_count,
-        "warning": "Update the ENCRYPTION_KEY environment variable to this new key before restarting the application.",
-    }
+    raise HTTPException(
+        status_code=409,
+        detail=(
+            "Online key rotation is disabled. Change the master password offline with "
+            "'python -m app.rotate_master_password' (see the backup and recovery guide). "
+            "Existing keys and encrypted data were not changed."
+        ),
+    )

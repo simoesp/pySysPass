@@ -45,8 +45,9 @@ class Settings(BaseSettings):
     SYSPASS_RUNTIME_CONFIG_JSON_PATH: str = str(BASE_DIR / "config" / "runtime-config.json")
     SYSPASS_CONFIG_XML_PATH: str = ""
     SYSPASS_CONFIG_CACHE_PATH: str = ""
-    DEBUG: Any = True
+    DEBUG: bool = False
     ALLOWED_HOSTS: List[str] = ["*"]
+    TRUSTED_PROXY_HOSTS: List[str] = []
     CORS_ORIGINS_FILE: str = str(DEFAULT_CORS_ORIGINS_FILE)
     CORS_ORIGINS: List[str] = []
 settings = Settings()
@@ -54,12 +55,6 @@ settings = Settings()
 
 def _running_under_pytest() -> bool:
     return "pytest" in sys.modules
-
-# Convert DEBUG to boolean
-if isinstance(settings.DEBUG, str):
-    settings.DEBUG = settings.DEBUG.lower() in ('true', '1', 'yes', 'on')
-elif not isinstance(settings.DEBUG, bool):
-    settings.DEBUG = bool(settings.DEBUG)
 
 if isinstance(settings.SQLALCHEMY_SCHEMA_GUARD, str):
     settings.SQLALCHEMY_SCHEMA_GUARD = settings.SQLALCHEMY_SCHEMA_GUARD.lower() in ('true', '1', 'yes', 'on')
@@ -78,16 +73,24 @@ if settings.SQLALCHEMY_READ_ONLY is not None:
         settings.SQLALCHEMY_SCHEMA_GUARD = bool(settings.SQLALCHEMY_READ_ONLY)
 
 
-if not settings.DEBUG and not _running_under_pytest():
-    required_env_vars = ("DATABASE_URL", "SECRET_KEY", "ENCRYPTION_KEY")
-    missing = [name for name in required_env_vars if not os.getenv(name)]
-    if missing:
-        missing_list = ", ".join(missing)
-        warnings.warn(
-            f"Missing required environment settings for non-debug mode: {missing_list}",
-            RuntimeWarning,
-            stacklevel=2,
-        )
+def validate_production_settings(config: Settings) -> None:
+    """Reject unsafe effective settings before starting the application."""
+    if config.DEBUG:
+        return
+    errors = []
+    if not config.DATABASE_URL:
+        errors.append("DATABASE_URL is required")
+    for name in ("SECRET_KEY", "ENCRYPTION_KEY"):
+        value = getattr(config, name)
+        if name not in config.model_fields_set or len(value.strip().encode()) < 32:
+            errors.append(f"{name} must be explicitly configured with at least 32 bytes")
+        elif value.lower().startswith(("change-this-", "replace-with-", "test-")):
+            errors.append(f"{name} must not use a sample value")
+    if "*" in config.TRUSTED_PROXY_HOSTS:
+        errors.append("TRUSTED_PROXY_HOSTS must identify specific proxy addresses or networks")
+    if errors:
+        raise RuntimeError("Invalid production configuration: " + "; ".join(errors))
+
 
 if not settings.DATABASE_URL and not _running_under_pytest():
     warnings.warn(

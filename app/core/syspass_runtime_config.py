@@ -58,6 +58,25 @@ def _read_cache_config(path: Path) -> dict[str, str]:
     return values
 
 
+def load_syspass_xml_list(name: str) -> Optional[list[str]]:
+    """A list setting from PHP config.xml (``<name><item>v</item>...</name>``).
+
+    None when no config.xml is available, so callers can tell "PHP config says
+    empty" from "no PHP config".
+    """
+    xml_candidates, _ = _candidate_paths()
+    for path in xml_candidates:
+        if path.exists():
+            try:
+                node = ElementTree.parse(path).getroot().find(name)
+            except Exception:
+                continue
+            if node is None:
+                return []
+            return [item.text.strip() for item in node.findall("item") if item.text and item.text.strip()]
+    return None
+
+
 @lru_cache(maxsize=1)
 def load_syspass_runtime_config() -> dict[str, str]:
     try:

@@ -80,6 +80,10 @@ develop-eggs/
 dist/
 downloads/
 backups/
+# Runtime state: RSA transport key, sessions, pending 2FA setups, runtime config.
+data/
+# Lock files created next to runtime JSON config.
+*.json.lock
 eggs/
 .eggs/
 lib/
@@ -124,3 +128,8 @@ node_modules/
 logs/
 .DS_Store
 Thumbs.db
+
+# Playwright browser tests
+e2e/node_modules/
+e2e/test-results/
+e2e/playwright-report/

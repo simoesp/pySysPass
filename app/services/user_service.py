@@ -4,7 +4,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 from app.models.account import User
 from app.schemas.user import UserCreate, UserUpdate
-from app.services.auth_service import get_password_hash, verify_password
+from app.services.auth_service import get_password_hash, set_user_login_password, verify_password
 from app.services.user_profile_service import UserProfileService
 
 class UserService:
@@ -96,7 +96,7 @@ class UserService:
             elif field == "email":
                 user.email = value
             elif field == "password" and value:
-                user.password = get_password_hash(value)
+                set_user_login_password(user, value)
             elif field == "is_admin":
                 user.isUserAdmin = value
             elif field == "is_active":
@@ -132,11 +132,7 @@ class UserService:
         if not user:
             return None
 
-        hashed = get_password_hash(new_password)
-        user.password = hashed.encode() if isinstance(hashed, str) else hashed
-        user.isChangePass = False
-        user.isChangedPass = True
-        user.isMigrate = False
+        set_user_login_password(user, new_password)
         self.db.commit()
         self.db.refresh(user)
         return user

@@ -29,13 +29,14 @@ def test_verify_token():
     assert not TwoFactorService.verify_token(secret, "000000")
 
 def test_generate_backup_codes():
-    """Test backup code generation"""
-    codes = TwoFactorService.generate_backup_codes(8)
+    """PHP AuthenticatorService::generateRecoveryCodes(): ten 20-hex codes."""
+    codes = TwoFactorService.generate_backup_codes()
 
-    assert len(codes) == 8
+    assert len(codes) == 10
     for code in codes:
-        assert len(code) == 10
-        assert code.isdigit()
+        assert len(code) == 20
+        int(code, 16)
+    assert len(TwoFactorService.generate_secret()) == 16
 
 def test_verify_backup_code():
     """Test backup code verification"""
@@ -57,7 +58,8 @@ def test_verify_backup_code():
 @pytest.fixture
 def store(db_session, encryption_service):
     from app.services.two_factor_service import TwoFactorStore
-    return TwoFactorStore(db_session, encryption_service)
+    from tests.account_refs import TEST_MASTER_PASSWORD
+    return TwoFactorStore(db_session, encryption_service, master_pass=TEST_MASTER_PASSWORD)
 
 
 def test_store_setup_then_enable_persists(db_session, store, test_user):
@@ -87,20 +89,23 @@ def test_store_setup_then_enable_persists(db_session, store, test_user):
 
 
 def test_store_secret_is_encrypted_at_rest(db_session, store, test_user):
-    import json
+    """Rows use the PHP Authenticator format: Defuse under the vault master."""
+    from app.core.php_authenticator import decrypt_state
     from app.models.account import PluginData
+    from tests.account_refs import TEST_MASTER_PASSWORD
 
     secret = TwoFactorService.generate_secret()
     store.start_setup(test_user.id, secret)
-    store.enable(test_user.id, ["1234567890"])
+    code = "0123456789abcdef0123"
+    store.enable(test_user.id, [code])
 
     row = db_session.query(PluginData).filter(
         PluginData.name == "Authenticator", PluginData.itemId == test_user.id,
     ).first()
-    raw = row.data.decode("utf-8") if isinstance(row.data, (bytes, bytearray)) else row.data
-    assert secret not in raw
-    assert "1234567890" not in raw
-    assert json.loads(raw)["enabled"] is True
+    assert row.key.startswith(b"def10000")
+    assert secret.encode() not in row.data and code.encode() not in row.data
+    state = decrypt_state(row.data, row.key, TEST_MASTER_PASSWORD)
+    assert (state.user_id, state.enabled, state.iv, state.recovery_codes) == (test_user.id, True, secret, [code])
 
 
 def test_store_disable_removes_row(db_session, store, test_user):

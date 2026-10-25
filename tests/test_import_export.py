@@ -14,13 +14,14 @@ from app.services.import_export_service import (
     KeePassImportService,
     XmlImportService,
 )
+from tests.account_refs import TEST_MASTER_PASSWORD
 
 
 PHP_CRYPTO_FIXTURE = Path(__file__).parent / "fixtures" / "php_syspass_3211_crypto.json"
 PHP_KEEPASS_FIXTURE = Path("../phpSysPass/tests/res/import/data_keepass.xml")
 
 
-def test_keepass_export_generates_valid_string_entries(db_session):
+def test_keepass_export_generates_valid_string_entries(db_session, test_user):
     encryption = EncryptionService("test-encryption-key-32bytes!!")
     encrypted_password = encryption.encrypt("secret-pass").encode("utf-8")
     category = Category(id=1, name="Infrastructure", hash=make_item_hash("Infrastructure"))
@@ -31,8 +32,8 @@ def test_keepass_export_generates_valid_string_entries(db_session):
     account = Account(
         id=1,
         userGroupId=1,
-        userId=1,
-        userEditId=1,
+        userId=test_user.id,
+        userEditId=test_user.id,
         clientId=1,
         name="Demo Account",
         categoryId=1,
@@ -71,7 +72,9 @@ def test_keepass_export_generates_valid_string_entries(db_session):
     assert values["Client"] == "Example Client"
     assert "[encrypted]" not in xml_output
 
-    parsed = KeePassImportService(db_session, encryption, 1).parse_keepass(xml_output)
+    parsed = KeePassImportService(
+        db_session, encryption, 1, master_password=TEST_MASTER_PASSWORD
+    ).parse_keepass(xml_output)
     assert parsed == [{
         "name": "Demo Account",
         "login": "alice",
@@ -88,7 +91,7 @@ def test_keepass_parser_accepts_upstream_php_fixture():
     if not PHP_KEEPASS_FIXTURE.exists():
         pytest.skip("../phpSysPass KeePass fixture is not available")
 
-    parsed = KeePassImportService(None, None, 1).parse_keepass(
+    parsed = KeePassImportService(None, None, 1, master_password=TEST_MASTER_PASSWORD).parse_keepass(
         PHP_KEEPASS_FIXTURE.read_text(encoding="utf-8")
     )
 
@@ -192,8 +195,8 @@ def test_php_native_protected_xml_round_trip(db_session, test_user):
     stats = importer.import_accounts(parsed)
     assert stats == {"success": 1, "failed": 0, "skipped": 0}
     imported = db_session.query(Account).one()
-    assert db_session.query(Category).one().hash == make_item_hash(category_name)
-    assert db_session.query(Client).one().hash == make_item_hash(client_name)
+    assert db_session.query(Category).filter_by(name=category_name).one().hash == make_item_hash(category_name)
+    assert db_session.query(Client).filter_by(name=client_name).one().hash == make_item_hash(client_name)
     assert db_session.query(Tag).one().hash == make_item_hash(tag_name)
     assert decrypt_with_password(
         imported.pass_.decode("ascii"),

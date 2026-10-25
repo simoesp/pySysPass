@@ -9,7 +9,7 @@ from app.api.deps import get_current_user
 router = APIRouter()
 
 @router.get("/tags", response_model=List[TagResponse])
-async def list_tags(
+def list_tags(
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)
 ):
@@ -18,7 +18,7 @@ async def list_tags(
     return service.get_tags(current_user["id"])
 
 @router.post("/tags", response_model=TagResponse, status_code=status.HTTP_201_CREATED)
-async def create_tag(
+def create_tag(
     tag: TagCreate,
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)
@@ -28,9 +28,10 @@ async def create_tag(
     return service.create_tag(tag, current_user["id"])
 
 @router.get("/tags/{tag_id}", response_model=TagResponse)
-async def get_tag(
+def get_tag(
     tag_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
 ):
     """Get a specific tag"""
     service = TagService(db)
@@ -40,7 +41,7 @@ async def get_tag(
     return tag
 
 @router.put("/tags/{tag_id}", response_model=TagResponse)
-async def update_tag(
+def update_tag(
     tag_id: int,
     tag: TagUpdate,
     db: Session = Depends(get_db),
@@ -54,7 +55,7 @@ async def update_tag(
     return updated
 
 @router.delete("/tags/{tag_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_tag(
+def delete_tag(
     tag_id: int,
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)
@@ -66,7 +67,7 @@ async def delete_tag(
     return None
 
 @router.get("/tags/{tag_id}/accounts", response_model=List[AccountWithTag])
-async def get_accounts_by_tag(
+def get_accounts_by_tag(
     tag_id: int,
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)
@@ -92,7 +93,7 @@ async def get_accounts_by_tag(
     return result
 
 @router.post("/accounts/{account_id}/tags/{tag_id}")
-async def add_tag_to_account(
+def add_tag_to_account(
     account_id: int,
     tag_id: int,
     db: Session = Depends(get_db),
@@ -122,7 +123,7 @@ async def add_tag_to_account(
     return {"message": "Tag added successfully"}
 
 @router.delete("/accounts/{account_id}/tags/{tag_id}")
-async def remove_tag_from_account(
+def remove_tag_from_account(
     account_id: int,
     tag_id: int,
     db: Session = Depends(get_db),
@@ -147,7 +148,7 @@ async def remove_tag_from_account(
     return {"message": "Tag removed successfully"}
 
 @router.get("/accounts/{account_id}/tags", response_model=List[TagResponse])
-async def get_account_tags(
+def get_account_tags(
     account_id: int,
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)
