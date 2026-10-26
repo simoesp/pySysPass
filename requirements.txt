@@ -1,13 +1,13 @@
 # FastAPI
-fastapi>=0.143.2,<1.0.0
+fastapi>=0.161.1,<1.0.0
 uvicorn[standard]>=0.54.0
 pydantic>=2.14.1
-pydantic-settings==2.16.0
+pydantic-settings==2.16.1
 email-validator>=2.3.0
 
 # Database
-sqlalchemy>=2.1.4
-alembic>=1.20.0
+sqlalchemy>=2.1.6
+alembic>=1.20.1
 pymysql>=1.2.3
 
 # Security
