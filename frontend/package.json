@@ -13,11 +13,11 @@
   },
   "dependencies": {
     "@quasar/extras": "^2.1.0",
-    "axios": "^1.20.0",
+    "axios": "^1.21.0",
     "pinia": "^4.1.0",
     "qrcode": "^1.5.4",
-    "quasar": "^2.35.1",
-    "vue": "^3.5.44",
+    "quasar": "^2.35.2",
+    "vue": "^3.5.45",
     "vue-router": "^5.4.0",
     "vue3-toastify": "^0.2.8"
   },
@@ -26,14 +26,14 @@
     "@pinia/testing": "^2.0.2",
     "@vitejs/plugin-vue": "^6.0.10",
     "@vue/test-utils": "^2.5.1",
-    "eslint": "^10.12.0",
-    "eslint-plugin-vue": "^10.11.1",
-    "globals": "^17.13.0",
-    "jsdom": "^30.1.3",
-    "sass": "^1.105.2",
+    "eslint": "^10.14.0",
+    "eslint-plugin-vue": "^10.12.0",
+    "globals": "^17.14.0",
+    "jsdom": "^31.0.0",
+    "sass": "^1.108.0",
     "typescript": "^7.0.2",
-    "vite": "^8.3.5",
-    "vitest": "^5.0.5"
+    "vite": "^8.3.6",
+    "vitest": "^5.1.0"
   },
   "overrides": {
     "brace-expansion": "^5.0.9",
