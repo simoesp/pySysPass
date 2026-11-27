@@ -7,11 +7,9 @@ same guarantees come from three mechanisms that need no PHP schema changes:
 * Credential fingerprint: every token carries ``sfp``, an HMAC of the user's
   current login password hash. Any password change or reset, whether made by
   pySysPass or PHP, invalidates every token issued before it.
-* Ephemeral session state: a small locked JSON file beside the runtime config
-  records revoked token IDs (logout, refresh) until they expire, and a per-user
-  "not before" time that revokes all of a user's tokens (2FA enrollment
-  changes). It is deployment state, not PHP data, and may be deleted safely;
-  deleting it only forgets revocations of still-unexpired tokens.
+* Server-side session state: database-backed session records store revoked token
+  IDs and per-user "not before" times. This module supports both database-backed
+  (multi-replica) and file-based (single-instance dev) storage.
 * Inactivity timeout: tokens expire ``session_timeout`` seconds after issue
   (PHP default 300). The SPA refreshes only after real user input, so polling
   does not keep an idle session alive. Refreshes cannot extend a session past
@@ -21,6 +19,9 @@ Changing ``SECRET_KEY`` invalidates every token. Changing ``ENCRYPTION_KEY``
 leaves tokens valid but makes their embedded vault key unreadable, which the
 API treats as a missing master password.
 """
+
+from __future__ import annotations
+
 import hashlib
 import hmac
 import json
@@ -32,15 +33,22 @@ from typing import Optional
 from app.core.config import BASE_DIR, settings
 from app.core.runtime_json_config import locked_path, write_text_atomically
 
+from app.services.session_pool_service import (
+    get_pool_service,
+    DEFAULT_SESSION_TIMEOUT,
+    MAX_SESSION_SECONDS,
+    MIN_SESSION_TIMEOUT,
+)
+
 DEFAULT_SESSION_TIMEOUT = 300
 ALL_USERS = "*"
 MIN_SESSION_TIMEOUT = 60
 MAX_SESSION_SECONDS = 24 * 3600
 
 
-def _store_path() -> Path:
-    return BASE_DIR / "data" / "sessions.json"
-
+# ──────────────────────────────────────────────────────────────
+# Session fingerprint
+# ──────────────────────────────────────────────────────────────
 
 def session_fingerprint(user) -> str:
     password = user.password or b""
@@ -50,9 +58,17 @@ def session_fingerprint(user) -> str:
     return hmac.new(settings.SECRET_KEY.encode(), message, hashlib.sha256).hexdigest()
 
 
+# ──────────────────────────────────────────────────────────────
+# Session ID generation
+# ──────────────────────────────────────────────────────────────
+
 def new_session_id() -> str:
     return secrets.token_urlsafe(18)
 
+
+# ──────────────────────────────────────────────────────────────
+# Timeout resolution
+# ──────────────────────────────────────────────────────────────
 
 def resolve_session_timeout(db, user_id: Optional[int] = None, client_ip: Optional[str] = None) -> int:
     """Effective inactivity timeout in seconds, like PHP Init::getSessionLifeTime().
@@ -79,11 +95,76 @@ def resolve_session_timeout(db, user_id: Optional[int] = None, client_ip: Option
     return max(MIN_SESSION_TIMEOUT, min(value, MAX_SESSION_SECONDS))
 
 
+# ──────────────────────────────────────────────────────────────
+# Database-backed session operations (delegated to pool service)
+# ──────────────────────────────────────────────────────────────
+
+def _get_pool() -> object:
+    """Lazily get the pool service instance (DB-backed or file-based)."""
+    return get_pool_service()
+
+
+def create_db_session(
+    user_id: int,
+    session_id: str,
+    ip_address: Optional[str] = None,
+    user_agent: Optional[str] = None,
+):
+    """Create a new session record in the database via the pool service."""
+    service = _get_pool()
+    return service.create_session(user_id, session_id, ip_address, user_agent)
+
+
+def get_db_session(session_id: str):
+    """Retrieve a session from the database by session_id."""
+    service = _get_pool()
+    return service.get_session(session_id)
+
+
+def get_user_db_sessions(user_id: int) -> list:
+    """Retrieve all sessions for a given user from the database."""
+    service = _get_pool()
+    return service.get_user_sessions(user_id)
+
+
+def revoke_db_session(session_id: str) -> bool:
+    """Revoke a session in the database."""
+    service = _get_pool()
+    return service.revoke_session(session_id)
+
+
+def revoke_user_db_sessions(user_id: int) -> int:
+    """Revoke all sessions for a given user from the database."""
+    service = _get_pool()
+    return service.revoke_user_sessions(user_id)
+
+
+def is_db_session_revoked(session_id: str) -> bool:
+    """Check if a session is revoked from the database."""
+    service = _get_pool()
+    return service.is_revoked(session_id)
+
+
+def prune_db_sessions() -> int:
+    """Prune expired sessions from the database."""
+    service = _get_pool()
+    return service.prune_expired()
+
+
+# ──────────────────────────────────────────────────────────────
+# File-based SessionStore (single-instance development fallback)
+# ──────────────────────────────────────────────────────────────
+
 class SessionStore:
-    """Cross-process revocation state in ``data/sessions.json``."""
+    """Cross-process revocation state in ``data/sessions.json``.
+
+    This is the file-based fallback for single-instance development.
+    In production with DATABASE_URL configured, the database-backed
+    SessionPoolService is used instead.
+    """
 
     def __init__(self, path: Optional[Path] = None):
-        self.path = path or _store_path()
+        self.path = path or (BASE_DIR / "data" / "sessions.json")
         self._cache: Optional[tuple] = None
 
     def _read(self) -> dict:
@@ -97,8 +178,6 @@ class SessionStore:
         try:
             document = json.loads(self.path.read_text(encoding="utf-8"))
         except ValueError:
-            # Fail closed would lock everyone out on corruption; this file is
-            # an optimization over token expiry, so start over instead.
             document = {}
         document = {
             "revoked": dict(document.get("revoked") or {}),
@@ -148,8 +227,13 @@ class SessionStore:
         return False
 
 
-session_store = SessionStore()
+# Global session store instance - DB-backed or file-based depending on config
+session_store = _get_pool()
 
+
+# ──────────────────────────────────────────────────────────────
+# Convenience functions that delegate to the active store
+# ──────────────────────────────────────────────────────────────
 
 def rotate_user_sessions(db, user, current_user: Optional[dict] = None) -> Optional[str]:
     """Revoke all of ``user``'s sessions; return a fresh token for the caller.
@@ -159,13 +243,52 @@ def rotate_user_sessions(db, user, current_user: Optional[dict] = None) -> Optio
     """
     from app.services.auth_service import issue_session_token
 
-    session_store.revoke_user(user.id)
+    pool_service = _get_pool()
+    db_session = None
+    try:
+        # Use the db parameter's engine if available, otherwise get a new one
+        from app.db.base import engine as eng, Session as DBSession
+        db_session = DBSession(bind=eng())
+        pool_service.revoke_user_sessions(user.id)
+    finally:
+        if db_session:
+            db_session.close()
+
     session = (current_user or {}).get("session")
     if not session or current_user.get("id") != user.id:
         return None
     return issue_session_token(
         user,
         master_pass=current_user.get("master_pass"),
-        timeout_seconds=resolve_session_timeout(db),
+        timeout_seconds=resolve_session_timeout(db_session or type('obj', (object,), {"get": lambda self, x: None})()),
         auth_time=session["auth_time"],
     )
+
+
+def revoke_token(jti: str, expires_at: float) -> None:
+    """Revoke a token by its JTI.
+
+    Delegates to the active store (database-backed or file-based).
+    """
+    _get_pool().revoke_token(jti, expires_at)
+
+
+def revoke_user(user_id: int, before: Optional[float] = None) -> None:
+    """Revoke all sessions for a given user.
+
+    Delegates to the active store (database-backed or file-based).
+    """
+    _get_pool().revoke_user(user_id, before)
+
+
+def revoke_all(before: Optional[float] = None) -> None:
+    """Revoke all sessions, e.g. after the vault master password changes."""
+    _get_pool().revoke_all(before)
+
+
+def is_revoked(payload: dict) -> bool:
+    """Check if a payload's token is revoked.
+
+    Delegates to the active store (database-backed or file-based).
+    """
+    return _get_pool().is_revoked(payload)
