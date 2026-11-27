@@ -443,6 +443,17 @@ detectable, deterministic and recoverable.
 
 ---
 
+### Keyring bootstrap decision — APPROVED 2026-11-27 (AIRR §3, modified Q2a)
+
+Backup/service-vault keyring gaps (baseline `PermissionError` on
+`/etc/syspass`; CI "No backup encryption key configured") are resolved by
+the architecture recorded in ADR-0010: root secrets from read-only mounted
+sources (never written back); mutable keyring state behind a storage
+abstraction (file / DB-wrapped / read-only+redeployment). CI provisions
+synthetic root keys via its secret mechanism — mandatory backup encryption
+is **not** disabled to make tests pass. The raw `os.environ` secret-read
+policy (V-10/T-CFG-05) remains an open owner decision.
+
 ## References
 
 - `docs/adr/0002-bidirectional-database-interoperability-and-extension-isolation.md`: PHP config compatibility

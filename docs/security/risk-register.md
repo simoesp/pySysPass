@@ -1,6 +1,41 @@
 # Risk Register — Consolidated Decision Matrix
 
-**Status:** PENDING OWNER DISPOSITION (Decision 5: no blanket acceptance authorized)
+**Status:** OWNER DISPOSITIONS RECORDED 2026-11-27 (AIRR §1; see §Owner dispositions below)
+
+## Owner dispositions (2026-11-27, AIRR §1)
+
+Recommended **mitigation strategies** are approved; this is **not** blanket
+residual-risk acceptance.
+
+- **Deployment (T-DEP-01…12):** recommended dispositions approved.
+  Feature-specific release gates are distinguished from universal production
+  gates: unverified OpenShift blocks only *declaring OpenShift production
+  support*; unverified UBI blocks only *declaring UBI support*; unverified
+  distributed session handling blocks only *declaring HA support*. A
+  separately verified single-instance Docker Compose release is not blocked
+  by those feature gates. Security weaknesses in the shared application
+  architecture remain universal production blockers.
+- **Migration (T-MIG-01…05):** mitigation approved as **required before
+  production upgrades** — coordinated migration authority, populated-DB
+  migration tests, schema compatibility guard, recovery procedures.
+- **Configuration/crypto (T-CFG-01…05):** mitigation per existing ADR
+  requirements. No production release may silently regenerate persistent
+  encryption keys, accept incompatible cryptographic configuration, or
+  expose unrestricted vault access. T-CFG-05's raw-`os.environ` policy
+  choice remains an open owner decision.
+- **API (T-API-01…04):** mitigation approved as required **before releasing
+  the affected features**. An unimplemented service-account HTTP surface is
+  a feature-readiness gap, not a vulnerability in an exposed endpoint. An
+  exposed unauthenticated emergency endpoint or authorization bypass **is**
+  a security finding (immediate remediation, not phase-gated). The error
+  contract (T-API-04) is temporarily deferred with AIRR conditions:
+  security assessment recorded, no sensitive exposure, deadline
+  **2026-12-31**; never permanently accepted.
+- **Verification:** T-TEST-01 mitigated for CI trigger availability
+  (execution observed). **CI integrity remains open** until the
+  local-vs-CI scope divergence is explained; no Gate 2 claim from green CI
+  alone. T-TEST-02 remains a production blocker.
+- No residual risk is accepted anywhere without a per-risk owner entry.
 **Date:** 2026-11-27 (AIRR consolidation)
 **Scope:** T-DEP-01…12 (previously referenced in `docs/adr/REGISTER.md` but undefined —
 defined here), T-MIG-01…05 (ADR-0016), T-CFG-01…05 (ADR-0017), T-API-01…04 (ADR-0018),
