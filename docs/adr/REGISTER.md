@@ -21,7 +21,7 @@ This register tracks all Architectural Decision Records for pySysPass.
 | ADR-0013 | Backup, Disaster Recovery and Cryptographic Recoverability | **Proposed** | ❌ Not Implemented | ❌ Not Verified | T-IDI-07 |
 | ADR-0014 | Emergency Authentication and Offline Recovery Access | **Proposed** | ❌ Not Implemented | ❌ Not Verified | T-EVP-08, T-PM-07, T-EAM-01, T-EAM-02, T-EAM-03 |
 | ADR-0015 | Deployment Architecture and Infrastructure Requirements | **Active** | ⚠️ Partially Implemented | ⚠️ Partially Verified | T-DEP-01 to T-DEP-12 |
-| ADR-0016 | Database Schema Ownership and Migration Governance | **Active** | ⚠️ Partially Implemented | ⚠️ Partially Verified | T-MIG-01 to T-MIG-05 |
+| ADR-0016 | Database Schema Ownership and Migration Governance | **Active** | ✅ Implemented (migration lock) / ⚠️ Partially (readiness, shape validation) | ✅ Verified (lock + TEST-011) / ⚠️ Partially (readiness) | T-MIG-01 to T-MIG-05 |
 | ADR-0017 | Configuration and Secret Management | **Active** | ⚠️ Partially Implemented | ✅ Discovery Verified | T-CFG-01 to T-CFG-05 |
 | ADR-0018 | API Versioning and Integration Compatibility | **Active** | ⚠️ Partially Implemented | ✅ Discovery Verified | T-API-01 to T-API-04 |
 | ADR-0019 | Testing and CI/CD Governance | **Active** | ✅ Implemented (CI) | ✅ Discovery Verified | T-TEST-01, T-TEST-02 |
@@ -185,8 +185,8 @@ This register tracks all Architectural Decision Records for pySysPass.
 ### ADR-0016: Database Schema Ownership and Migration Governance
 - **Status:** Active
 - **Decision:** Bootstrap owns PHP base schema creation (IF NOT EXISTS); Alembic owns Python extensions (003-005+); runtime DDL blocked by schema guard; Alembic version check required at readiness; migration lock required for Alembic
-- **Implementation:** Partially implemented — bootstrap + schema guard verified; Alembic exists but not invoked at startup; migration locking only for bootstrap; `python_init.sql` dead code; PHP `.sql` migration files unused
-- **Verification:** Partially verified — table existence check verified; shape validation missing; Alembic idempotency risk documented
+- **Implementation:** Partially implemented — bootstrap + schema guard verified; Alembic exists but not invoked at startup; **coordinated schema-mutation lock `pysyspass_schema_mutation` implemented for bootstrap and Alembic (IMPL-035)**; `python_init.sql` dead code; PHP `.sql` migration files unused
+- **Verification:** Partially verified — table existence check verified; shape validation missing; **Alembic 001 baseline stamp and lock coordination verified (IMPL-035; tests/test_alembic_lock_serialization.py TEST-011)**
 - **Dependencies:** ADR-0002 (PHP compat contract), ADR-0013 (backup prerequisites), ADR-0015 (deployment)
 - **Outstanding Decisions:**
   - Alembic GET_LOCK in env.py

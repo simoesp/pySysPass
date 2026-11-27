@@ -141,7 +141,7 @@ Application Startup (main.py:94)
 | **No Alembic version check at startup** | **High** | `main.py:94` only calls bootstrap, not Alembic | Add readiness check: `alembic_version` table exists + current >= minimum required |
 | **No schema shape validation** | **High** | `database_requires_bootstrap()` checks table existence only, not column types or FKs | Add readiness validation comparing detected schema against `Base.metadata` |
 | **Alembic 001 idempotency risk** | Medium | `op.execute(statement)` with `CREATE TABLE` (no IF NOT EXISTS) on already-populated DB | Already mitigated: bootstrap applies first; if Alembic applied first, `001` would fail on existing tables |
-| **No migration coordination lock** | Medium | Alembic has no distributed lock; concurrent `alembic upgrade` possible | Implement: MySQL advisory lock in Alembic env.py or operational procedure |
+| **No migration coordination lock** | Medium | Alembic had no distributed lock; concurrent `alembic upgrade` possible | Resolved by IMPL-035: coordinated lock `pysyspass_schema_mutation` shared by bootstrap and Alembic | Implemented ✓ |
 | **Bootstrap bypasses schema guard** | Low (by design) | `execute_schema_statements()` uses `raw_connection()` | Correct: guard protects runtime, not initialization |
 | **`databaseVersion` in Config not validated** | Low | Read for display only; never checked against code requirements | Add version detection to readiness |
 | **`SQLALCHEMY_SCHEMA_GUARD` bypassed by Alembic** | Low (by design) | Alembic uses its own engine from `alembic.ini` | Correct: migrations need DDL |
@@ -153,12 +153,35 @@ Application Startup (main.py:94)
 
 | Operation | Lock | Scope | Status |
 |-----------|------|-------|--------|
-| Bootstrap (initial schema) | `GET_LOCK('pysyspass_bootstrap', 300)` | MySQL server-wide | Verified ✓ |
-| Alembic migration | `GET_LOCK('pysyspass_alembic', 600)` | MySQL server-wide | **Proposed** (add to env.py) |
-| Schema guard (runtime) | N/A (event-based block) | Per-process | Verified ✓ |
-| Multi-replica Alembic | Operational runbook: one migration at a time | Process discipline | **Proposed** |
+| Bootstrap (initial schema) | `GET_LOCK('pysyspass_schema_mutation', 600)` (coordinated) | MySQL server-wide | Implemented ✓ (IMPL-035) |
+| Alembic migration | `GET_LOCK('pysyspass_schema_mutation', 600)` (coordinated) | MySQL server-wide | Implemented ✓ (IMPL-035) |
+|| Schema guard (runtime) | N/A (event-based block) | Per-process | Verified ✓ ||
+|| Multi-replica Alembic | Operational runbook: one migration at a time | Process discipline | **Proposed** ||
 
-**Gap:** Alembic has no built-in distributed lock. For MySQL deployments, `before_execute` hook in `alembic/env.py` should acquire `GET_LOCK('pysyspass_alembic', 600)`.
+**Gap:** none — Alembic now acquires the same coordinated lock as bootstrap
+in `alembic/env.py` (MySQL: connection-scoped `GET_LOCK` on the connection
+that runs the DDL; SQLite: `fcntl` file lock keyed by database URL).
+
+#### 4.3 Interrupted-migration recovery
+
+MySQL DDL is **not** assumed transactional, and the lock is connection-scoped:
+if a migration process dies mid-migration, MySQL releases its `GET_LOCK`
+automatically — there is no stale lock to clear manually.
+
+1. Confirm the lock is free: `SELECT IS_FREE_LOCK('pysyspass_schema_mutation')` (expect 1).
+2. Assess what applied: check `alembic_version` and inspect the schema; some
+   DDL statements may have executed while others did not.
+3. Restore the verified pre-migration backup (ADR-0013, mandatory before
+   ALTER/DROP migrations) and re-run the migration. If a restore is not
+   possible, manually apply the remaining DDL, then stamp the correct revision
+   under the coordinated lock (`alembic stamp <revision>` then
+   `alembic upgrade head`). Never skip failed DDL steps, and never stamp a
+   revision whose tables are missing.
+4. Re-verify: `alembic current` reports the expected head and the readiness
+   check passes before restarting traffic.
+
+Full operator procedure: `docs/deployment.md` (§Upgrade and Rollback
+Procedures → Database Migration → Interrupted-migration recovery).
 
 ---
 
@@ -349,7 +372,7 @@ This section corrects ADR-0015's file-based session approval.
 
 | Threat ID | Description | Mitigation | Status |
 |-----------|-------------|------------|--------|
-| **T-MIG-01** | Concurrent migration without lock corrupts schema | Alembic advisory lock (proposed) | Gap |
+| **T-MIG-01** | Concurrent migration without lock corrupts schema | Coordinated schema-mutation lock `pysyspass_schema_mutation` (bootstrap + Alembic) | Mitigated (IMPL-035) |
 | **T-MIG-02** | Silent schema mutation at startup with unexpected schema | `AUTO_INIT_DB_ON_STARTUP=true` default | Gap |
 | **T-MIG-03** | Application starts against incomplete schema (extension tables missing) | No Alembic version check at startup | Gap |
 | **T-MIG-04** | PHP schema upgrade (manual `.sql` application) not reflected in bootstrap definition | `dbstructure.sql` may lag behind applied `.sql` increments | Gap |
@@ -396,10 +419,10 @@ This section corrects ADR-0015's file-based session approval.
 | Bootstrap uses GET_LOCK (MySQL) | Concurrent startup → only one applies schema | Verified ✓ |
 | Alembic not invoked at startup | Grep `main.py` → no alembic call | Verified ✓ |
 | Extension tables created by Alembic | `alembic upgrade head` → tables exist | Verified ✓ |
-| Alembic 001 idempotent after bootstrap | Bootstrap then Alembic 001 → `CREATE TABLE` on existing → potential failure | **Needs fix** (IF NOT EXISTS or skip) |
+| Alembic 001 idempotent after bootstrap | Bootstrap then Alembic 001 → `CREATE TABLE` on existing → potential failure | **Fixed:** 001 stamps the baseline instead of re-executing PHP SQL; restamp of an already-stamped DB is an idempotent no-op | Verified ✓ (IMPL-035) |
 | `python_init.sql` referenced | `grep -rn "python_init"` → zero hits | Verified (dead code) ✓ |
 | Config.databaseVersion validated at startup | Readiness checks do not check this | Verified (not checked) ✓ |
-| Alembic has distributed lock | env.py has no GET_LOCK | Verified (no lock) ✓ |
+| Alembic has distributed lock | env.py acquires `GET_LOCK('pysyspass_schema_mutation')` on the DDL connection | Verified ✓ (IMPL-035) |
 | Extension tables use utf8mb4 | Check Alembic migrations → `utf8mb4_unicode_ci` | Verified ✓ |
 
 ---
@@ -474,6 +497,20 @@ Alembic to mutate shared schema **concurrently**. The contract is amended to a
   reconcile the standalone `alembic upgrade head` path against it).
 
 No two independent authorities may mutate the same shared schema.
+
+**Implementation (IMPL-035, 2026-11-27):** implemented. `app/db/schema_lock.py`
+exposes the single coordinated lock identity `pysyspass_schema_mutation` with
+a configurable 600 s default acquisition timeout
+(`SCHEMA_MUTATION_LOCK_SECONDS` / `PYSYSPASS_SCHEMA_MUTATION_LOCK_SECONDS`).
+`app/db/bootstrap.py` and `alembic/env.py` both acquire it before any schema
+mutation; independent `pysyspass_bootstrap` / `pysyspass_alembic` identities
+are removed. Alembic revision 001 is a baseline stamp (no re-execution of
+`schemas/dbstructure.sql`); restamps of already-stamped databases are
+idempotent and run under the same lock. Timeout and abort paths are covered by
+`tests/test_alembic_lock_serialization.py` (TEST-011 bootstrap-vs-Alembic
+mutex and timeout-vs-duration assertions). Interrupted-migration recovery is
+documented in §4.3 below and in `docs/deployment.md` (§Upgrade and Rollback
+Procedures).
 
 Kanban impact: IMPL-015 is **re-scoped** from "add independent
 `pysyspass_alembic` lock" to "single coordinated schema-mutation lock shared

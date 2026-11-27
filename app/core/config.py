@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     DATABASE_URL: Optional[str] = None
     AUTO_INIT_DB_ON_STARTUP: Any = True
     SQLALCHEMY_SCHEMA_GUARD: Any = True
+    SCHEMA_MUTATION_LOCK_SECONDS: int = 600
     SQLALCHEMY_READ_ONLY: Any = None
     SECRET_KEY: str = _generated_secret()
     ENCRYPTION_KEY: str = _generated_secret()

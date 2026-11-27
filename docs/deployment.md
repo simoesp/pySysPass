@@ -1131,13 +1131,66 @@ oc rollout history deployment/pySysPass
 
 ### Database Migration
 
-```bash
-# Run migrations
-python -m app.db.migrate
+pySysPass shares its database with sysPass PHP, so schema changes are a
+coordinated, one-at-a-time operation governed by the coordinated
+schema-mutation lock (``pysyspass_schema_mutation``, ADR-0016 Decision 6):
 
-# Verify migrations
-python -m app.db.migration_status
+1. **Backup first.** Take a verified, restorable backup before any migration
+   (ADR-0013; mandatory for ALTER/DROP migrations).
+2. **Bootstrap first.** On a fresh or adopted database, application startup
+   runs `bootstrap_database_on_startup()` (idempotent ``CREATE TABLE IF NOT
+   EXISTS`` from `schemas/dbstructure.sql`) under the coordinated lock — this
+   owns the PHP base schema. Alembic never re-executes it.
+3. **Migrate.** `alembic upgrade head` applies Python extension migrations
+   (003+) under the same coordinated lock; revision 001 is a baseline stamp
+   only — on databases already stamped at 001 it is an idempotent no-op.
+4. **One at a time.** Bootstrap and Alembic share the single lock identity,
+   scoped to the target database, so they never mutate the same database
+   concurrently. Do not run `alembic upgrade` while the application is
+   bootstrapping, and never run two upgrades against the same database.
+
+```bash
+# 1. Backup (verified restorable before touching the schema)
+scripts/check-backup-recovery.py  # or your verified dump procedure
+
+# 2. Startup bootstraps the PHP base schema automatically when needed
+#    (AUTO_INIT_DB_ON_STARTUP; idempotent on existing databases).
+
+# 3. Apply Python extension migrations under the coordinated lock
+DATABASE_URL="mysql+pymysql://..." python -m alembic upgrade head
+
+# 4. Verify
+DATABASE_URL="mysql+pymysql://..." python -m alembic current
 ```
+
+#### Interrupted-migration recovery
+
+MySQL DDL is **not** transactional, and the schema-mutation lock is
+connection-scoped: if a migration process dies mid-migration, MySQL releases
+its `GET_LOCK` automatically — there is no stale lock to clear manually.
+
+1. **Confirm the lock is free:**
+   ```sql
+   SELECT IS_FREE_LOCK('pysyspass_schema_mutation');  -- expect 1
+   ```
+2. **Assess what applied.** Because DDL is not transactional, some statements
+   may have executed while others did not. Check `alembic_version` and inspect
+   the schema; determine which migration statements completed.
+3. **Restore or complete.** The safe recovery is to restore the pre-migration
+   backup (verified restorable per ADR-0013) and re-run the migration. If
+   restoring is not possible, manually apply the remaining DDL, then stamp the
+   correct revision under the coordinated lock:
+   ```bash
+   DATABASE_URL="..." python -m alembic stamp <revision>
+   DATABASE_URL="..." python -m alembic upgrade head
+   ```
+   Never skip failed DDL steps, and never stamp a revision whose tables are
+   missing.
+4. **Re-verify:** `alembic current` must report the expected head, and the
+   application readiness check must pass before restarting traffic.
+
+The lock code never touches `alembic_version`; rollback of this change
+(reverting to per-mechanism locks) requires no data change.
 
 ---
 

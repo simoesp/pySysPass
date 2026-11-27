@@ -1,18 +1,16 @@
 from __future__ import annotations
 
-import contextlib
-import hashlib
 import logging
-import tempfile
 from pathlib import Path
 from typing import Iterable
 import re
 
 from sqlalchemy import inspect, text
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Connection, Engine
 
 from app.core.config import settings
 from app.db.base import engine
+from app.db.schema_lock import schema_mutation_lock
 
 logger = logging.getLogger(__name__)
 
@@ -183,8 +181,19 @@ def database_requires_bootstrap(
 def execute_schema_statements(
     statements: Iterable[str],
     engine_obj: Engine = engine,
+    connection: Connection | None = None,
 ) -> None:
-    connection = engine_obj.raw_connection()
+    """Execute *statements* and commit them.
+
+    If *connection* is supplied (the lock-holding connection from
+    :func:`schema_mutation_lock`) DDL runs on it; the caller owns the
+    connection's lifecycle.  Otherwise a raw connection is opened for the
+    call (backward-compatible entry point used directly by tests).
+    """
+    owns_connection = connection is None
+    if owns_connection:
+        connection = engine_obj.raw_connection()
+    assert connection is not None
     cursor = connection.cursor()
     try:
         for statement in statements:
@@ -195,7 +204,8 @@ def execute_schema_statements(
         raise
     finally:
         cursor.close()
-        connection.close()
+        if owns_connection:
+            connection.close()
 
 
 def _view_name(statement: str) -> str | None:
@@ -225,42 +235,16 @@ def bootstrap_database(engine_obj: Engine = engine) -> bool:
     logger.warning("Incomplete or virgin sysPass database detected; applying bootstrap schema.")
     statements = [statement for statement in _load_schema_statements() if not _view_name(statement)]
     statements.extend(_missing_view_statements(engine_obj))
-    execute_schema_statements(statements, engine_obj=engine_obj)
+
+    # The coordinated schema-mutation lock serializes bootstrap against Alembic
+    # and against other bootstrappers; DDL runs on the lock-holding connection
+    # so ownership stays tied to the acquiring connection.  Statements are
+    # idempotent (IF NOT EXISTS / INSERT IGNORE / CREATE OR REPLACE), so a
+    # re-check after acquiring the lock is unnecessary.
+    with schema_mutation_lock(engine_obj) as connection:
+        execute_schema_statements(statements, engine_obj=engine_obj, connection=connection)
     logger.warning("sysPass bootstrap schema applied successfully.")
     return True
-
-
-BOOTSTRAP_LOCK_SECONDS = 300
-
-
-@contextlib.contextmanager
-def _bootstrap_lock(engine_obj: Engine):
-    """Serialize bootstrap across workers (WEB_CONCURRENCY) and containers.
-
-    Every uvicorn worker runs the startup hook; without this, workers racing
-    on a virgin database all apply the schema and the losers crash.
-    """
-    if engine_obj.dialect.name == "mysql":
-        with engine_obj.connect() as connection:
-            acquired = connection.execute(
-                text("SELECT GET_LOCK('pysyspass_bootstrap', :wait)"), {"wait": BOOTSTRAP_LOCK_SECONDS}
-            ).scalar()
-            if acquired != 1:
-                raise RuntimeError("Timed out waiting for another process to bootstrap the database")
-            try:
-                yield
-            finally:
-                connection.execute(text("SELECT RELEASE_LOCK('pysyspass_bootstrap')"))
-        return
-    import fcntl
-
-    key = hashlib.sha256(str(engine_obj.url).encode()).hexdigest()[:16]
-    with open(Path(tempfile.gettempdir()) / f"pysyspass-bootstrap-{key}.lock", "w") as handle:
-        fcntl.flock(handle, fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(handle, fcntl.LOCK_UN)
 
 
 def bootstrap_database_on_startup(engine_obj: Engine = engine) -> bool:
@@ -268,6 +252,6 @@ def bootstrap_database_on_startup(engine_obj: Engine = engine) -> bool:
         return False
     if not database_requires_bootstrap(engine_obj):
         return False
-    with _bootstrap_lock(engine_obj):
-        # Re-checked under the lock: another worker may have finished it.
-        return bootstrap_database(engine_obj=engine_obj)
+    # Single coordinated lock acquisition inside bootstrap_database(); no
+    # second lock layer here (GET_LOCK is not reentrant).
+    return bootstrap_database(engine_obj=engine_obj)
