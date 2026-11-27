@@ -36,7 +36,7 @@
             <span v-if="props.row.user_id">User #{{ props.row.user_id }}</span>
             <span v-else-if="props.row.user_group_id">Group #{{ props.row.user_group_id }}</span>
             <span v-else-if="props.row.user_profile_id">Profile #{{ props.row.user_profile_id }}</span>
-            <q-badge v-else color="grey" label="Global" />
+            <q-badge v-else color="grey" label="No scope" />
           </q-td>
         </template>
         <template v-slot:body-cell-fixed="props">
@@ -46,6 +46,7 @@
         </template>
         <template v-slot:body-cell-data="props">
           <q-td :props="props">
+            <q-badge v-if="props.row.legacy" color="orange" label="Legacy, not applied" class="q-mr-sm" />
             <code class="text-caption">{{ JSON.stringify(props.value) }}</code>
           </q-td>
         </template>
@@ -67,11 +68,12 @@
           <q-btn icon="close" flat round dense v-close-popup />
         </q-card-section>
         <q-card-section class="q-gutter-md">
-          <q-select v-if="!editing" v-model="form.type" :options="TYPES" label="Type" outlined dense emit-value map-options />
+          <q-select v-if="!editing" v-model="form.type" :options="typeOptions.slice(1)" label="Type" outlined dense
+            emit-value map-options @update:model-value="t => { formDataStr = JSON.stringify(TEMPLATES[t], null, 2) }" />
           <div v-else class="text-caption text-grey-6">Type: <strong>{{ form.type }}</strong></div>
 
           <div v-if="!editing" class="text-caption text-grey-7 q-mt-none">
-            Scope — leave all blank for a global preset:
+            Scope — set a user, a group or a profile (as in sysPass PHP):
           </div>
           <div v-if="!editing" class="row q-gutter-sm">
             <q-input v-model.number="form.user_id" type="number" label="User ID" outlined dense class="col" clearable />
@@ -107,7 +109,23 @@ import { ref, onMounted } from 'vue'
 import { Notify, Dialog } from 'quasar'
 import api from '@/api/axios'
 
-const TYPES = ['AccountPermission', 'AccountPrivate', 'Password', 'SessionTimeout']
+// sysPass PHP preset types; "fixed" presets are enforced on accounts and sessions.
+const TYPES = ['account.permission', 'account.private', 'account.password', 'session.timeout']
+const TYPE_LABELS = {
+  'account.permission': 'Account permissions',
+  'account.private': 'Account privacy',
+  'account.password': 'Password policy',
+  'session.timeout': 'Session timeout',
+}
+const TEMPLATES = {
+  'account.permission': { users_view: [], users_edit: [], user_groups_view: [], user_groups_edit: [] },
+  'account.private': { private_user: false, private_group: false },
+  'account.password': {
+    length: 12, use_numbers: true, use_letters: true, use_symbols: false, use_upper: true,
+    use_lower: true, use_image: false, expire_days: 0, score: 0, regex: null,
+  },
+  'session.timeout': { ip_address: '0.0.0.0/0', timeout: 300 },
+}
 
 const rows = ref([])
 const loading = ref(false)
@@ -119,7 +137,7 @@ const typeFilter = ref(null)
 
 const typeOptions = [
   { label: 'All', value: null },
-  ...TYPES.map(t => ({ label: t, value: t })),
+  ...TYPES.map(t => ({ label: TYPE_LABELS[t], value: t })),
 ]
 
 const columns = [
@@ -165,7 +183,7 @@ async function load() {
 function openCreate() {
   editing.value = null
   form.value = emptyForm()
-  formDataStr.value = '{}'
+  formDataStr.value = JSON.stringify(TEMPLATES[form.value.type], null, 2)
   jsonError.value = ''
   dialog.value = true
 }

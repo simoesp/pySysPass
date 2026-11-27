@@ -1,14 +1,17 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Body, Query, Request
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List, Literal, Optional
 from app.db.base import get_db
 from app.schemas.account import (
     AccountCreate, AccountResponse, AccountUpdate, PasswordResponse,
     SharedUserInfo, SharedGroupInfo, AccountAuditEntry,
 )
-from app.services.account_service import AccountService
+from app.services.account_service import AccountService, AccountValidationError, VaultRequiredError
 from app.services.account_audit_service import AccountAuditService
 from app.core.security import get_encryption_service
+from app.core.password_image import text_to_png_base64
+from app.services.item_preset_service import ItemPresetService
+from app.services.runtime_policy import get_policy
 from app.api.deps import (
     enforce_permissions,
     require_all_permissions,
@@ -16,6 +19,11 @@ from app.api.deps import (
 )
 
 router = APIRouter()
+
+
+def _vault_required(exc: VaultRequiredError) -> HTTPException:
+    # Same code the login flow uses when the vault cannot be unlocked.
+    return HTTPException(status_code=428, detail={"code": "MASTER_PASSWORD_REQUIRED", "message": str(exc)})
 
 
 def _client_ip(request: Request) -> str:
@@ -37,7 +45,7 @@ account_permission = require_any_permission("acc_permission", account_admin=True
 
 
 @router.get("/accounts", response_model=List[AccountResponse])
-async def list_accounts(
+def list_accounts(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     q: Optional[str] = Query(None),
@@ -54,7 +62,7 @@ async def list_accounts(
 
 
 @router.get("/accounts/count")
-async def count_accounts(
+def count_accounts(
     q: Optional[str] = Query(None),
     category_id: Optional[int] = Query(None),
     client_id: Optional[int] = Query(None),
@@ -70,16 +78,20 @@ async def count_accounts(
 
 
 @router.get("/accounts/search", response_model=List[AccountResponse])
-async def search_accounts(
+def search_accounts(
     q: str,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db),
     current_user=Depends(account_view),
 ):
-    return AccountService(db, get_encryption_service()).search_accounts(current_user["id"], q)
+    # Paged like /accounts (and PHP's account search); unbounded results cost
+    # seconds per request on large vaults.
+    return AccountService(db, get_encryption_service()).search_accounts(current_user["id"], q, skip, limit)
 
 
 @router.post("/accounts", response_model=AccountResponse, status_code=status.HTTP_201_CREATED)
-async def create_account(
+def create_account(
     account: AccountCreate,
     db: Session = Depends(get_db),
     current_user=Depends(account_create),
@@ -100,12 +112,16 @@ async def create_account(
         return AccountService(db, get_encryption_service()).create_account(
             account, current_user["id"], master_pass=current_user.get("master_pass")
         )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except AccountValidationError as e:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(e))
+    except VaultRequiredError as e:
+        db.rollback()
+        raise _vault_required(e)
 
 
 @router.get("/accounts/{account_id}/audit", response_model=List[AccountAuditEntry])
-async def get_account_audit(
+def get_account_audit(
     account_id: int,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
@@ -124,7 +140,7 @@ async def get_account_audit(
 
 
 @router.get("/accounts/{account_id}", response_model=AccountResponse)
-async def get_account(
+def get_account(
     account_id: int,
     request: Request,
     db: Session = Depends(get_db),
@@ -141,7 +157,7 @@ async def get_account(
 
 
 @router.put("/accounts/{account_id}", response_model=AccountResponse)
-async def update_account(
+def update_account(
     account_id: int,
     account: AccountUpdate,
     db: Session = Depends(get_db),
@@ -163,9 +179,16 @@ async def update_account(
         enforce_permissions(
             current_user, db, "acc_permission", account_admin=True
         )
-    result = AccountService(db, get_encryption_service()).update_account(
-        account_id, account, current_user["id"], master_pass=current_user.get("master_pass")
-    )
+    try:
+        result = AccountService(db, get_encryption_service()).update_account(
+            account_id, account, current_user["id"], master_pass=current_user.get("master_pass")
+        )
+    except AccountValidationError as e:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(e))
+    except VaultRequiredError as e:
+        db.rollback()
+        raise _vault_required(e)
     if not result:
         raise HTTPException(status_code=404, detail="Account not found")
     # account.edit is recorded by the global audit middleware (with the
@@ -174,7 +197,7 @@ async def update_account(
 
 
 @router.delete("/accounts/{account_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_account(
+def delete_account(
     account_id: int,
     db: Session = Depends(get_db),
     current_user=Depends(account_delete),
@@ -185,26 +208,34 @@ async def delete_account(
 
 
 @router.get("/accounts/{account_id}/password")
-async def get_account_password(
+def get_account_password(
     account_id: int,
     request: Request,
+    purpose: Literal["copy", "view"] = "copy",
     db: Session = Depends(get_db),
     current_user=Depends(account_view_pass),
 ):
-    password = AccountService(db, get_encryption_service()).get_decrypted_password(
-        account_id, current_user["id"], master_pass=current_user.get("master_pass")
-    )
+    """The password; ``purpose=view`` follows PHP viewPass's image rule, copy returns text as copyPass does."""
+    try:
+        password = AccountService(db, get_encryption_service()).get_decrypted_password(
+            account_id, current_user["id"], master_pass=current_user.get("master_pass")
+        )
+    except VaultRequiredError as e:
+        raise _vault_required(e)
     if password is None:
         raise HTTPException(status_code=404, detail="Account not found or no password")
     AccountAuditService(db).log(
         account_id, "account.view.pass", current_user["id"],
         current_user.get("username"), _client_ip(request),
     )
+    if purpose == "view" and (get_policy(db).account_pass_to_image
+                              or ItemPresetService(db).password_as_image(current_user["id"])):
+        return PasswordResponse(use_image=True, password_image=text_to_png_base64(password))
     return PasswordResponse(password=password)
 
 
 @router.post("/accounts/{account_id}/favorite")
-async def toggle_favorite(
+def toggle_favorite(
     account_id: int,
     db: Session = Depends(get_db),
     current_user=Depends(account_view),
@@ -217,14 +248,17 @@ async def toggle_favorite(
 
 
 @router.post("/accounts/{account_id}/copy", response_model=AccountResponse, status_code=status.HTTP_201_CREATED)
-async def copy_account(
+def copy_account(
     account_id: int,
     db: Session = Depends(get_db),
     current_user=Depends(account_copy),
 ):
-    result = AccountService(db, get_encryption_service()).copy_account(
-        account_id, current_user["id"], master_pass=current_user.get("master_pass")
-    )
+    try:
+        result = AccountService(db, get_encryption_service()).copy_account(
+            account_id, current_user["id"], master_pass=current_user.get("master_pass")
+        )
+    except VaultRequiredError as e:
+        raise _vault_required(e)
     if not result:
         raise HTTPException(status_code=404, detail="Account not found")
     return result
@@ -233,7 +267,7 @@ async def copy_account(
 # ── ACL: shared users ─────────────────────────────────────────────────────
 
 @router.put("/accounts/{account_id}/users/{target_user_id}")
-async def set_user_access(
+def set_user_access(
     account_id: int,
     target_user_id: int,
     is_edit: bool = Body(False, embed=True),
@@ -249,7 +283,7 @@ async def set_user_access(
 
 
 @router.delete("/accounts/{account_id}/users/{target_user_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def remove_user_access(
+def remove_user_access(
     account_id: int,
     target_user_id: int,
     db: Session = Depends(get_db),
@@ -264,7 +298,7 @@ async def remove_user_access(
 # ── ACL: shared groups ────────────────────────────────────────────────────
 
 @router.put("/accounts/{account_id}/groups/{group_id}")
-async def set_group_access(
+def set_group_access(
     account_id: int,
     group_id: int,
     is_edit: bool = Body(False, embed=True),
@@ -280,7 +314,7 @@ async def set_group_access(
 
 
 @router.delete("/accounts/{account_id}/groups/{group_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def remove_group_access(
+def remove_group_access(
     account_id: int,
     group_id: int,
     db: Session = Depends(get_db),

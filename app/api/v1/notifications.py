@@ -9,7 +9,7 @@ from app.api.deps import get_current_user
 router = APIRouter()
 
 @router.get("/notifications", response_model=List[NotificationResponse])
-async def list_notifications(
+def list_notifications(
     unread_only: bool = False,
     skip: int = 0,
     limit: int = 50,
@@ -26,7 +26,7 @@ async def list_notifications(
     )
 
 @router.get("/notifications/unread-count")
-async def get_unread_count(
+def get_unread_count(
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)
 ):
@@ -36,7 +36,7 @@ async def get_unread_count(
     return {"unread_count": count}
 
 @router.post("/notifications", response_model=NotificationResponse, status_code=status.HTTP_201_CREATED)
-async def create_notification(
+def create_notification(
     notification: NotificationCreate,
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)
@@ -54,7 +54,7 @@ async def create_notification(
     )
 
 @router.get("/notifications/{notification_id}", response_model=NotificationResponse)
-async def get_notification(
+def get_notification(
     notification_id: int,
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)
@@ -69,7 +69,7 @@ async def get_notification(
     return notification
 
 @router.post("/notifications/{notification_id}/read")
-async def mark_as_read(
+def mark_as_read(
     notification_id: int,
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)
@@ -84,7 +84,7 @@ async def mark_as_read(
     return {"message": "Notification marked as read"}
 
 @router.post("/notifications/read-all")
-async def mark_all_as_read(
+def mark_all_as_read(
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)
 ):
@@ -95,7 +95,7 @@ async def mark_all_as_read(
     return {"message": f"{count} notifications marked as read"}
 
 @router.delete("/notifications/{notification_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_notification(
+def delete_notification(
     notification_id: int,
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)
@@ -109,7 +109,7 @@ async def delete_notification(
     return None
 
 @router.delete("/notifications")
-async def delete_all_notifications(
+def delete_all_notifications(
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)
 ):
@@ -120,7 +120,7 @@ async def delete_all_notifications(
     return {"message": f"{count} notifications deleted"}
 
 @router.get("/notifications/type/{notification_type}", response_model=List[NotificationResponse])
-async def get_notifications_by_type(
+def get_notifications_by_type(
     notification_type: str,
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)

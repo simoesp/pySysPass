@@ -1,0 +1,12 @@
+{
+  "name": "pysyspass-e2e",
+  "private": true,
+  "type": "module",
+  "description": "Browser acceptance tests against a running pySysPass stack (not part of the shipped frontend).",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.0"
+  }
+}

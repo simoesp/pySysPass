@@ -14,7 +14,7 @@ router = APIRouter()
 
 
 @router.get("/user-groups", response_model=List[UserGroupResponse])
-async def list_user_groups(
+def list_user_groups(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -22,7 +22,7 @@ async def list_user_groups(
 
 
 @router.post("/user-groups", response_model=UserGroupResponse, status_code=status.HTTP_201_CREATED)
-async def create_user_group(
+def create_user_group(
     group: UserGroupCreate,
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('mgm_groups')),
@@ -31,7 +31,7 @@ async def create_user_group(
 
 
 @router.get("/user-groups/{group_id}", response_model=UserGroupWithMembers)
-async def get_user_group(
+def get_user_group(
     group_id: int,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
@@ -56,7 +56,7 @@ async def get_user_group(
 
 
 @router.put("/user-groups/{group_id}", response_model=UserGroupResponse)
-async def update_user_group(
+def update_user_group(
     group_id: int,
     group: UserGroupUpdate,
     db: Session = Depends(get_db),
@@ -70,7 +70,7 @@ async def update_user_group(
 
 
 @router.delete("/user-groups/{group_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_user_group(
+def delete_user_group(
     group_id: int,
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('mgm_groups')),
@@ -81,7 +81,7 @@ async def delete_user_group(
 
 
 @router.get("/user-groups/{group_id}/members", response_model=List[UserGroupMember])
-async def get_group_members(
+def get_group_members(
     group_id: int,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
@@ -94,7 +94,7 @@ async def get_group_members(
 
 
 @router.post("/user-groups/{group_id}/members/{user_id}")
-async def add_user_to_group(
+def add_user_to_group(
     group_id: int,
     user_id: int,
     db: Session = Depends(get_db),
@@ -112,7 +112,7 @@ async def add_user_to_group(
 
 
 @router.delete("/user-groups/{group_id}/members/{user_id}")
-async def remove_user_from_group(
+def remove_user_from_group(
     group_id: int,
     user_id: int,
     db: Session = Depends(get_db),
@@ -124,7 +124,7 @@ async def remove_user_from_group(
 
 
 @router.get("/users/{user_id}/groups", response_model=List[UserGroupResponse])
-async def get_user_groups(
+def get_user_groups(
     user_id: int,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),

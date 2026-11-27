@@ -16,6 +16,15 @@ updates:
       frontend-deps:
         patterns: ["*"]
 
+  # Base images are pinned by digest; let Dependabot propose digest updates.
+  - package-ecosystem: "docker"
+    directories: ["/", "/frontend"]
+    schedule:
+      interval: "weekly"
+    groups:
+      container-images:
+        patterns: ["*"]
+
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:

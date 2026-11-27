@@ -14,6 +14,10 @@
       />
     </div>
 
+    <q-banner class="bg-warning text-dark q-mb-md">
+      Restore requires a maintenance window. Stop all applications sharing the database and
+      follow the offline recovery procedure before restarting them.
+    </q-banner>
     <q-card flat bordered>
       <q-table
         :rows="backups"
@@ -37,14 +41,6 @@
         </template>
         <template v-slot:body-cell-actions="props">
           <q-td :props="props" auto-width>
-            <q-btn
-              flat dense round icon="restore_page" color="warning" size="sm"
-              :disable="restoring === props.row.filename"
-              :loading="restoring === props.row.filename"
-              @click="doRestore(props.row)"
-            >
-              <q-tooltip>Restore</q-tooltip>
-            </q-btn>
             <q-btn
               flat dense round icon="download" color="primary" size="sm"
               @click="doDownload(props.row.filename)"
@@ -72,7 +68,6 @@ import api from '@/api/axios'
 const backups = ref([])
 const loading = ref(false)
 const creating = ref(false)
-const restoring = ref('')
 
 const columns = [
   { name: 'filename', label: 'Filename', field: 'filename', align: 'left', sortable: true },
@@ -106,7 +101,7 @@ async function doCreate() {
   try {
     const r = await api.post('/backup/create?include_db=true')
     Notify.create({
-      message: `Backup created: ${r.data.filename}${r.data.db_included ? '' : ' (no DB dump — mysqldump not found)'}`,
+      message: `Backup created: ${r.data.filename}`,
       color: 'positive',
     })
     load()
@@ -115,37 +110,6 @@ async function doCreate() {
   } finally {
     creating.value = false
   }
-}
-
-function doRestore(row) {
-  Dialog.create({
-    title: 'Restore Backup',
-    message: `Restore ${row.filename}? This will overwrite the current data directory${row.db_included ? ' and attempt to restore the database dump' : ''}.`,
-    cancel: true,
-    persistent: true,
-    ok: { label: 'Restore', color: 'warning' },
-  }).onOk(async () => {
-    restoring.value = row.filename
-    try {
-      const r = await api.post(`/backup/${encodeURIComponent(row.filename)}/restore`)
-      const restoredParts = [
-        r.data.db_restored ? 'database' : null,
-        r.data.data_restored ? 'data files' : null,
-      ].filter(Boolean)
-      Notify.create({
-        message: restoredParts.length
-          ? `Backup restored: ${restoredParts.join(' and ')}`
-          : 'Backup restored, but no restorable payloads were found.',
-        color: 'positive',
-        timeout: 2500,
-      })
-      load()
-    } catch (e) {
-      Notify.create({ message: e.response?.data?.detail || 'Restore failed', color: 'negative' })
-    } finally {
-      restoring.value = ''
-    }
-  })
 }
 
 function doDownload(filename) {

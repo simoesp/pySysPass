@@ -1,12 +1,16 @@
+from datetime import datetime
+
 import pytest
-from app.schemas.account import AccountCreate, AccountUpdate
-from app.services.account_service import AccountService
+from app.models.account import Account
+from app.schemas.account import AccountUpdate
+from tests.account_refs import account_create, TEST_MASTER_PASSWORD
+from app.services.account_service import AccountService, VaultRequiredError
 from app.core.security import EncryptionService
 
 @pytest.mark.asyncio
 async def test_create_account(db_session, encryption_service, test_user):
     service = AccountService(db_session, encryption_service)
-    account_data = AccountCreate(
+    account_data = account_create(
         title="Test Account",
         description="Test Description",
         login="testuser",
@@ -14,7 +18,7 @@ async def test_create_account(db_session, encryption_service, test_user):
         url="https://example.com"
     )
 
-    account = service.create_account(account_data, test_user.id)
+    account = service.create_account(account_data, test_user.id, master_pass=TEST_MASTER_PASSWORD)
 
     assert account.id is not None
     assert account.title == "Test Account"
@@ -28,11 +32,11 @@ async def test_get_accounts(db_session, encryption_service, test_user):
 
     # Create test accounts
     for i in range(3):
-        account_data = AccountCreate(
+        account_data = account_create(
             title=f"Account {i}",
             password="secret123"
         )
-        service.create_account(account_data, test_user.id)
+        service.create_account(account_data, test_user.id, master_pass=TEST_MASTER_PASSWORD)
 
     accounts = service.get_accounts(test_user.id)
 
@@ -42,26 +46,31 @@ async def test_get_accounts(db_session, encryption_service, test_user):
 async def test_get_decrypted_password(db_session, encryption_service, test_user):
     service = AccountService(db_session, encryption_service)
 
-    account_data = AccountCreate(
+    account_data = account_create(
         title="Secret Account",
         password="my-secret-password"
     )
-    account = service.create_account(account_data, test_user.id)
+    account = service.create_account(account_data, test_user.id, master_pass=TEST_MASTER_PASSWORD)
 
-    decrypted = service.get_decrypted_password(account.id)
-
-    assert decrypted == "my-secret-password"
+    assert service.get_decrypted_password(account.id, master_pass=TEST_MASTER_PASSWORD) == "my-secret-password"
+    stored = db_session.get(Account, account.id)
+    assert stored.key.startswith(b"def10000")  # native Defuse, not a Python format
+    with pytest.raises(VaultRequiredError):
+        service.get_decrypted_password(account.id)
+    assert service.get_decrypted_password(account.id, master_pass="wrong-master") is None
+    db_session.refresh(stored)
+    assert stored.countDecrypt == 1  # failed decryptions are not counted
 
 @pytest.mark.asyncio
 async def test_update_account(db_session, encryption_service, test_user):
     from app.schemas.account import AccountUpdate
 
     service = AccountService(db_session, encryption_service)
-    account_data = AccountCreate(title="Original", password="pass1")
-    account = service.create_account(account_data, test_user.id)
+    account_data = account_create(title="Original", password="pass1")
+    account = service.create_account(account_data, test_user.id, master_pass=TEST_MASTER_PASSWORD)
 
     update_data = AccountUpdate(title="Updated Title", is_favorite=True)
-    updated = service.update_account(account.id, update_data, test_user.id)
+    updated = service.update_account(account.id, update_data, test_user.id, master_pass=TEST_MASTER_PASSWORD)
 
     assert updated.title == "Updated Title"
     assert updated.is_favorite
@@ -69,8 +78,8 @@ async def test_update_account(db_session, encryption_service, test_user):
 @pytest.mark.asyncio
 async def test_delete_account(db_session, encryption_service, test_user):
     service = AccountService(db_session, encryption_service)
-    account_data = AccountCreate(title="To Delete", password="pass1")
-    account = service.create_account(account_data, test_user.id)
+    account_data = account_create(title="To Delete", password="pass1")
+    account = service.create_account(account_data, test_user.id, master_pass=TEST_MASTER_PASSWORD)
 
     result = service.delete_account(account.id, test_user.id)
 
@@ -82,9 +91,18 @@ async def test_search_accounts(db_session, encryption_service, test_user):
     service = AccountService(db_session, encryption_service)
 
     # Create accounts
-    service.create_account(AccountCreate(title="GitHub Account", login="github_user", password="pass"), test_user.id)
-    service.create_account(AccountCreate(title="GitLab Account", login="gitlab_user", password="pass"), test_user.id)
-    service.create_account(AccountCreate(title="Other Account", login="other_user", password="pass"), test_user.id)
+    service.create_account(
+        account_create(title="GitHub Account", login="github_user", password="pass"),
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
+    )
+    service.create_account(
+        account_create(title="GitLab Account", login="gitlab_user", password="pass"),
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
+    )
+    service.create_account(
+        account_create(title="Other Account", login="other_user", password="pass"),
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
+    )
 
     # Search
     results = service.search_accounts(test_user.id, "GitHub")
@@ -92,13 +110,26 @@ async def test_search_accounts(db_session, encryption_service, test_user):
     assert len(results) == 1
     assert "GitHub" in results[0].title
 
+
+def test_search_is_paged_and_stable(db_session, encryption_service, test_user):
+    service = AccountService(db_session, encryption_service)
+    for index in range(5):
+        service.create_account(account_create(title=f"Paged {index}", password="pass"), test_user.id,
+                               master_pass=TEST_MASTER_PASSWORD)
+    db_session.query(Account).update({Account.dateAdd: datetime(2026, 1, 1)})  # equal dates: id breaks ties
+    db_session.commit()
+    pages = [service.search_accounts(test_user.id, "Paged", skip, 2) for skip in (0, 2, 4)]
+    assert [len(page) for page in pages] == [2, 2, 1]
+    ids = [account.id for page in pages for account in page]
+    assert len(set(ids)) == 5 and ids == sorted(ids, reverse=True)
+
 @pytest.mark.asyncio
 async def test_account_access_is_scoped_to_owner(db_session, encryption_service, test_user):
     from app.models.account import User
     from app.services.auth_service import get_password_hash
 
     other_user = User(
-        username="otheruser",
+        name="otheruser", userProfileId=1, hashSalt=b"s" * 32, username="otheruser",
         email="other@example.com",
         password=get_password_hash("testpassword"),
         isUserAdmin=False,
@@ -110,13 +141,15 @@ async def test_account_access_is_scoped_to_owner(db_session, encryption_service,
 
     service = AccountService(db_session, encryption_service)
     account = service.create_account(
-        AccountCreate(title="Private Account", password="secret123"),
-        test_user.id,
+        account_create(title="Private Account", password="secret123"),
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     assert service.get_account(account.id, other_user.id) is None
     assert service.get_decrypted_password(account.id, other_user.id) is None
-    assert service.update_account(account.id, AccountUpdate(title="Stolen"), other_user.id) is None
+    assert service.update_account(
+        account.id, AccountUpdate(title="Stolen"), other_user.id, master_pass=TEST_MASTER_PASSWORD
+    ) is None
     assert service.delete_account(account.id, other_user.id) is False
     assert service.get_account(account.id, test_user.id) is not None
 
@@ -142,7 +175,9 @@ async def test_get_accounts_pagination(db_session, encryption_service, test_user
     service = AccountService(db_session, encryption_service)
 
     for i in range(5):
-        service.create_account(AccountCreate(title=f"Account {i}", password="pass"), test_user.id)
+        service.create_account(
+            account_create(title=f"Account {i}", password="pass"), test_user.id, master_pass=TEST_MASTER_PASSWORD
+        )
 
     all_accounts = service.get_accounts(test_user.id)
     assert len(all_accounts) == 5
@@ -169,25 +204,33 @@ async def test_get_accounts_filters_and_count(db_session, encryption_service, te
 
     service = AccountService(db_session, encryption_service)
 
+    from app.models.account import Category, Client
+
     tag = Tag(name="prod", hash=make_item_hash("prod"))
     db_session.add(tag)
+    db_session.add_all([
+        Category(id=1, name="Cat 1", hash=make_item_hash("Cat 1")),
+        Category(id=2, name="Cat 2", hash=make_item_hash("Cat 2")),
+        Client(id=1, name="Client 1", hash=make_item_hash("Client 1")),
+        Client(id=2, name="Client 2", hash=make_item_hash("Client 2")),
+    ])
     db_session.commit()
     db_session.refresh(tag)
 
     github = service.create_account(
-        AccountCreate(title="GitHub", login="gh_user", password="pass",
+        account_create(title="GitHub", login="gh_user", password="pass",
                       category_id=1, client_id=1),
-        test_user.id,
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
     service.create_account(
-        AccountCreate(title="GitLab", login="gl_user", password="pass",
+        account_create(title="GitLab", login="gl_user", password="pass",
                       category_id=2, client_id=1),
-        test_user.id,
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
     service.create_account(
-        AccountCreate(title="Mail", login="mail_user", password="pass",
+        account_create(title="Mail", login="mail_user", password="pass",
                       category_id=2, client_id=2),
-        test_user.id,
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
     db_session.add(AccountToTag(accountId=github.id, tagId=tag.id))
     db_session.commit()
@@ -212,11 +255,12 @@ async def test_get_accounts_filters_and_count(db_session, encryption_service, te
 
 @pytest.mark.asyncio
 async def test_count_accounts_is_scoped_to_user(db_session, encryption_service, test_user):
-    from app.models.account import User
+    from app.models.account import User, UserGroup
     from app.services.auth_service import get_password_hash
 
+    db_session.add(UserGroup(id=99, name="Counters"))
     other_user = User(
-        username="counter",
+        name="counter", userProfileId=1, hashSalt=b"s" * 32, username="counter",
         email="counter@example.com",
         password=get_password_hash("testpassword"),
         isUserAdmin=False,
@@ -227,7 +271,52 @@ async def test_count_accounts_is_scoped_to_user(db_session, encryption_service, 
     db_session.refresh(other_user)
 
     service = AccountService(db_session, encryption_service)
-    service.create_account(AccountCreate(title="Mine", password="pass"), test_user.id)
+    service.create_account(
+        account_create(title="Mine", password="pass"), test_user.id, master_pass=TEST_MASTER_PASSWORD
+    )
 
     assert service.count_accounts(test_user.id) == 1
     assert service.count_accounts(other_user.id) == 0
+
+
+def test_account_listing_queries_do_not_grow_with_rows(db_session, encryption_service, test_user):
+    """Listing builds every row from a fixed number of queries (no N+1)."""
+    from sqlalchemy import event
+
+    from app.models.account import AccountToFavorite, Tag
+    from app.schemas.account import SharedGroupEntry, SharedUserEntry
+    from app.services.category_service import make_item_hash
+
+    service = AccountService(db_session, encryption_service)
+    db_session.add(Tag(id=5, name="t", hash=make_item_hash("t")))
+    db_session.commit()
+
+    def build(count):
+        for index in range(count):
+            created = service.create_account(account_create(
+                title=f"q{count}-{index}", password="p", is_public=True, tag_ids=[5],
+                shared_users=[SharedUserEntry(user_id=test_user.id)], shared_groups=[SharedGroupEntry(group_id=1)],
+            ), test_user.id, master_pass=TEST_MASTER_PASSWORD)
+            db_session.add(AccountToFavorite(accountId=created["id"], userId=test_user.id))
+        db_session.commit()
+
+    def queries_for_listing():
+        engine = db_session.get_bind()
+        seen = []
+        listener = lambda *args: seen.append(1)  # noqa: E731
+        event.listen(engine, "before_cursor_execute", listener)
+        try:
+            rows = AccountService(db_session, encryption_service).get_accounts(test_user.id, 0, 500)
+        finally:
+            event.remove(engine, "before_cursor_execute", listener)
+        return len(rows), len(seen), rows
+
+    build(5)
+    small_rows, small, _ = queries_for_listing()
+    build(45)
+    large_rows, large, rows = queries_for_listing()
+    assert (small_rows, large_rows) == (5, 50)
+    assert large == small  # constant, not proportional to rows
+    assert all(r["is_favorite"] and [t.id for t in r["tags"]] == [5] for r in rows)
+    assert all(r["shared_users"][0].username == test_user.username for r in rows)
+    assert all(r["shared_groups"][0].group_id == 1 for r in rows)

@@ -5,11 +5,12 @@ from pathlib import Path
 from typing import Iterable
 import re
 
-from sqlalchemy import inspect
-from sqlalchemy.engine import Engine
+from sqlalchemy import inspect, text
+from sqlalchemy.engine import Connection, Engine
 
 from app.core.config import settings
 from app.db.base import engine
+from app.db.schema_lock import schema_mutation_lock
 
 logger = logging.getLogger(__name__)
 
@@ -180,8 +181,19 @@ def database_requires_bootstrap(
 def execute_schema_statements(
     statements: Iterable[str],
     engine_obj: Engine = engine,
+    connection: Connection | None = None,
 ) -> None:
-    connection = engine_obj.raw_connection()
+    """Execute *statements* and commit them.
+
+    If *connection* is supplied (the lock-holding connection from
+    :func:`schema_mutation_lock`) DDL runs on it; the caller owns the
+    connection's lifecycle.  Otherwise a raw connection is opened for the
+    call (backward-compatible entry point used directly by tests).
+    """
+    owns_connection = connection is None
+    if owns_connection:
+        connection = engine_obj.raw_connection()
+    assert connection is not None
     cursor = connection.cursor()
     try:
         for statement in statements:
@@ -192,7 +204,8 @@ def execute_schema_statements(
         raise
     finally:
         cursor.close()
-        connection.close()
+        if owns_connection:
+            connection.close()
 
 
 def _view_name(statement: str) -> str | None:
@@ -222,7 +235,14 @@ def bootstrap_database(engine_obj: Engine = engine) -> bool:
     logger.warning("Incomplete or virgin sysPass database detected; applying bootstrap schema.")
     statements = [statement for statement in _load_schema_statements() if not _view_name(statement)]
     statements.extend(_missing_view_statements(engine_obj))
-    execute_schema_statements(statements, engine_obj=engine_obj)
+
+    # The coordinated schema-mutation lock serializes bootstrap against Alembic
+    # and against other bootstrappers; DDL runs on the lock-holding connection
+    # so ownership stays tied to the acquiring connection.  Statements are
+    # idempotent (IF NOT EXISTS / INSERT IGNORE / CREATE OR REPLACE), so a
+    # re-check after acquiring the lock is unnecessary.
+    with schema_mutation_lock(engine_obj) as connection:
+        execute_schema_statements(statements, engine_obj=engine_obj, connection=connection)
     logger.warning("sysPass bootstrap schema applied successfully.")
     return True
 
@@ -230,4 +250,8 @@ def bootstrap_database(engine_obj: Engine = engine) -> bool:
 def bootstrap_database_on_startup(engine_obj: Engine = engine) -> bool:
     if not settings.AUTO_INIT_DB_ON_STARTUP:
         return False
+    if not database_requires_bootstrap(engine_obj):
+        return False
+    # Single coordinated lock acquisition inside bootstrap_database(); no
+    # second lock layer here (GET_LOCK is not reentrant).
     return bootstrap_database(engine_obj=engine_obj)

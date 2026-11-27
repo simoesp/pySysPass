@@ -13,7 +13,11 @@ SCHEMA_PATH = ROOT / "schemas" / "dbstructure.sql"
 
 
 def _physical_tables():
-    return [table for table in Base.metadata.tables.values() if not table.info.get("is_view")]
+    return [
+        table
+        for table in Base.metadata.tables.values()
+        if not table.info.get("is_view") and not table.info.get("is_php_extension")
+    ]
 
 
 def test_every_physical_table_has_php_mysql_storage_options():

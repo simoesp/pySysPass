@@ -10,6 +10,7 @@ from app.services.user_profile_service import UserProfileService
 from app.services.auth_service import verify_password
 from app.models.account import User
 from app.api.deps import get_current_user, require_permission
+from app.services.session_service import rotate_user_sessions
 
 
 class PasswordChangeRequest(BaseModel):
@@ -31,7 +32,7 @@ def _has_perm(db: Session, user_id: int, key: str) -> bool:
 
 
 @router.get("/users", response_model=list[UserResponse])
-async def list_users(
+def list_users(
     skip: int = Query(0, ge=0),
     limit: Optional[int] = Query(None, ge=1, le=500),
     q: Optional[str] = Query(None),
@@ -46,7 +47,7 @@ async def list_users(
 
 
 @router.get("/users/count")
-async def count_users(
+def count_users(
     q: Optional[str] = Query(None),
     current_user=Depends(require_permission('mgm_users')),
     db: Session = Depends(get_db),
@@ -55,7 +56,7 @@ async def count_users(
 
 
 @router.post("/users", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-async def create_user(
+def create_user(
     user: UserCreate,
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('mgm_users')),
@@ -69,7 +70,7 @@ async def create_user(
 
 
 @router.get("/users/{user_id}", response_model=UserResponse)
-async def get_user(
+def get_user(
     user_id: int,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
@@ -85,7 +86,7 @@ async def get_user(
 
 
 @router.put("/users/{user_id}", response_model=UserResponse)
-async def update_user(
+def update_user(
     user_id: int,
     user: UserUpdate,
     db: Session = Depends(get_db),
@@ -102,7 +103,7 @@ async def update_user(
 
 
 @router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_user(
+def delete_user(
     user_id: int,
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('mgm_users')),
@@ -113,7 +114,7 @@ async def delete_user(
 
 
 @router.post("/users/{user_id}/password", status_code=status.HTTP_200_OK)
-async def change_password(
+def change_password(
     user_id: int,
     body: PasswordChangeRequest,
     db: Session = Depends(get_db),
@@ -131,4 +132,10 @@ async def change_password(
     updated = service.update_user_password(user_id, body.new_password)
     if not updated:
         raise HTTPException(status_code=404, detail="User not found")
-    return {"message": "Password updated successfully"}
+    # The changed hash already invalidates older tokens (credential
+    # fingerprint); a self-service change keeps the acting session alive.
+    user = db.query(User).filter(User.id == user_id).first()
+    return {
+        "message": "Password updated successfully",
+        "access_token": rotate_user_sessions(db, user, current_user) if is_self else None,
+    }
