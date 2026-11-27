@@ -15,7 +15,9 @@ activate/deactivate scripts are NOT yet implemented (IMPL-005/IMPL-006).
 Endpoint, timeout, revocation, and script tests are therefore expected to
 FAIL until those land; model-level tests run against the real app model.
 """
+import os
 import subprocess
+import sys
 import time
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -32,6 +34,7 @@ from app.api.v1 import auth as auth_router
 from app.db.base import get_db
 from app.models.account import EmergencyCredentials, EventLog, User
 from app.services.auth_service import decode_token, get_password_hash, verify_password
+from app.services.emergency_auth import emergency_endpoint_enabled
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -48,10 +51,17 @@ NO_EMERGENCY_MODE_DETAIL_HINTS = ("not enabled", "not active", "403")
 # ---------------------------------------------------------------------------
 
 def _make_client():
-    """Test client for the auth router, with the emergency route registered
-    by the implementation (IMPL-005). Missing route -> 404 on every request."""
+    """Test client for the auth router, mirroring app/main.py wiring (impl-041).
+
+    The emergency route lives on auth_router.emergency_router and is mounted
+    only when the startup exposure gate (EMERGENCY_AUTH_ENABLED) is enabled.
+    The autouse emergency_route_enabler fixture turns the gate on for this
+    module; with the gate disabled the route is absent -> 404 on every request.
+    """
     app = FastAPI()
     app.include_router(auth_router.router, prefix="/api/v1/auth")
+    if emergency_endpoint_enabled():
+        app.include_router(auth_router.emergency_router, prefix="/api/v1/auth")
     return TestClient(app)
 
 
@@ -144,6 +154,19 @@ def emergency_mode(tmp_path, monkeypatch):
 
     activate.__doc__ = "Write the activation flag file"
     return {"activate": activate, "deactivate": deactivate, "flag": flag}
+
+
+@pytest.fixture(autouse=True)
+def emergency_route_enabler(monkeypatch):
+    """Enable the ADR-0014 startup exposure gate for the test-built apps (impl-041).
+
+    With the gate disabled (the production default) the emergency route is not
+    registered at all, so tests that exercise it set the enabler —
+    EMERGENCY_AUTH_ENABLED=*** so the route registers, exactly as an operator
+    would at startup before mounting POST /api/v1/auth/emergency.
+    """
+    monkeypatch.setenv("EMERGENCY_AUTH_ENABLED", "true")
+    yield
 
 
 def _valid_mfa(secret="JBSWY3DPEHPK3PXP"):
@@ -240,19 +263,29 @@ class TestEmergencyCredentialsModel:
 # ---------------------------------------------------------------------------
 
 def _endpoint_exists() -> bool:
-    """Does POST /api/v1/auth/emergency exist on the auth router?"""
-    def walk(routes, prefix=""):
+    """Is POST /emergency registered on the auth routers (router-relative path)?
+
+    The route lives on auth_router.emergency_router, which is mounted under
+    /api/v1/auth, so the full path is /api/v1/auth/emergency but the
+    router-relative path is /emergency. Mounting stays conditional on the
+    startup gate: with the gate disabled the tests set the enabler fixture
+    (emergency_route_enabler) so the route registers in the test-built app.
+    """
+
+    def walk(routes):
         for route in routes:
             ctx = getattr(route, "include_context", None)
             if ctx is not None:
-                walk(ctx.included_router.routes, prefix + (ctx.prefix or ""))
+                if walk(ctx.included_router.routes):
+                    return True
                 continue
-            if getattr(route, "path", None) == prefix + "/auth/emergency":
+            if getattr(route, "path", None) == "/emergency":
                 methods = getattr(route, "methods", set()) or set()
                 if "POST" in methods:
                     return True
         return False
-    return walk(auth_router.router.routes, "/api/v1")
+
+    return walk(auth_router.router.routes) or walk(auth_router.emergency_router.routes)
 
 
 IMPL_005 = pytest.mark.xfail(
@@ -327,7 +360,7 @@ class TestEmergencyEndpointAuthentication:
     @IMPL_005
     def test_recovery_token_does_not_bypass_mfa(self, db_session, emergency_mode):
         """§5A: recovery tokens never bypass MFA — token + no code still fails."""
-        emergency_mode["activate"]
+        emergency_mode["activate"]()
         user = _make_emergency_user(db_session, is_recovery=True)
         client = _make_client()
         response = _emergency(client, db_session,
@@ -626,7 +659,8 @@ class TestOfflineRecoveryPersonnel:
         emergency_mode["activate"]()
         user = _make_emergency_user(
             db_session, is_recovery=True,
-            recovery_token="rt-1", recovery_token_expires_at=datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=1),
+            recovery_token="rt-1",
+            recovery_token_expires_at=datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=1),
         )
         client = _make_client()
         response = _emergency(client, db_session, username=user.username,
@@ -684,6 +718,94 @@ class TestNoFallbackRegression:
         response = _login(client, db_session,
                           {"username": "ldapuser-x", "password": "localpass"})
         assert response.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# 9. Exposure gate (impl-041): the route exists only when EMERGENCY_AUTH_ENABLED
+# ---------------------------------------------------------------------------
+
+_PRODUCTION_ROUTE_PROBE = """
+import app.main as m
+paths = []
+def walk(routes, prefix=""):
+    for r in routes:
+        ctx = getattr(r, "include_context", None)
+        if ctx is not None:
+            walk(ctx.included_router.routes, prefix + (ctx.prefix or ""))
+            continue
+        p = getattr(r, "path", None)
+        if p is not None:
+            paths.append(prefix + p)
+walk(m.app.routes)
+print("EMERGENCY_ROUTE=" + ("EXPOSED" if "/api/v1/auth/emergency" in paths else "ABSENT"))
+"""
+
+
+def _production_app_route_state(extra_env: dict) -> str:
+    """Import the real production app (app.main) in a clean subprocess and
+    report whether /api/v1/auth/emergency is registered on it."""
+    env = {k: v for k, v in os.environ.items() if k != "EMERGENCY_AUTH_ENABLED"}
+    env.update(extra_env)
+    env["DATABASE_URL"] = "sqlite:///:memory:"
+    env["PYTHONPATH"] = str(REPO) + os.pathsep + env.get("PYTHONPATH", "")
+    result = subprocess.run(
+        [sys.executable, "-c", _PRODUCTION_ROUTE_PROBE],
+        capture_output=True, text=True, env=env, cwd=str(REPO), timeout=180,
+    )
+    assert result.returncode == 0, result.stderr
+    lines = [ln for ln in result.stdout.splitlines() if ln.startswith("EMERGENCY_ROUTE=")]
+    assert lines, result.stdout + result.stderr
+    return lines[0]
+
+
+class TestExposureGate:
+    """impl-041 / ADR-0014: POST /api/v1/auth/emergency must exist only when the
+    startup configuration flag EMERGENCY_AUTH_ENABLED enables it (default: the
+    route is not registered at all -> 404)."""
+
+    def test_gate_defaults_to_disabled(self, monkeypatch):
+        monkeypatch.delenv("EMERGENCY_AUTH_ENABLED", raising=False)
+        assert emergency_endpoint_enabled() is False
+
+    @pytest.mark.parametrize("value", ["true", "1", "yes", "on", "TRUE"])
+    def test_gate_enabled_values(self, monkeypatch, value):
+        monkeypatch.setenv("EMERGENCY_AUTH_ENABLED", value)
+        assert emergency_endpoint_enabled() is True
+
+    @pytest.mark.parametrize("value", ["false", "0", "no", "off", ""])
+    def test_gate_disabled_values(self, monkeypatch, value):
+        monkeypatch.setenv("EMERGENCY_AUTH_ENABLED", value)
+        assert emergency_endpoint_enabled() is False
+
+    def test_route_absent_when_gate_disabled(self, monkeypatch):
+        """Gate off: the test app (same wiring as app/main.py) has no emergency
+        route; other auth routes stay registered."""
+        monkeypatch.delenv("EMERGENCY_AUTH_ENABLED", raising=False)
+        client = _make_client()
+        from tests.conftest import api_route_paths
+        paths = set(api_route_paths(client.app))
+        assert "/api/v1/auth/emergency" not in paths
+        assert "/api/v1/auth/login" in paths
+        response = client.post("/api/v1/auth/emergency",
+                               data={"username": "x", "password": "***"})
+        assert response.status_code == 404
+
+    def test_route_present_when_gate_enabled(self, monkeypatch):
+        monkeypatch.setenv("EMERGENCY_AUTH_ENABLED", "true")
+        client = _make_client()
+        from tests.conftest import api_route_paths
+        paths = set(api_route_paths(client.app))
+        assert "/api/v1/auth/emergency" in paths
+        assert "/api/v1/auth/login" in paths
+
+    def test_production_app_route_absent_by_default(self):
+        """Default startup config (EMERGENCY_AUTH_ENABLED absent): the real app
+        built by app.main does not register /api/v1/auth/emergency."""
+        assert _production_app_route_state({}) == "EMERGENCY_ROUTE=ABSENT"
+
+    def test_production_app_route_present_when_flag_set(self):
+        """EMERGENCY_AUTH_ENABLED=true at startup: app.main registers the route."""
+        assert _production_app_route_state({"EMERGENCY_AUTH_ENABLED": "true"}) == "EMERGENCY_ROUTE=EXPOSED"
 
 
 # LDAP fixtures (mirror tests/test_ldap_login.py wiring)
