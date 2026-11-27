@@ -27,6 +27,32 @@ Rules:
 - Compare to `None` with `is` / `is not`; use `isinstance()` instead of type comparisons.
 - When editing existing files, match the established style of the surrounding code rather than reformatting unrelated lines.
 
+## Architecture Decision Records (ADRs)
+
+All significant architectural decisions are documented in ADRs under `docs/adr/`. Before making architectural changes:
+
+1. Read the relevant ADR(s) for the area you're modifying
+2. Check `docs/adr/REGISTER.md` for current status and outstanding decisions
+3. Reference `docs/GLOSSARY.md` for canonical domain terminology
+4. Do not introduce undocumented architectural decisions
+5. Update ADRs when changing established security contracts or compatibility guarantees
+
+Key ADRs:
+- ADR-0001: Project Identity and Compatibility Contract
+- ADR-0002: Bidirectional Database Interoperability and Extension Isolation
+- ADR-0003: Identity Authentication, MFA and Cryptographic Unlocking Boundaries
+- ADR-0004: Identity Provider Binding, Administrator Provisioning and Break-Glass Access
+- ADR-0005: Authorization, Access Control and Administrator Privilege Boundaries
+- ADR-0006: Account Ownership, Credential Sharing and Group-Based Access
+- ADR-0007: Effective Permissions, ACL Precedence and Conflict Resolution
+- ADR-0008: Encryption Architecture, Master Password and Cryptographic Key Lifecycle
+- ADR-0009: Session Architecture, API Token Lifecycle and Server-Side Vault Context
+- ADR-0010: Service Accounts, Workload Identity and Automated Credential Retrieval
+- ADR-0011: Audit Logging and Accountability
+- ADR-0012: Threat Model and Trust Boundaries
+- ADR-0013: Backup, Disaster Recovery and Cryptographic Recoverability
+- ADR-0014: Emergency Authentication and Offline Recovery Access
+
 ## sysPass PHP compatibility
 
 This project must remain fully compatible with the original sysPass PHP version.
@@ -46,7 +72,7 @@ Rules:
 - When fixing bugs, prefer the behavior that matches sysPass PHP over introducing a cleaner Python-only design.
 - For any compatibility-sensitive change, add or update tests covering PHP-created data or upstream schema expectations.
 - If a change may break PHP-created databases, XML exports, encrypted values, user profiles, shares, or config parsing, stop and call out the compatibility risk explicitly.
-- Keep docs honest: do not claim “fully compatible” unless schema, behavior, and legacy data parity are verified.
+- Keep docs honest: do not claim "fully compatible" unless schema, behavior, and legacy data parity are verified.
 
 Compatibility validation checklist:
 - Database schema parity: columns, types, nullability, indexes, FKs, defaults.
@@ -59,3 +85,11 @@ After compatibility-sensitive code changes:
 - Run the relevant pytest coverage.
 - Run `graphify update .`.
 - Update `docs/project/php-compatibility-checklist.md` if the compatibility posture changed.
+
+## Documentation Governance
+
+- Every implementation task must identify applicable ADRs, domain terminology from `docs/GLOSSARY.md`, compatibility requirements, security invariants, and verification obligations
+- Update `docs/adr/REGISTER.md` when implementation status changes
+- Update `docs/GLOSSARY.md` when introducing new domain concepts
+- Do not claim implementation verification without executed test evidence
+- Distinguish documented tests from implemented and executed tests

@@ -24,6 +24,45 @@ Recommended entry points:
 - [docs/security/policy.md](docs/security/policy.md): security model and reporting
 - [docs/security/scanning.md](docs/security/scanning.md): local and CI scanning workflow
 - [docs/project/feature-completion.md](docs/project/feature-completion.md): implementation status notes
+- [docs/GLOSSARY.md](docs/GLOSSARY.md): domain dictionary for all ADR terminology
+- [docs/adr/REGISTER.md](docs/adr/REGISTER.md): architectural decision register
+- [docs/adr/0001-project-identity-and-compatibility-contract.md](docs/adr/0001-project-identity-and-compatibility-contract.md): ADR-0001 Project Identity
+- [docs/adr/0002-bidirectional-database-interoperability-and-extension-isolation.md](docs/adr/0002-bidirectional-database-interoperability-and-extension-isolation.md): ADR-0002 Database Interoperability
+- [docs/adr/0003-identity-authentication-mfa-and-cryptographic-unlocking.md](docs/adr/0003-identity-authentication-mfa-and-cryptographic-unlocking.md): ADR-0003 Authentication Hierarchy
+- [docs/adr/0004-identity-provider-binding-administrator-provisioning-and-break-glass-access.md](docs/adr/0004-identity-provider-binding-administrator-provisioning-and-break-glass-access.md): ADR-0004 Identity Provider Binding
+- [docs/adr/0005-authorization-access-control-and-administrator-privilege-boundaries.md](docs/adr/0005-authorization-access-control-and-administrator-privilege-boundaries.md): ADR-0005 Authorization Boundaries
+- [docs/adr/0006-account-ownership-credential-sharing-and-group-based-access.md](docs/adr/0006-account-ownership-credential-sharing-and-group-based-access.md): ADR-0006 Account Ownership
+- [docs/adr/0007-effective-permissions-acl-precedence-and-conflict-resolution.md](docs/adr/0007-effective-permissions-acl-precedence-and-conflict-resolution.md): ADR-0007 Effective Permissions
+- [docs/adr/0008-encryption-architecture-master-password-and-cryptographic-key-lifecycle.md](docs/adr/0008-encryption-architecture-master-password-and-cryptographic-key-lifecycle.md): ADR-0008 Encryption Architecture
+- [docs/adr/0009-session-architecture-api-token-lifecycle-and-server-side-vault-context.md](docs/adr/0009-session-architecture-api-token-lifecycle-and-server-side-vault-context.md): ADR-0009 Session Architecture
+- [docs/adr/0010-service-accounts-workload-identity-and-automated-credential-retrieval.md](docs/adr/0010-service-accounts-workload-identity-and-automated-credential-retrieval.md): ADR-0010 Service Accounts
+- [docs/adr/0011-audit-logging-and-accountability.md](docs/adr/0011-audit-logging-and-accountability.md): ADR-0011 Audit Logging
+- [docs/adr/0012-threat-model-and-trust-boundaries.md](docs/adr/0012-threat-model-and-trust-boundaries.md): ADR-0012 Threat Model
+- [docs/adr/0013-backup-disaster-recovery-and-cryptographic-recoverability.md](docs/adr/0013-backup-disaster-recovery-and-cryptographic-recoverability.md): ADR-0013 Backup/DR
+- [docs/adr/0014-emergency-authentication-mode.md](docs/adr/0014-emergency-authentication-mode.md): ADR-0014 Emergency Authentication
+
+## Architecture Decision Records (ADRs)
+
+pySysPass uses ADRs to document significant architectural decisions. The current register includes 14 ADRs:
+
+| ADR | Title | Status |
+|-----|-------|--------|
+| ADR-0001 | Project Identity and Compatibility Contract | Accepted |
+| ADR-0002 | Bidirectional Database Interoperability and Extension Isolation | Accepted |
+| ADR-0003 | Identity Authentication, MFA and Cryptographic Unlocking Boundaries | Active |
+| ADR-0004 | Identity Provider Binding, Administrator Provisioning and Break-Glass Access | Active |
+| ADR-0005 | Authorization, Access Control and Administrator Privilege Boundaries | Accepted |
+| ADR-0006 | Account Ownership, Credential Sharing and Group-Based Access | Accepted |
+| ADR-0007 | Effective Permissions, ACL Precedence and Conflict Resolution | Accepted |
+| ADR-0008 | Encryption Architecture, Master Password and Cryptographic Key Lifecycle | Accepted |
+| ADR-0009 | Session Architecture, API Token Lifecycle and Server-Side Vault Context | Accepted |
+| ADR-0010 | Service Accounts, Workload Identity and Automated Credential Retrieval | Proposed |
+| ADR-0011 | Audit Logging and Accountability | Active |
+| ADR-0012 | Threat Model and Trust Boundaries | Proposed |
+| ADR-0013 | Backup, Disaster Recovery and Cryptographic Recoverability | Proposed |
+| ADR-0014 | Emergency Authentication and Offline Recovery Access | Proposed |
+
+See [docs/adr/REGISTER.md](docs/adr/REGISTER.md) for implementation status, verification state, and outstanding decisions.
 
 ## Overview
 
@@ -105,9 +144,7 @@ Recommended entry points:
 
 ## Quick Start
 
-For the full step-by-step guide, including first-run setup, verification, and
-running against an existing sysPass PHP database, see
-[docs/installation.md](docs/installation.md).
+For the full step-by-step guide, including first-run setup, verification, and running against an existing sysPass PHP database, see [docs/installation.md](docs/installation.md).
 
 ### Prerequisites
 
@@ -146,11 +183,7 @@ This starts:
 
 ### First-run setup
 
-A freshly bootstrapped database has the full schema but no administrator and no
-master password. Open `http://localhost:8080` and complete the first-run setup
-form to create the admin and set (or generate) the master password — save it,
-as it cannot be recovered. The equivalent API flow (`/api/v1/auth/install`) and
-full details are in [docs/installation.md](docs/installation.md#first-run-setup).
+A freshly bootstrapped database has the full schema but no administrator and no master password. Open `http://localhost:8080` and complete the first-run setup form to create the admin and set (or generate) the master password — save it, as it cannot be recovered. The equivalent API flow (`/api/v1/auth/install`) and full details are in [docs/installation.md](docs/installation.md#first-run-setup).
 
 ### Deploy with Portainer
 
@@ -185,16 +218,13 @@ npm ci --legacy-peer-deps
 npm run dev
 ```
 
-Use the Node version in `frontend/.nvmrc` (`nvm install && nvm use` from
-`frontend/`). CI and Docker use the same Node release and install the committed
-lockfile. The legacy peer-dependency flag matches how that lockfile was generated.
+Use the Node version in `frontend/.nvmrc` (`nvm install && nvm use` from `frontend/`). CI and Docker use the same Node release and install the committed lockfile. The legacy peer-dependency flag matches how that lockfile was generated.
 
 The default Vite dev server runs on `http://localhost:5173`.
 
 ## Configuration
 
-Settings are loaded from environment variables and optionally from `.env` via [app/core/config.py](app/core/config.py).
-Application-level settings are stored in `config/runtime-config.json`, which is the JSON successor to the old PHP `config.xml` approach.
+Settings are loaded from environment variables and optionally from `.env` via [app/core/config.py](app/core/config.py). Application-level settings are stored in `config/runtime-config.json`, which is the JSON successor to the old PHP `config.xml` approach.
 
 | Variable | Default | Description |
 | --- | --- | --- |
@@ -212,40 +242,27 @@ Application-level settings are stored in `config/runtime-config.json`, which is 
 
 The settings API continues to work, and file-backed JSON settings are preferred over legacy values stored in the database `Config` table. PHP-style XML and cache files remain supported as compatibility fallbacks for runtime metadata such as `passwordSalt`.
 
-The compose stack includes development defaults. Change all secrets before any shared or production deployment.
-`podman-compose.yml` keeps developer-friendly bind mounts and `--reload`; `portainer-stack.yml` is the cleaner runtime-oriented variant.
+The compose stack includes development defaults. Change all secrets before any shared or production deployment. `podman-compose.yml` keeps developer-friendly bind mounts and `--reload`; `portainer-stack.yml` is the cleaner runtime-oriented variant.
 
-Production startup rejects missing, short, or sample application keys. Keep an
-existing vault's encryption key: changing it requires a verified migration.
-The supplied stacks keep the backend private and configure explicit proxy trust;
-see [deployment and startup requirements](docs/installation.md#proxy-trust-and-production-startup).
+Production startup rejects missing, short, or sample application keys. Keep an existing vault's encryption key: changing it requires a verified migration. The supplied stacks keep the backend private and configure explicit proxy trust; see [deployment and startup requirements](docs/installation.md#proxy-trust-and-production-startup).
 
 ### Run against an existing sysPass database
 
-Use `podman-compose.external.yml` to run the complete frontend and backend
-without starting an internal database. The backend treats the external schema
-as PHP-owned: automatic initialization is disabled and the schema mutation
-guard remains enabled.
+Use `podman-compose.external.yml` to run the complete frontend and backend without starting an internal database. The backend treats the external schema as PHP-owned: automatic initialization is disabled and the schema mutation guard remains enabled.
 
 ```bash
 cp .env.external.example .env.external
-# Edit .env.external with the external database URL, PHP passwordSalt, and
-# independently generated application secrets.
+# Edit .env.external with the external database URL, PHP passwordSalt, and independently generated application secrets.
 podman-compose --env-file .env.external -f podman-compose.external.yml up -d --build
 ```
 
-The defaults expose the UI at `http://localhost:8081`. The backend has no
-published host port. The frontend proxies `/api/` and `/health` to the
-backend over the private Compose network. Stop the stack with:
+The defaults expose the UI at `http://localhost:8081`. The backend has no published host port. The frontend proxies `/api/` and `/health` to the backend over the private Compose network. Stop the stack with:
 
 ```bash
 podman-compose --env-file .env.external -f podman-compose.external.yml down
 ```
 
-On a brand-new database, run the installation flow first. The installer creates the initial administrator and sets the sysPass master password at install time. That master password can either be supplied explicitly or generated once by the API, and it must be saved outside the application.
-When the installer generates the master password, the setup page keeps it visible until you confirm that it has been saved and continue to login. If you supply the master password yourself, successful setup reloads the application at the login page so installation state is checked again.
-The administrator login and manually supplied master-password fields include the same secure password generator used for vault accounts, plus live strength and entropy feedback.
-If startup is interrupted during schema creation, the bootstrap process now checks the full expected table set and retries missing tables on the next launch.
+On a brand-new database, run the installation flow first. The installer creates the initial administrator and sets the sysPass master password at install time. That master password can either be supplied explicitly or generated once by the API, and it must be saved outside the application. When the installer generates the master password, the setup page keeps it visible until you confirm that it has been saved and continue to login. If you supply the master password yourself, successful setup reloads the application at the login page so installation state is checked again. The administrator login and manually supplied master-password fields include the same secure password generator used for vault accounts, plus live strength and entropy feedback. If startup is interrupted during schema creation, the bootstrap process now checks the full expected table set and retries missing tables on the next launch.
 
 ## API Overview
 
@@ -268,6 +285,8 @@ Use the live OpenAPI UI at `/docs` for the detailed request and response schema.
 - [docs/security/policy.md](docs/security/policy.md)
 - [docs/security/scanning.md](docs/security/scanning.md)
 - [docs/project/feature-completion.md](docs/project/feature-completion.md)
+- [docs/GLOSSARY.md](docs/GLOSSARY.md)
+- [docs/adr/REGISTER.md](docs/adr/REGISTER.md)
 
 ## Testing
 
