@@ -283,7 +283,7 @@ This register tracks all Architectural Decision Records for pySysPass.
 | `SERVICE_VAULT_KEY` startup validation when service accounts enabled | ADR-0017 | **PEND** — presented for approval (with keyring bootstrap decisions, see risk register T-CFG-05) | High |
 | Service-vault keyring bootstrap: rotation state on read-only mounted secret vs writable volume vs DB backend | ADR-0010/0017 | **PEND** — presented for approval (multi-replica + OpenShift interaction) | High |
 | Structured error contract (breaking change for /api/v1) | ADR-0018 | Deferred (post-readiness) | Medium |
-| Enable feature branch CI | ADR-0019 | **AUTHORIZED 2026-11-27** — triggers widened; commit pending push observation | In progress (IMPL-028) |
+| Enable feature branch CI | ADR-0019 | **AUTHORIZED & COMMITTED 2026-11-27** — triggers widened in commit 5e2923c, pushed to `fix/production-readiness-foundations`; first run observation pending | In progress (IMPL-028) |
 | Alembic-on-populated-DB integration test before ADR-0016 verification | ADR-0019 | **AUTHORIZED** — test written+executed locally 2026-11-27; commit lands with Phase-2 migration cluster | In progress (IMPL-028) |
 | Create unified ADR verification matrix | ADR-0019/0020 | **APPROVED & DELIVERED 2026-11-27** — `docs/tests/verification-matrix.md` | Closed |
 
