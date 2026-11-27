@@ -3,7 +3,10 @@
 Manages the emergency mode activation flag, timeout enforcement, and provides
 utilities for the emergency authentication endpoint.
 """
+import hashlib
+import hmac
 import json
+import os
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -28,6 +31,31 @@ EMERGENCY_FLAG_FILE = EMERGENCY_FLAG_DIR / "emergency-auth-active"
 # Default timeout: 2 hours per ADR-0014 §3 (body header says 24h but acceptance criteria say 2h)
 DEFAULT_TIMEOUT_HOURS = 2
 EMERGENCY_SESSION_SECONDS = 3600  # 1 hour token lifetime per ADR-0014 §4
+
+_TRUTHY = ("1", "true", "yes", "on")
+
+
+def emergency_endpoint_enabled() -> bool:
+    """Startup exposure gate for POST /api/v1/auth/emergency (ADR-0014, impl-041).
+
+    The break-glass endpoint must NOT be exposed in production unless the
+    operator explicitly opts in at startup via EMERGENCY_AUTH_ENABLED (env var
+    or Settings field). Default (absent/false): the route is not registered at
+    all and requests answer 404.
+
+    Evaluated at call time — env first, then the Settings snapshot — so the
+    production app reads it once at startup when app/main.py registers routers,
+    and tests can flip it with monkeypatch before building a client. The
+    /var/run/syspass flag file still gates each individual login once the
+    route is mounted.
+    """
+    raw = os.environ.get("EMERGENCY_AUTH_ENABLED")
+    if raw is not None and raw.strip() != "":
+        return raw.strip().lower() in _TRUTHY
+    value = getattr(settings, "EMERGENCY_AUTH_ENABLED", False)
+    if isinstance(value, str):
+        return value.strip().lower() in _TRUTHY
+    return bool(value)
 
 
 class EmergencyAuthError(Exception):
@@ -212,8 +240,6 @@ def verify_recovery_token(username: str, provided_token: str, db) -> bool:
     return True
 
 
-import hmac
-
 def constant_time_compare(val1: str, val2: str) -> bool:
     """Constant-time string comparison."""
     return hmac.compare_digest(val1, val2)
@@ -248,8 +274,6 @@ def emergency_session_fingerprint(cred) -> str:
 
     Uses the password_hash field instead of password (which is on User model).
     """
-    import hmac
-    import hashlib
     from app.core.config import settings
 
     password_hash = cred.password_hash or b""

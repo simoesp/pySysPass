@@ -1225,6 +1225,26 @@ The lock code never touches `alembic_version`; rollback of this change
 - **DO:** Use server-side sessions (12hr)
 - **DON'T:** Allow long-lived tokens
 
+### 5. Emergency Authentication (Break-Glass) Endpoint Gate
+
+- `POST /api/v1/auth/emergency` (ADR-0014 break-glass login) is **not exposed by
+  default**: the route is registered at startup **only** when
+  `EMERGENCY_AUTH_ENABLED=true` is set in the service environment. With the
+  default configuration (variable absent or false) the route is not registered
+  at all and requests to `/api/v1/auth/emergency` return **404**.
+- Setting the flag exposes the route; each login still requires the out-of-band
+  activation flag file (`/var/run/syspass/emergency-auth-active`, 2-hour default
+  timeout), valid emergency credentials, and mandatory MFA. Recovery tokens
+  never bypass MFA.
+- The enablement decision is logged at startup (application log) and written to
+  the audit log as `auth.emergency.config` — CRITICAL when the break-glass route
+  is exposed, INFO when default-deny.
+- **DO:** Set `EMERGENCY_AUTH_ENABLED=true` only on hosts where break-glass
+  access is intended, and keep the activation script (`scripts/activate-emergency-auth.sh`)
+  restricted to operators.
+- **DON'T:** Expose the emergency endpoint on internet-facing deployments.
+  See `docs/adr/0014-emergency-authentication-mode.md`.
+
 ---
 
 ## Troubleshooting

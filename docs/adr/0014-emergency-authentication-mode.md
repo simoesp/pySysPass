@@ -175,6 +175,16 @@ CREATE TABLE emergency_credentials (
    - Logs all actions
 ```
 
+> **Exposure gate (impl-041):** the endpoint is registered at startup **only**
+> when `EMERGENCY_AUTH_ENABLED=true` is set in the environment (default:
+> absent/false). With the default configuration the route is not registered at
+> all and `POST /api/v1/auth/emergency` answers **404** — partially implemented
+> emergency endpoints must not be exposed in production. When the flag is set,
+> the route is mounted (`app/main.py` mounts `auth.emergency_router`) and the
+> runtime activation flag file above still gates each individual login.
+> Enablement is logged at startup and audit-logged as `auth.emergency.config`
+> (CRITICAL when exposed). See `docs/deployment.md` §Security Considerations.
+
 **Emergency Authentication Endpoint:**
 
 ```python

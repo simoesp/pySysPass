@@ -40,6 +40,11 @@ def _client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 router = APIRouter()
+# ADR-0014 break-glass route lives on its own router so app/main.py can mount
+# it only when the startup exposure gate (EMERGENCY_AUTH_ENABLED, default
+# false) enables it; otherwise POST /api/v1/auth/emergency is not registered
+# at all and answers 404 (impl-041).
+emergency_router = APIRouter()
 security = HTTPBearer()
 
 
@@ -174,7 +179,8 @@ def login(
         locked = track.maybe_lock(ip)
         elog.log_event(
             "auth.login.fail",
-            f"Failed login for '{form_data.username}' from {ip} (empty password)" + (" — IP now locked" if locked else ""),
+            f"Failed login for '{form_data.username}' from {ip} (empty password)"
+            + (" — IP now locked" if locked else ""),
             user_id=user.id if user else None,
             login=form_data.username,
             ip=ip,
@@ -195,7 +201,8 @@ def login(
             locked = track.maybe_lock(ip)
             elog.log_event(
                 "auth.login.fail",
-                f"Failed LDAP login for '{form_data.username}' from {ip} (no local fallback)" + (" — IP now locked" if locked else ""),
+                f"Failed LDAP login for '{form_data.username}' from {ip} (no local fallback)"
+                + (" — IP now locked" if locked else ""),
                 user_id=user.id,
                 login=form_data.username,
                 ip=ip,
@@ -464,7 +471,7 @@ def refresh_session(request: Request, current_user: dict = Depends(get_current_u
     return {"access_token": token, "token_type": "bearer"}  # nosec B105
 
 
-@router.post("/emergency", response_model=Token)
+@emergency_router.post("/emergency", response_model=Token)
 def emergency_login(
     request: Request,
     username: str = Form(...),
@@ -630,7 +637,8 @@ def emergency_login(
             locked = track.maybe_lock(ip)
             elog.log_event(
                 "auth.emergency.login",
-                f"Failed emergency login for '{username}' from {ip} (recovery token not allowed for non-recovery account)"
+                f"Failed emergency login for '{username}' from {ip} "
+                "(recovery token not allowed for non-recovery account)"
                 + (" — IP now locked" if locked else ""),
                 user_id=cred.id,
                 login=username,

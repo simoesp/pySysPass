@@ -51,6 +51,10 @@ class Settings(BaseSettings):
     TRUSTED_PROXY_HOSTS: List[str] = []
     CORS_ORIGINS_FILE: str = str(DEFAULT_CORS_ORIGINS_FILE)
     CORS_ORIGINS: List[str] = []
+    # ADR-0014 break-glass exposure gate (impl-041): POST /api/v1/auth/emergency
+    # is registered at startup ONLY when this is explicitly true. Default false:
+    # the route is not mounted at all and requests answer 404.
+    EMERGENCY_AUTH_ENABLED: bool = False
 settings = Settings()
 
 

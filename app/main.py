@@ -17,6 +17,7 @@ from app.api.v1 import (
 from app.services.readiness_service import run_readiness_checks
 from app.services.runtime_policy import get_policy
 from app.services.task_service import task_service
+from app.services.emergency_auth import emergency_endpoint_enabled
 from app.core.operations import record_failure
 from contextlib import asynccontextmanager
 import logging
@@ -93,6 +94,7 @@ def _get_user_from_request(request: Request):
 async def lifespan(application: FastAPI):
     validate_production_settings(settings)
     bootstrap_database_on_startup()
+    _audit_emergency_gate_config()
     # IMPL-036: Generate salt on fresh install bootstrap; adopted installs
     # must already have SYSPASS_PASSWORD_SALT set (validated above).
     if not _is_adopted_install(settings):
@@ -145,6 +147,33 @@ def _write_audit_event(action, level, description, user_id, username, ip) -> Non
         )
     finally:
         db.close()
+
+
+def _audit_emergency_gate_config() -> None:
+    """Audit-log the emergency-endpoint exposure gate at startup (ADR-0014).
+
+    Records whether EMERGENCY_AUTH_ENABLED exposed POST /api/v1/auth/emergency
+    in this process: CRITICAL when the break-glass route is registered, INFO
+    when the default-deny configuration kept it unregistered. An audit-write
+    failure never breaks startup.
+    """
+    enabled = emergency_endpoint_enabled()
+    description = (
+        f"Startup exposure gate EMERGENCY_AUTH_ENABLED={'true' if enabled else 'false'}: "
+        f"POST /api/v1/auth/emergency {'registered' if enabled else 'not registered (default-deny)'}"
+    )
+    logger.log(logging.CRITICAL if enabled else logging.INFO, "%s", description)
+    try:
+        _write_audit_event(
+            "auth.emergency.config",
+            "CRITICAL" if enabled else "INFO",
+            description,
+            0,
+            "system",
+            "127.0.0.1",
+        )
+    except Exception:
+        logger.exception("Failed to audit-log emergency exposure gate config at startup")
 
 
 @app.middleware("http")
@@ -206,6 +235,22 @@ app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=settings.TRUSTED_PROXY_
 
 # Include routers
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
+# ADR-0014 exposure gate (impl-041): the break-glass endpoint is registered
+# ONLY when EMERGENCY_AUTH_ENABLED is explicitly set at startup. Default
+# (absent/false): the route is not registered at all and
+# POST /api/v1/auth/emergency answers 404. When the flag is set, the route is
+# mounted and the /var/run/syspass activation flag file still gates each login.
+if emergency_endpoint_enabled():
+    app.include_router(auth.emergency_router, prefix="/api/v1/auth", tags=["Authentication"])
+    logger.critical(
+        "EMERGENCY_AUTH_ENABLED is set: POST /api/v1/auth/emergency registered "
+        "(ADR-0014 break-glass route exposed; per-login activation flag still required)"
+    )
+else:
+    logger.info(
+        "EMERGENCY_AUTH_ENABLED not set: POST /api/v1/auth/emergency NOT registered "
+        "(default-deny per ADR-0014; set EMERGENCY_AUTH_ENABLED=true at startup to expose)"
+    )
 app.include_router(accounts.router, prefix="/api/v1", tags=["Accounts"])
 app.include_router(categories.router, prefix="/api/v1", tags=["Categories"])
 app.include_router(clients.router, prefix="/api/v1", tags=["Clients"])
