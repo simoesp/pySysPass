@@ -75,11 +75,26 @@ belongs to two clusters. Authoritative unique failing-test-id inventory
 
 </details>
 
-**Baseline provenance caveat:** the 28-failure baseline was executed in a
-working tree that active workers were concurrently editing. A reproducible
-clean-checkout baseline (same commit, no local edits) is being established
-per AIRR §6; deltas will be recorded as newly-introduced vs
-environment-specific before any Gate 2 claim.
+**Three-level baseline taxonomy (AIRR §6/§7 — supersedes the single
+dirty-tree baseline reported earlier):**
+
+| Level | Tree & environment | Result | Interpretation |
+|-------|--------------------|--------|----------------|
+| A — canonical code baseline | clean checkout `7e24d9d` + `requirements.lock` env (`--require-hashes`), CI-equivalent | verification executing 2026-11-27 | The only baseline admissible for Gate-2 claims |
+| B — clean checkout, local project venv | same tree, drifted venv | **7 failed, 432 passed, 15 skipped** (454 collected, 133 s) | All 7 = MFA/2FA cluster failing on `pyotp` `ValueError: Secrets must be at least 112 bits` — **environment-specific**: local venv drifts from the lock on 22/49 packages (pyotp 2.10.0→2.12.1, passlib 1.7.4→1.9.5, sqlalchemy, fastapi, starlette, pydantic, …) |
+| C — worker-integrated working tree, local venv | `7e24d9d` + concurrent worker edits (untracked test suites, skipif unmasking) | **28 failed, 702 passed, 35 skipped** (766 collected, 345 s) | Integrated-state preview; the 28 ids below are **worker-code defects and open integration regressions**, not baseline defects of the canonical commit |
+
+**CI-scope divergence answer (AIRR §6):** CI pytest is green at the same
+commit while local clean checkout shows 7 failures purely because CI
+installs `requirements.lock` and the local venv drifted; the 28-failure set
+exists only in the worker-integrated tree (level C). CI does **not** exclude
+mandatory regression suites (`pytest tests/`, full, locked env). Remaining
+CI remediation = the four genuinely red jobs (lint, MySQL backup rehearsal
+keyring, security scan incl. pip-audit against floating `requirements.txt`,
+Playwright backup download). Supply-chain note: floating `requirements.txt`
+specifiers plus drifted dev environments are the mechanism behind both this
+divergence and Dependabot advisory 31 — baseline tooling must create envs
+from the lock.
 
 Matrix rows below that cite these files now record Failed where the scenario is in a
 failed cluster; "Passed (2026-11-27)" claims apply only to files actually observed green.
