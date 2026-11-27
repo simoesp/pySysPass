@@ -25,6 +25,7 @@ This register tracks all Architectural Decision Records for pySysPass.
 | ADR-0017 | Configuration and Secret Management | **Active** | ⚠️ Partially Implemented | ✅ Discovery Verified | T-CFG-01 to T-CFG-05 |
 | ADR-0018 | API Versioning and Integration Compatibility | **Active** | ⚠️ Partially Implemented | ✅ Discovery Verified | T-API-01 to T-API-04 |
 | ADR-0019 | Testing and CI/CD Governance | **Active** | ✅ Implemented (CI) | ✅ Discovery Verified | T-TEST-01, T-TEST-02 |
+| ADR-0020 | Documentation Governance | **Active** | ⚠️ Partially Implemented | ✅ Discovery Verified | — |
 
 ## Detailed ADR Status
 
@@ -242,6 +243,21 @@ This register tracks all Architectural Decision Records for pySysPass.
 - **Related Threats:** T-TEST-01, T-TEST-02
 - **Known Gaps:** Feature branch CI gap; no Alembic migration on populated PHP DB; stale IMPL-006 skips; no unified verification matrix; load_test.py not CI-gated
 
+### ADR-0020: Documentation Governance
+- **Status:** Active
+- **Decision:** Canonical location registry for every document type (single source of truth); ADR lifecycle (Proposed→Active→Completed/Superseded/Deprecated); extended ADR template with deviation/status/decision sections; Kanban DB is operational source of truth (tasks.md is convenience view); verification matrix is the readiness gate; atomic update rule (ADR + register + Kanban + matrix in same commit)
+- **Implementation:** Governance rules documented in 0020; ADR template and register are active; glossary single-location confirmed; ADR cross-references verified
+- **Verification:** Discovery verified (V-01–V-06); no test evidence required (process document)
+- **Dependencies:** All ADRs (governs all documentation)
+- **Outstanding Decisions:**
+  - Update ADR template with deviation/status sections (IMPL-032)
+  - Annotate docs/kanban/tasks.md as non-authoritative (IMPL-032)
+  - Complete docs/README.md navigation (IMPL-032)
+  - Add historical banners to dated documents (IMPL-033)
+  - Add supersession headers to archive files (IMPL-033)
+- **Related Threats:** None (process document)
+- **Known Gaps:** Template stale (V-01); docs/kanban/tasks.md unannotated (V-02); historical documents lack banners (V-03); archive files lack supersession headers (V-04); docs/README.md incomplete (V-06)
+
 ## Outstanding Decisions
 
 | Decision | ADR | Status | Priority |
@@ -254,6 +270,21 @@ This register tracks all Architectural Decision Records for pySysPass.
 | LDAP fallback removal | ADR-0004 | Pending | Critical |
 | MFA before vault unlock | ADR-0003 | Pending | High |
 | Master password not identity fallback | ADR-0003 | Pending | High |
+| Redis session vs DB-backed session target architecture | ADR-0015 | Pending (decision needed) | **Critical** |
+| Redis mandatory vs optional for basic deployments | ADR-0015 | Pending (decision needed) | High |
+| Vault context: JWT-embedded (current) vs server-side (ADR-0009) | ADR-0015 | Pending (decision needed) | **Critical** |
+| MySQL 8.4 LTS vs 8.0 support | ADR-0015 | Pending (decision needed) | High |
+| UBI/OpenShift target: supported vs documented experimental | ADR-0015 | Pending (decision needed) | **Critical** |
+| Risk register approval | ADR-0015 | Pending (approval needed) | **Critical** |
+| Alembic lock name and timeout | ADR-0016 | Pending (decision needed) | Medium |
+| Migration privilege separation enforcement | ADR-0016 | Pending (decision needed) | Medium |
+| Raw `os.environ` secret policy (bring into Settings or exempt) | ADR-0017 | Pending (decision needed) | Medium |
+| `SYSPASS_PASSWORD_SALT` mandatory in production | ADR-0017 | Pending (decision needed) | **Critical** |
+| `SERVICE_VAULT_KEY` startup validation when service accounts enabled | ADR-0017 | Pending (decision needed) | High |
+| Structured error contract (breaking change for /api/v1) | ADR-0018 | Deferred (post-readiness) | Medium |
+| Enable feature branch CI | ADR-0019 | Pending (IMPL-028) | **High** |
+| Alembic-on-populated-DB integration test before ADR-0016 verification | ADR-0019 | Pending (IMPL-028) | **High** |
+| Create unified ADR verification matrix | ADR-0019/0020 | Pending (IMPL-030) | **High** |
 
 ## Dependencies
 

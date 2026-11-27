@@ -325,6 +325,10 @@ This glossary defines all approved domain concepts from ADR-0001 through ADR-001
 | **URI Versioning** | pySysPass API versioning strategy: the major version is part of the URL prefix (`/api/v1`). Minor additions are backward-compatible; breaking changes require `/api/v2`. | ADR-0018 |
 | **Sunset Header** | `Sunset: <RFC-8594-date>` response header indicating a deprecation deadline for an API version. Target mechanism for communicating v1 retirement. Not yet implemented (V-06). | ADR-0018 |
 | **X-Request-ID** | Response header carrying a server-generated UUID for cross-system audit correlation. Target addition. Not yet implemented (V-05). | ADR-0018, ADR-0011 |
+| **ADR Lifecycle** | ADR status progression: Proposed → Active → Completed / Superseded / Deprecated. ADR cannot be Completed without test evidence. Superseded ADRs move to archive with a `Superseded by: ADR-NNNN` header. | ADR-0020 |
+| **Canonical Location** | The single authoritative file for a given document type. Any other copies are derived and must be kept in sync or marked as non-authoritative. | ADR-0020 |
+| **Verification Matrix** | `docs/tests/verification-matrix.md` (to be created): maps every ADR architectural claim to its test evidence and CI status. An ADR cannot be marked Completed while its claims appear as Gap in this matrix. | ADR-0019, ADR-0020 |
+| **Atomic Update Rule** | When an ADR status changes, the ADR, REGISTER.md, Kanban DB, and verification matrix must be updated in the same commit. Partial updates create documentation drift. | ADR-0020 |
 
 ## Deprecated Terms
 
