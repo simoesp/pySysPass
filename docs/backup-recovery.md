@@ -6,6 +6,41 @@ All supplied stacks persist runtime data and backups in separate named volumes.
 Copy archives to encrypted off-host storage; same-host volumes are not disaster
 recovery. Archives contain secrets.
 
+## Backup encryption (ADR-0013)
+
+Every backup is encrypted with AES-256-GCM by default. A backup is **never**
+published as plaintext unless an administrator explicitly sets
+`BACKUP_ALLOW_UNENCRYPTED=true`; when the exception is active the API records a
+WARNING-level `EventLog` audit event (`backup.exception.unencrypted`) for every
+plaintext archive published.
+
+**Encryption keyring.** The key is stored independently of the backups
+(ADR-0013: the key must not live inside what it protects). Provide a keyring
+JSON file at `BACKUP_KEYRING_PATH`, `/etc/syspass/backup-keyring.json`, or
+`config/backup-keyring.json`::
+
+    {"current": "v1", "keys": {"v1": "<64 hex characters = 32 bytes>"}}
+
+The file must have permissions `0400` (owner read-only); looser modes are
+refused. Manage it with the CLI (run from the project directory / container):
+
+```bash
+python -m app.backup_key init              # generate the first key (v1)
+python -m app.backup_key status            # report keyring state; exit 1 if unusable
+python -m app.backup_key rotate --key-id v2  # new current key, old keys retained
+```
+
+**Key rotation.** Historical backups remain readable only while their key
+version stays in the keyring. Never delete a version while a backup encrypted
+under it still exists (see `docs/adr/0013`). Keep an independent recovery copy
+of the keyring: losing it makes every encrypted backup unrecoverable.
+
+**Restoration is transparent.** Encrypted archives decrypt during restore, so
+the path-traversal and symlink defenses validate authenticated plaintext; a
+tampered or wrong-key archive fails the authentication check and nothing is
+restored. Archives created before encryption enforcement (no manifest) remain
+restorable and are listed with `encrypted: false`.
+
 A live database dump and runtime files are not one atomic snapshot. Stop all Python
 and PHP writers for a coordinated checkpoint. Preserve the deployment's existing
 encryption keys and PHP password salt separately; never rotate them during recovery.

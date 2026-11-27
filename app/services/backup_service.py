@@ -1,4 +1,18 @@
-"""Backup Service - Database and file backups"""
+"""Backup Service - Database and file backups
+
+ADR-0013: every published backup is encrypted with AES-256-GCM by default.
+An unencrypted backup is produced only under an explicit administrator
+exception (``BACKUP_ALLOW_UNENCRYPTED``); the API records an audit event for
+it (``backup.exception.unencrypted``).
+
+Encrypted archive layout: the payload members (``database.sql``, ``data/...``)
+are unchanged in name, but each member's bytes are sealed and an added
+plaintext ``manifest.json`` records the key version and per-member nonces/tags.
+Restore decrypts transparently into the staging tree, so the path-traversal
+and symlink defenses validate authenticated plaintext. Pre-encryption archives
+(no manifest) remain restorable and are reported as ``encrypted=False``.
+"""
+import json
 import os
 import shutil
 import subprocess
@@ -7,10 +21,12 @@ import uuid
 import zipfile
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
+
+from app.core import backup_crypto
 
 
 def _parse_db_url(db_url: str) -> Optional[Dict]:
@@ -35,6 +51,12 @@ def _parse_db_url(db_url: str) -> Optional[Dict]:
 
 def _mysql_client(*names: str) -> Optional[str]:
     return next((path for name in names if (path := shutil.which(name))), None)
+
+
+def _write_member(zf: zipfile.ZipFile, name: str, data: bytes) -> None:
+    info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+    info.external_attr = 0o600 << 16
+    zf.writestr(info, data)
 
 
 class BackupService:
@@ -121,12 +143,16 @@ class BackupService:
         except (subprocess.TimeoutExpired, OSError):
             return False
 
+    # ── Archive inspection, encryption and extraction ────────────────────────
+
     def _inspect_archive(self, archive_path: Path) -> Dict[str, bool]:
         """Report whether an archive contains DB and/or data payloads."""
         db_included = False
         data_included = False
+        encrypted = False
         try:
             with zipfile.ZipFile(archive_path, "r") as archive:
+                encrypted = backup_crypto.MANIFEST_NAME in archive.namelist()
                 for name in archive.namelist():
                     normalized = name.strip("/")
                     if normalized == "database.sql":
@@ -137,14 +163,96 @@ class BackupService:
                         break
         except (OSError, zipfile.BadZipFile):
             pass
-        return {"db_included": db_included, "data_included": data_included}
+        result = {"db_included": db_included, "data_included": data_included}
+        if encrypted:
+            manifest = self._read_manifest(archive_path)
+            result["encrypted"] = bool(manifest and manifest.get("encrypted"))
+        else:
+            result["encrypted"] = False
+        return result
 
-    def _extract_archive(self, archive_path: Path, target_dir: Path) -> None:
-        """Extract an archive while blocking path traversal entries."""
+    def _read_manifest(self, archive_path: Path) -> Optional[Dict]:
+        try:
+            with zipfile.ZipFile(archive_path, "r") as archive:
+                if backup_crypto.MANIFEST_NAME not in archive.namelist():
+                    return None
+                return json.loads(archive.read(backup_crypto.MANIFEST_NAME).decode("utf-8"))
+        except (OSError, ValueError, zipfile.BadZipFile):
+            return None
+
+    def _build_archive(self, staging: Path, archive_path: Path) -> Tuple[Dict, Dict]:
+        """Write the published ZIP from staged payload files, encrypting per ADR-0013.
+
+        Returns ``(encryption_info, manifest)``. Raises on any encryption
+        failure so no unencrypted archive is ever published by accident.
+        """
+        exception = backup_crypto.exception_allowed()
+        manifest: Dict = {
+            "version": "1.0",
+            "algorithm": "none" if exception else backup_crypto.ALGORITHM,
+            "encrypted": not exception,
+            "created_at": datetime.now().isoformat(),
+            "members": {},
+        }
+        key_id: Optional[str] = None
+        key: Optional[bytes] = None
+        if not exception:
+            key_id, key = backup_crypto.current_key()
+            manifest["key_id"] = key_id
+
+        payload_files = sorted(
+            path for path in staging.rglob("*") if path.is_file()
+        )
+        with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for path in payload_files:
+                name = path.relative_to(staging).as_posix()
+                plaintext = path.read_bytes()
+                if exception:
+                    _write_member(zf, name, plaintext)
+                    manifest["members"][name] = {"encrypted": False}
+                else:
+                    assert key is not None  # invariant: encrypted branch loads key above
+                    ciphertext, nonce, tag = backup_crypto.seal_bytes(plaintext, key)
+                    _write_member(zf, name, ciphertext)
+                    manifest["members"][name] = {
+                        "encrypted": True,
+                        "nonce": nonce.hex(),
+                        "tag": tag.hex(),
+                        "size": len(plaintext),
+                    }
+            manifest["backup_size"] = archive_path.stat().st_size
+            zf.writestr(backup_crypto.MANIFEST_NAME, json.dumps(manifest, indent=2))
+
+        encryption_info = {
+            "encrypted": not exception,
+            "algorithm": manifest["algorithm"],
+            "key_id": key_id,
+            "exception": exception,
+            "audit_required": exception,
+        }
+        return encryption_info, manifest
+
+    def _extract_archive(self, archive_path: Path, target_dir: Path) -> Dict:
+        """Extract an archive to plaintext, decrypting when the manifest says so.
+
+        Path-traversal and symlink defenses run on the manifest member names —
+        the plaintext view — before any ciphertext is opened, so untrusted
+        archives cannot steer writes. Returns the manifest (``{}`` for legacy
+        plaintext archives).
+        """
         target_dir = target_dir.resolve()
         with zipfile.ZipFile(archive_path, "r") as archive:
-            for member in archive.infolist():
-                member_path = Path(member.filename)
+            names = [n for n in archive.namelist() if n.strip("/") != backup_crypto.MANIFEST_NAME]
+            manifest = self._read_manifest(archive_path) or {}
+            manifest_members = manifest.get("members", {})
+            encrypted = bool(manifest.get("encrypted"))
+            key: Optional[bytes] = None
+            if encrypted:
+                key = backup_crypto.key_for_id(manifest.get("key_id", ""))
+
+            # Validate every name up front (before any decryption/copy).
+            for name in names:
+                member_path = Path(name)
                 if member_path.is_absolute() or ".." in member_path.parts:
                     raise RuntimeError("Backup archive contains invalid paths")
                 dest_path = (target_dir / member_path).resolve()
@@ -152,21 +260,44 @@ class BackupService:
                     dest_path.relative_to(target_dir)
                 except ValueError as exc:
                     raise RuntimeError("Backup archive contains invalid paths") from exc
-                # ZIP symlinks can redirect later members outside the staging tree.
-                if (member.external_attr >> 16) & 0o170000 == 0o120000:
+                if self._member_is_symlink(archive, name):
                     raise RuntimeError("Backup archive contains symbolic links")
-                if member.is_dir():
-                    dest_path.mkdir(parents=True, exist_ok=True, mode=0o700)
-                    continue
+
+            for name in names:
+                dest_path = target_dir / name
+                raw = archive.read(name)
+                entry = manifest_members.get(name, {})
+                if encrypted:
+                    assert key is not None  # invariant: encrypted archives load key above
+                    if not entry.get("encrypted"):
+                        raise RuntimeError(
+                            f"Backup manifest marks {name!r} as unencrypted in an encrypted archive"
+                        )
+                    try:
+                        plaintext = backup_crypto.open_bytes(
+                            raw, bytes.fromhex(entry["nonce"]), bytes.fromhex(entry["tag"]), key
+                        )
+                    except (KeyError, ValueError) as exc:
+                        raise RuntimeError(
+                            f"Backup manifest for {name!r} is malformed"
+                        ) from exc
+                else:
+                    plaintext = raw
                 dest_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-                with archive.open(member, "r") as source, dest_path.open("wb") as dest:
+                with dest_path.open("wb") as dest:
                     os.chmod(dest_path, 0o600)
-                    shutil.copyfileobj(source, dest)
+                    dest.write(plaintext)
+        return manifest
+
+    @staticmethod
+    def _member_is_symlink(archive: zipfile.ZipFile, name: str) -> bool:
+        member = archive.getinfo(name)
+        return (member.external_attr >> 16) & 0o170000 == 0o120000
 
     # ── Public API ───────────────────────────────────────────────────────────
 
     def create_full_backup(self, db_url: str = None, include_files: bool = True) -> Dict:
-        """Publish an archive only after every requested payload succeeds."""
+        """Publish an encrypted archive only after every payload succeeds."""
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         backup_name = f"syspass_full_backup_{stamp}_{uuid.uuid4().hex}"
         staging = Path(tempfile.mkdtemp(prefix=".backup-", dir=self.backup_dir))
@@ -183,7 +314,7 @@ class BackupService:
             if not db_url and not data_included:
                 raise RuntimeError("No database or runtime data to back up")
             partial_archive.touch(mode=0o600, exist_ok=False)
-            shutil.make_archive(str(staging), "zip", staging)
+            encryption, _manifest = self._build_archive(staging, partial_archive)
             os.chmod(partial_archive, 0o600)
             with zipfile.ZipFile(partial_archive) as archive:
                 if archive.testzip() is not None:
@@ -198,6 +329,7 @@ class BackupService:
                 "created_at": datetime.fromtimestamp(stat.st_ctime).isoformat(),
                 "db_included": bool(db_url),
                 "data_included": data_included,
+                "encryption": encryption,
             }
         except Exception as exc:
             raise RuntimeError(f"Backup failed: {exc}") from exc
@@ -237,6 +369,7 @@ class BackupService:
                 'created_at': datetime.fromtimestamp(stat.st_ctime).isoformat(),
                 'db_included': contents["db_included"],
                 'data_included': contents["data_included"],
+                'encrypted': contents["encrypted"],
             })
 
         # Sort by creation time (newest first)
@@ -257,7 +390,7 @@ class BackupService:
         keep_recovery = False
         try:
             payload = work / "payload"
-            self._extract_archive(archive_path, payload)
+            manifest = self._extract_archive(archive_path, payload)
             dump = payload / "database.sql"
             data = payload / "data"
             if not dump.is_file() and not data.is_dir():
@@ -291,6 +424,7 @@ class BackupService:
                 "filename": archive_path.name,
                 "db_restored": dump.is_file(),
                 "data_restored": data.is_dir(),
+                "encrypted": bool(manifest.get("encrypted", False)),
             }
         except Exception as exc:
             rollback_errors = []
