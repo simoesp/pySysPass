@@ -24,6 +24,7 @@ This register tracks all Architectural Decision Records for pySysPass.
 | ADR-0016 | Database Schema Ownership and Migration Governance | **Active** | ⚠️ Partially Implemented | ⚠️ Partially Verified | T-MIG-01 to T-MIG-05 |
 | ADR-0017 | Configuration and Secret Management | **Active** | ⚠️ Partially Implemented | ✅ Discovery Verified | T-CFG-01 to T-CFG-05 |
 | ADR-0018 | API Versioning and Integration Compatibility | **Active** | ⚠️ Partially Implemented | ✅ Discovery Verified | T-API-01 to T-API-04 |
+| ADR-0019 | Testing and CI/CD Governance | **Active** | ✅ Implemented (CI) | ✅ Discovery Verified | T-TEST-01, T-TEST-02 |
 
 ## Detailed ADR Status
 
@@ -225,6 +226,21 @@ This register tracks all Architectural Decision Records for pySysPass.
   - Service token authentication path integration test (TEST-020, blocks ADR-0010)
 - **Related Threats:** T-API-01 through T-API-04
 - **Related Security Findings:** Emergency auth 500 on missing extension table (V-03); error format inconsistency (V-05); header spoofing when TRUSTED_PROXY_HOSTS=["*"] (V-08)
+
+### ADR-0019: Testing and CI/CD Governance
+- **Status:** Active
+- **Decision:** 9 CI jobs (lint, SQLite tests, MySQL tests, frontend, security, browser E2E, PHP forward interop, PHP reverse interop, MySQL bootstrap+recovery); 75% coverage floor; named-gate release policy; unified ADR verification matrix (target); stale skip policy tied to Kanban cards
+- **Implementation:** CI pipeline implemented and passing (315-line ci.yml, 679 tests, 4 security scanners); PHP interop both directions pinned to upstream commits; 27-table bootstrap assertion; backup recovery rehearsal
+- **Verification:** Discovery verified (V-01–V-08); test evidence mapped to all 18 ADRs
+- **Dependencies:** All ADRs (verifies each ADR's claims)
+- **Outstanding Decisions:**
+  - Enable feature branch CI (V-01, IMPL-028)
+  - Alembic-on-populated-DB test (V-02, IMPL-028)
+  - Concurrent bootstrap replica test (V-03, IMPL-029)
+  - Create unified verification matrix (V-05, IMPL-030)
+  - Clean stale IMPL-006 skipifs (V-04, IMPL-031)
+- **Related Threats:** T-TEST-01, T-TEST-02
+- **Known Gaps:** Feature branch CI gap; no Alembic migration on populated PHP DB; stale IMPL-006 skips; no unified verification matrix; load_test.py not CI-gated
 
 ## Outstanding Decisions
 

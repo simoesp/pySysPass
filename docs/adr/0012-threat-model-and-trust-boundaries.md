@@ -189,6 +189,8 @@ This threat model documents the security threats, trust boundaries, and control 
 | T-API-02 | Service account tokens | External attacker | API | Token replay / no overlap window | Credential vault exposure | Token rotation with grace period (ADR-0010) | Medium | Medium | No HTTP surface (V-02) |
 | T-API-03 | Extension table absence | Misconfigured deployment | `POST /api/v1/auth/emergency` | Alembic not run; `emergency_credentials` absent | 500 instead of 401 on emergency auth | Readiness check validates extension tables (IMPL-016) | Medium | Low | Gap (V-03) |
 | T-API-04 | API version confusion | Integration consumer | Clients | Inconsistent version metadata (2.2.2 vs 1.0.0) | Incorrect client version checks / migration timing | Single `__version__` source of truth (IMPL-026) | Low | Medium | Gap (V-01) |
+| T-TEST-01 | Feature branch regressions | Developer workflow | CI pipeline | CI runs only on `main`; feature branches untested | Regressions reach main undetected | Enable feature branch CI triggers (IMPL-028) | **High** | Medium | Gap (V-01) |
+| T-TEST-02 | Migration path untested | Operator | Alembic upgrade path | Alembic never exercised on populated PHP database in CI | Incompatible migration discovers at deploy time, not CI | Alembic-on-populated-DB integration test (IMPL-028) | Medium | Low | Gap (V-02) |
 | T-IDI-08 | Service vault context | Compromised service | Server→DB | Service access | Context theft | Encrypted storage | Medium | Low | Key management |
 
 #### STRIDE: E - Elevation of Privilege
