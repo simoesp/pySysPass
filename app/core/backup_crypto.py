@@ -48,15 +48,15 @@ class BackupCryptoError(RuntimeError):
     """Base error for backup encryption failures."""
 
 
-class BackupKeyMissing(BackupCryptoError):
+class BackupKeyMissingError(BackupCryptoError):
     """No usable backup encryption key is configured."""
 
 
-class BackupKeyUnreadable(BackupCryptoError):
+class BackupKeyUnreadableError(BackupCryptoError):
     """The key file exists but cannot be parsed or is insufficiently protected."""
 
 
-class BackupDecryptionFailed(BackupCryptoError):
+class BackupDecryptionFailedError(BackupCryptoError):
     """Authentication tag mismatch: wrong key or tampered/corrupted backup."""
 
 
@@ -72,7 +72,7 @@ def _keyring_path(explicit: Optional[str] = None) -> Path:
     for path in DEFAULT_KEYRING_PATHS:
         if path.is_file():
             return path
-    raise BackupKeyMissing(
+    raise BackupKeyMissingError(
         "No backup encryption key configured: set "
         f"{KEYRING_ENV} to a keyring file (checked {', '.join(str(p) for p in DEFAULT_KEYRING_PATHS)})"
     )
@@ -83,7 +83,7 @@ def _check_keyring_permissions(path: Path) -> None:
         return
     mode = stat.S_IMODE(path.stat().st_mode)
     if mode & 0o077:
-        raise BackupKeyUnreadable(
+        raise BackupKeyUnreadableError(
             f"Backup keyring {path} is readable/writable by group or others "
             f"(mode {mode:04o}); ADR-0013 requires 0400"
         )
@@ -94,10 +94,10 @@ def _load_keyring(path: Path) -> dict:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        raise BackupKeyUnreadable(f"Backup keyring {path} is unreadable: {exc}") from exc
+        raise BackupKeyUnreadableError(f"Backup keyring {path} is unreadable: {exc}") from exc
     keys = data.get("keys") if isinstance(data, dict) else None
     if not isinstance(keys, dict) or not keys:
-        raise BackupKeyUnreadable(
+        raise BackupKeyUnreadableError(
             f"Backup keyring {path} has no 'keys' map (expected "
             '{"current": "<id>", "keys": {"<id>": "<64 hex>"}})'
         )
@@ -106,17 +106,17 @@ def _load_keyring(path: Path) -> dict:
 
 def _decode_key(key_id: str, raw: object, *, path: Path) -> bytes:
     if not KEY_ID_PATTERN.match(key_id):
-        raise BackupKeyUnreadable(f"Backup keyring {path} has an invalid key id {key_id!r}")
+        raise BackupKeyUnreadableError(f"Backup keyring {path} has an invalid key id {key_id!r}")
     if not isinstance(raw, str) or len(raw) != 64:
-        raise BackupKeyUnreadable(
+        raise BackupKeyUnreadableError(
             f"Backup key {key_id!r} in {path} must be 32 bytes (64 hex characters)"
         )
     try:
         key = bytes.fromhex(raw)
     except ValueError as exc:
-        raise BackupKeyUnreadable(f"Backup key {key_id!r} in {path} is not valid hex") from exc
+        raise BackupKeyUnreadableError(f"Backup key {key_id!r} in {path} is not valid hex") from exc
     if len(key) != 32:
-        raise BackupKeyUnreadable(f"Backup key {key_id!r} in {path} must be exactly 32 bytes")
+        raise BackupKeyUnreadableError(f"Backup key {key_id!r} in {path} must be exactly 32 bytes")
     return key
 
 
@@ -126,7 +126,7 @@ def current_key(keyring_path: Optional[str] = None) -> tuple[str, bytes]:
     data = _load_keyring(path)
     key_id = data.get("current")
     if not isinstance(key_id, str) or key_id not in data["keys"]:
-        raise BackupKeyUnreadable(
+        raise BackupKeyUnreadableError(
             f"Backup keyring {path} 'current' id is missing or not present in 'keys'"
         )
     return key_id, _decode_key(key_id, data["keys"][key_id], path=path)
@@ -138,7 +138,7 @@ def key_for_id(key_id: str, keyring_path: Optional[str] = None) -> bytes:
     data = _load_keyring(path)
     keys = data["keys"]
     if key_id not in keys:
-        raise BackupKeyMissing(
+        raise BackupKeyMissingError(
             f"Backup key {key_id!r} is not in keyring {path}; historical backups "
             "need their original key retained"
         )
@@ -154,12 +154,12 @@ def seal_bytes(plaintext: bytes, key: bytes) -> tuple[bytes, bytes, bytes]:
 
 
 def open_bytes(ciphertext: bytes, nonce: bytes, tag: bytes, key: bytes) -> bytes:
-    """AES-256-GCM open. Raises BackupDecryptionFailed on tag mismatch."""
+    """AES-256-GCM open. Raises BackupDecryptionFailedError on tag mismatch."""
     aesgcm = AESGCM(key)
     try:
         return aesgcm.decrypt(nonce, ciphertext + tag, None)
     except InvalidTag as exc:
-        raise BackupDecryptionFailed(
+        raise BackupDecryptionFailedError(
             "Backup authentication failed: wrong key or the archive was "
             "tampered with or corrupted"
         ) from exc

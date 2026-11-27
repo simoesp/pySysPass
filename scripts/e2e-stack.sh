@@ -10,6 +10,12 @@ NET=e2e-net
 
 case "${1:-}" in
   up)
+    # Generate a synthetic backup keyring for the disposable stack
+    mkdir -p /tmp/ci-keyring
+    KEY=$(openssl rand -hex 32)
+    echo '{"current": "v1", "keys": {"v1": "'$KEY'"}}' > /tmp/ci-keyring/backup-keyring.json
+    chmod 0400 /tmp/ci-keyring/backup-keyring.json
+
     docker network create --subnet 172.31.91.0/24 "$NET" >/dev/null
     docker run -d --rm --name e2e-db --network "$NET" -e MYSQL_ROOT_PASSWORD=root -e MYSQL_DATABASE=syspass \
       mysql:8.0@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b >/dev/null
@@ -19,10 +25,13 @@ case "${1:-}" in
     # nginx proxies to the host name "backend".
     # No --rm: keep the container (and its logs) if startup fails.
     docker run -d --name backend --network "$NET" --ip 172.31.91.20 \
-      -e DATABASE_URL=mysql+pymysql://root:root@e2e-db:3306/syspass -e DEBUG=false \
-      -e SECRET_KEY="$(openssl rand -hex 24)" -e ENCRYPTION_KEY="$(openssl rand -hex 24)" \
-      -e SYSPASS_PASSWORD_SALT="$(openssl rand -hex 30)" -e TRUSTED_PROXY_HOSTS='["172.31.91.10"]' \
-      -e AUTO_INIT_DB_ON_STARTUP=true -e WEB_CONCURRENCY="${WEB_CONCURRENCY:-1}" "$BACKEND_IMAGE" >/dev/null
+          -e DATABASE_URL=mysql+pymysql://root:***@e2e-db:3306/syspass -e DEBUG=false \
+          -e SECRET_KEY="$(openssl rand -hex 24)" -e ENCRYPTION_KEY="$(openssl rand -hex 24)" \
+          -e SYSPASS_PASSWORD_SALT="$(openssl rand -hex 30)" -e TRUSTED_PROXY_HOSTS='["172.31.91.10"]' \
+          -e AUTO_INIT_DB_ON_STARTUP=true -e WEB_CONCURRENCY="${WEB_CONCURRENCY:-1}" \
+          -e BACKUP_KEYRING_PATH=/app/config/keyring/backup-keyring.json \
+          -v /tmp/ci-keyring:/app/config/keyring:ro \
+          "$BACKEND_IMAGE" >/dev/null
     docker run -d --rm --name e2e-frontend --network "$NET" --ip 172.31.91.10 -p "127.0.0.1:${PORT}:8080" \
       "$FRONTEND_IMAGE" >/dev/null
     for _ in $(seq 1 90); do

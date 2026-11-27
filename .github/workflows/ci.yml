@@ -295,14 +295,22 @@ jobs:
         run: python -m pytest -q -rs tests/test_mysql_account_references.py tests/test_mysql_readiness.py
       - name: Build recovery container
         run: docker build -t pysyspass-recovery:ci .
+      - name: Generate synthetic backup keyring for CI rehearsal
+        run: |
+          mkdir -p /tmp/ci-keyring
+          KEY=$(openssl rand -hex 32)
+          echo '{"current": "v1", "keys": {"v1": "'$KEY'"}}' > /tmp/ci-keyring/backup-keyring.json
+          chmod 0400 /tmp/ci-keyring/backup-keyring.json
       - name: Rehearse database and mounted runtime recovery
         run: |
           docker volume create recovery-ci-data
           docker run --rm --network host \
             -v recovery-ci-data:/app/data \
             -v "$PWD/scripts:/app/scripts:ro" \
+            -v /tmp/ci-keyring:/app/config/keyring:ro \
             -e DATABASE_URL -e SQLALCHEMY_SCHEMA_GUARD -e DEBUG=false \
             -e ALLOW_DISPOSABLE_RECOVERY_TEST=yes -e PYTHONPATH=/app \
+            -e BACKUP_KEYRING_PATH=/app/config/keyring/backup-keyring.json \
             pysyspass-recovery:ci python scripts/check-backup-recovery.py
       # The runtime image must stay non-root and free of local state/tooling.
       - name: Verify hardened backend image

@@ -50,7 +50,7 @@ def _save(path: Path, data: dict) -> None:
 def status() -> int:
     try:
         path = _keyring_file()
-    except backup_crypto.BackupKeyMissing as exc:
+    except backup_crypto.BackupKeyMissingError as exc:
         allowed = backup_crypto.exception_allowed()
         print(json.dumps({
             "keyring": None,
