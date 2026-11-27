@@ -542,3 +542,50 @@ Tests must use a private keyring path (`SERVICE_VAULT_KEYRING_PATH` pointed at a
 - `app/core/service_vault_keyring` (keyring, DEK wrap/rotate)
 - `tests/conftest.py` `isolated_service_vault_state` (test isolation)
 - Coordinator decision on IMPL-010 (2026-11-27 05:2x WET)
+
+---
+
+## Owner decisions — AIRR Wave 1 (2026-11-27)
+
+### GOV-002 Q1 — APPROVED (option a)
+
+`SERVICE_VAULT_KEY` is mandatory whenever persistent service vault
+functionality is enabled: explicit startup validation; clear remediation
+message; no insecure default; **no silent key generation when persistent
+encrypted contexts already exist**; no fallback to `SECRET_KEY` or
+`ENCRYPTION_KEY`; independent lifecycle and key versioning; secure
+mounted-file support; optional external secret provider. Disabled vault →
+key optional. Undecryptable existing contexts → affected operations stay
+unavailable; startup must **not destroy or overwrite** them.
+
+### GOV-002 Q2 — APPROVED (modified option a): root secret vs mutable keyring state
+
+Root encryption keys are supplied via read-only mounted secret files,
+Docker secrets, Kubernetes/OpenShift secret volumes, environment variables
+(compatibility), or optional external secret managers, and are **never
+written back** during routine operation. Mutable keyring state sits behind
+a **keyring storage abstraction** with three backends: (1) file-backed
+(single-instance; restrictive permissions, atomic updates, filesystem
+locking, explicit key versions, corruption detection, recovery); (2)
+database-backed wrapped keyring (distributed; authenticated encryption of
+wrapped key material, transactional metadata, rotation coordination,
+concurrency safety, consistent active-key selection, revocation
+propagation, recovery after interrupted rotation); (3) read-only keyring +
+controlled redeployment. A shared writable volume is **not** a safe
+distributed backend until its locking/consistency semantics are verified.
+No plaintext master password or plaintext persistent service key material
+in the database. Root-key rotation and operational-key rotation are
+distinct procedures. Redis stays optional.
+
+### Open security requirement (AIRR §4) — provisioning/bootstrap
+
+Key-storage approval does not close cryptographic provisioning. Before
+GOV-002 completes, establish and document: provisioning authority; master
+material acquisition; persisted cryptographic authorization; derivation of
+operational contexts from provisioning grants; renewal authorization;
+absolute provisioning expiration; service-token revocation; service
+identity disabling; master-password rotation; root-key rotation; restart
+recovery; compromise containment. **Documented limitation:** a
+service-specific key does not limit the blast radius of exposing the
+global master password held in that service's decrypted context.
+Tracked as IMPL-044.

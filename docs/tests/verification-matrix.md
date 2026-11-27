@@ -14,6 +14,12 @@ implementation verification."
 CI-published evidence is marked "(CI)". Rows citing static reading only are marked
 "static" and are **not** Executed.
 
+## Gate status (AIRR Wave 1, 2026-11-27 owner ruling)
+
+- **Gate 1 — Architectural readiness:** conditionally approved for Wave 1 scope.
+- **Gate 2 — Implementation verification:** **not passed** (baseline failures open; CI scope divergence unexplained).
+- **Gate 3 — Release readiness:** not passed. **No production deployment or release authorized.**
+
 ## Baseline run 2026-11-27 (authorized foundation work)
 
 `.venv/bin/python -m pytest tests/ -q` → **28 failed, 702 passed, 35 skipped, 1 xfailed** (344.9 s).
@@ -21,7 +27,7 @@ Failed clusters are defect-documenting or environment-blocked; none were skipped
 
 | Cluster | Count | Classification |
 |---------|-------|----------------|
-| `tests/test_emergency_auth.py` (endpoint auth 13, audit trail 1, offline recovery 3, revocation-on-deactivation 1) | 18 | Failed — skipif masks removed (3504551) exposed ADR-0014 gaps end-to-end; defect-documenting, tracked by new Phase-6 card IMPL-041 |
+| `tests/test_emergency_auth.py` (endpoint auth 12, audit trail 1, offline recovery 3, revocation-on-deactivation 1) | **17** | Failed — skipif masks removed (3504551) exposed ADR-0014 gaps end-to-end; defect-documenting, tracked by new Phase-6 card IMPL-041 |
 | `tests/test_backup_encryption.py::test_restore_wrong_key_fails` | 1 | Failed — wrong-key restore acceptance defect (ADR-0013 crypto boundary) |
 | `tests/test_backup_integrity_authenticity.py::test_signature_missing_from_manifest_fails` | 1 | Failed — manifest signature-omission not rejected (ADR-0013) |
 | `tests/test_impl010_seal_matrix.py::test_seal_matrix` | 1 | Failed — `PermissionError` writing default keyring path (`/etc/syspass/…` not writable for test uid): environment gap, keyring bootstrap decision (GOV-002) |
@@ -30,7 +36,50 @@ Failed clusters are defect-documenting or environment-blocked; none were skipped
 | `tests/test_readiness.py` (ready-when-OK, malformed runtime config) | 2 | Failed — readiness logic defects (T-DEP-09 area) |
 | `tests/test_service_vault_forward_security.py` (post-revoke reveal, internal validation) + `test_service_vault_operator_bootstrap.py` | 3 | Failed — service-vault forward-security + operator-bootstrap regressions (ADR-0010); new Phase-3 card IMPL-042 |
 
-(28 failures reported by pytest; one parametrized rotation id overlaps the preconditions list — cluster counts above enumerate distinct FAILED node ids, reproduced deterministically by the 2026-11-27 `--lf` re-run in 10.7 s.)
+Cluster arithmetic reconciled (AIRR §7): 17+2+1+2+1+2+3 = **28**, matching pytest.
+The previously reported "18 emergency" was an enumeration error: the
+endpoint-auth class contains **12**, not 13, distinct node ids. No failure
+belongs to two clusters. Authoritative unique failing-test-id inventory
+(28):
+
+<details><summary>28 unique FAILED node ids (2026-11-27 baseline, commit 7e24d9d lineage, dirty-tree run)</summary>
+
+- tests/test_emergency_auth.py::TestEmergencyEndpointAuthentication::test_disabled_emergency_account_rejected
+- tests/test_emergency_auth.py::TestEmergencyEndpointAuthentication::test_emergency_endpoint_never_consults_ldap_or_user_table
+- tests/test_emergency_auth.py::TestEmergencyEndpointAuthentication::test_emergency_login_audited_as_critical
+- tests/test_emergency_auth.py::TestEmergencyEndpointAuthentication::test_emergency_token_is_short_lived
+- tests/test_emergency_auth.py::TestEmergencyEndpointAuthentication::test_invalid_mfa_rejected
+- tests/test_emergency_auth.py::TestEmergencyEndpointAuthentication::test_invalid_recovery_token_rejected_for_recovery_account
+- tests/test_emergency_auth.py::TestEmergencyEndpointAuthentication::test_login_rejected_when_mode_inactive
+- tests/test_emergency_auth.py::TestEmergencyEndpointAuthentication::test_login_succeeds_with_password_and_valid_mfa
+- tests/test_emergency_auth.py::TestEmergencyEndpointAuthentication::test_missing_mfa_rejected
+- tests/test_emergency_auth.py::TestEmergencyEndpointAuthentication::test_ordinary_ldap_user_rejected
+- tests/test_emergency_auth.py::TestEmergencyEndpointAuthentication::test_recovery_personnel_can_present_recovery_token
+- tests/test_emergency_auth.py::TestEmergencyEndpointAuthentication::test_wrong_password_rejected
+- tests/test_emergency_auth.py::TestOfflineRecoveryPersonnel::test_expired_recovery_token_rejected
+- tests/test_emergency_auth.py::TestOfflineRecoveryPersonnel::test_recovery_personnel_authenticated_only_while_mode_active
+- tests/test_emergency_auth.py::TestOfflineRecoveryPersonnel::test_recovery_personnel_usage_audited
+- tests/test_emergency_auth.py::TestSessionRevocationOnDeactivation::test_deactivation_revokes_active_emergency_sessions
+- tests/test_emergency_auth.py::TestAuditTrail::test_login_event_recorded_with_required_fields
+- tests/test_backup_encryption.py::test_restore_wrong_key_fails
+- tests/test_backup_integrity_authenticity.py::test_signature_missing_from_manifest_fails
+- tests/test_impl010_seal_matrix.py::test_seal_matrix  *(environment-specific: default keyring path not writable for test uid; re-evaluate under clean checkout + GOV-002 keyring abstraction)*
+- tests/test_master_password_rotation.py::test_rotation_preconditions[wrong-master-Rotated-Master-\u79d8\u5bc6-2026-does not match]
+- tests/test_master_password_rotation.py::test_rotation_requires_maintenance_mode
+- tests/test_production_security.py::test_production_accepts_effective_dotenv_secrets
+- tests/test_readiness.py::test_not_ready_with_malformed_runtime_configuration
+- tests/test_readiness.py::test_ready_when_all_prerequisites_hold
+- tests/test_service_vault_forward_security.py::test_context_service_internally_still_validates_after_revoke
+- tests/test_service_vault_forward_security.py::test_revoked_context_never_reveals_the_master_again
+- tests/test_service_vault_operator_bootstrap.py::test_operator_bootstrap_provisions_with_operator_audit
+
+</details>
+
+**Baseline provenance caveat:** the 28-failure baseline was executed in a
+working tree that active workers were concurrently editing. A reproducible
+clean-checkout baseline (same commit, no local edits) is being established
+per AIRR §6; deltas will be recorded as newly-introduced vs
+environment-specific before any Gate 2 claim.
 
 Matrix rows below that cite these files now record Failed where the scenario is in a
 failed cluster; "Passed (2026-11-27)" claims apply only to files actually observed green.
@@ -51,7 +100,7 @@ failed cluster; "Passed (2026-11-27)" claims apply only to files actually observ
 | 0011 | Audit HMAC integrity | Entries verify against HMAC key | T-CFG-04, T-REP-* | IMPL-023 | Tamper detection on audit row | `tests/test_account_audit.py` | Implemented (partial: audit fields), verify-key matrix **Not implemented** | G2 |
 | 0013 | Backup/restore round-trip | Restored DB cryptographically identical | T-IDI-07 | — | Create backup → offline restore → decrypt account | `scripts/test_backup_recovery.py` (CI: MySQL bootstrap+recovery job) | Implemented, Passed (CI) | G3 |
 | 0013 | Backup encryption parity | Backup crypto interoperable | T-IDI-07 | — | Encrypted backup vectors | `tests/test_backup_encryption.py`, `tests/test_backup_integrity_authenticity.py` | Implemented, Executed (2026-11-27), **Failed (2: restore-with-wrong-key accepted; manifest signature omission not rejected)** — parity vectors passed | G2 |
-| 0014 | Emergency auth (break-glass) | Extension-table absence → 401-class, not 500 | T-API-03 | IMPL-041 (new, Phase 6) | POST /auth/emergency full ADR-0014 matrix | `tests/test_emergency_auth.py` (+ stale skipifs IMPL-031) | Implemented; Executed (2026-11-27), **Failed (18 node ids: endpoint auth, audit, offline recovery, revocation)** | G2 |
+| 0014 | Emergency auth (break-glass) | Extension-table absence → 401-class, not 500 | T-API-03 | IMPL-041 (new, Phase 6) | POST /auth/emergency full ADR-0014 matrix | `tests/test_emergency_auth.py` (+ stale skipifs IMPL-031) | Implemented; Executed (2026-11-27), **Failed (17 node ids — corrected 2026-11-27: endpoint auth enumerates 12)** | G2 |
 | 0015 | Non-root container execution | No root runtime | T-DEP-06 | Phase 7 | Image User field + whoami | `Dockerfile` + container smoke (deployment suite) | Implemented (Debian image), Executed (manual, pre-AIRR); **UBI/OpenShift variants Not implemented** | G3 |
 | 0015 | Readiness/liveness probes | Ready only when DB+schema+storage OK | T-DEP-09 | IMPL-016 | Ready endpoint under schema skew | `tests/test_readiness.py`, `tests/test_mysql_readiness.py` | Implemented (no version gate yet), Executed (2026-11-27), **Failed (2: ready-when-all-OK, malformed runtime config)**; version-gate scenario **Not implemented** | G2 |
 | 0015 | Bootstrap serialization | Single bootstrapper under concurrency | T-MIG-01 | IMPL-029 | N concurrent bootstrap calls (MySQL `GET_LOCK`) | **Not implemented** (multi-replica concurrency test) | Documented | G2 |
