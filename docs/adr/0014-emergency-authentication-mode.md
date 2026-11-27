@@ -4,6 +4,16 @@
 
 **Status:** **Proposed** (Pending approval)
 
+**Implementation status (IMPL-041, 2026-11-27):** Behaviours implemented and verified —
+mode-gated `POST /api/v1/auth/emergency`, mandatory MFA for every emergency identity,
+recovery-token semantics, 1-hour emergency sessions, CRITICAL-only audit events,
+2-hour auto-deactivation with session revocation, fail-closed 401 when the Alembic 003
+extension table is absent, and emergency-table state on `/health/ready`. Evidence:
+18/18 unmodified defect tests in `tests/test_emergency_auth.py` plus 4 new guards in
+`tests/test_emergency_migration.py`; `docs/tests/verification-matrix.md` row 0014.
+No PHP schema change (ADR-0002 isolation). Governance approval of the ADR itself is
+still pending; this note records implementation, not a change of decision status.
+
 ---
 
 ## Context

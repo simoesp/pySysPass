@@ -121,4 +121,16 @@ async def run_readiness_checks(
     for name, result in results.items():
         if not result["ok"]:
             logger.warning("Readiness check %s failed: %s", name, result["reason"])
-    return {"ready": all(result["ok"] for result in results.values()), "checks": results}
+    # ADR-0014 / T-API-03: report the Python extension table separately from
+    # the four canonical checks. Absence makes emergency mode inert (ADR-0002
+    # isolation) but does not make the core service unready; operators still
+    # need to see whether Alembic 003 has been applied.
+    from app.services.emergency_auth import emergency_credentials_table_present
+
+    return {
+        "ready": all(result["ok"] for result in results.values()),
+        "checks": results,
+        "extensions": {
+            "emergency_credentials": {"present": emergency_credentials_table_present(engine)}
+        },
+    }

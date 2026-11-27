@@ -3,6 +3,7 @@
 Manages the emergency mode activation flag, timeout enforcement, and provides
 utilities for the emergency authentication endpoint.
 """
+import hmac
 import json
 import time
 from datetime import UTC, datetime, timedelta
@@ -28,6 +29,23 @@ EMERGENCY_FLAG_FILE = EMERGENCY_FLAG_DIR / "emergency-auth-active"
 # Default timeout: 2 hours per ADR-0014 §3 (body header says 24h but acceptance criteria say 2h)
 DEFAULT_TIMEOUT_HOURS = 2
 EMERGENCY_SESSION_SECONDS = 3600  # 1 hour token lifetime per ADR-0014 §4
+
+
+def emergency_credentials_table_present(engine) -> bool:
+    """Report whether the ADR-0014 Python extension table exists.
+
+    ``emergency_credentials`` is a Python-native extension (ADR-0002/0016):
+    a PHP-only deployment predating Alembic 003 has no such table. Emergency
+    authentication must fail closed with an auth-class response (T-API-03)
+    instead of letting an ORM query error surface as HTTP 500.
+    """
+    try:
+        from sqlalchemy import inspect
+
+        return bool(inspect(engine).has_table("emergency_credentials"))
+    except Exception:
+        # An uninspectable bind is treated as "no emergency identities".
+        return False
 
 
 class EmergencyAuthError(Exception):
@@ -211,8 +229,6 @@ def verify_recovery_token(username: str, provided_token: str, db) -> bool:
 
     return True
 
-
-import hmac
 
 def constant_time_compare(val1: str, val2: str) -> bool:
     """Constant-time string comparison."""

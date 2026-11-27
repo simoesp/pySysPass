@@ -19,7 +19,7 @@ This register tracks all Architectural Decision Records for pySysPass.
 | ADR-0011 | Audit Logging and Accountability | **Active** | ⚠️ Partially Implemented | ❌ Not Verified | T-REP-01, T-REP-02, T-REP-03, T-PDB-02 |
 | ADR-0012 | Threat Model and Trust Boundaries | **Proposed** | ⚠️ Partially Implemented | ❌ Not Verified | All threats |
 | ADR-0013 | Backup, Disaster Recovery and Cryptographic Recoverability | **Proposed** | ❌ Not Implemented | ❌ Not Verified | T-IDI-07 |
-| ADR-0014 | Emergency Authentication and Offline Recovery Access | **Proposed** | ❌ Not Implemented | ❌ Not Verified | T-EVP-08, T-PM-07, T-EAM-01, T-EAM-02, T-EAM-03 |
+| ADR-0014 | Emergency Authentication and Offline Recovery Access | **Proposed** | ✅ Implemented | ✅ Verified | T-EVP-08, T-PM-07, T-EAM-01, T-EAM-02, T-EAM-03 |
 | ADR-0015 | Deployment Architecture and Infrastructure Requirements | **Active** | ⚠️ Partially Implemented | ⚠️ Partially Verified | T-DEP-01 to T-DEP-12 |
 | ADR-0016 | Database Schema Ownership and Migration Governance | **Active** | ✅ Implemented (migration lock) / ⚠️ Partially (readiness, shape validation) | ✅ Verified (lock + TEST-011) / ⚠️ Partially (readiness) | T-MIG-01 to T-MIG-05 |
 | ADR-0017 | Configuration and Secret Management | **Active** | ⚠️ Partially Implemented | ✅ Discovery Verified | T-CFG-01 to T-CFG-05 |
@@ -154,16 +154,14 @@ This register tracks all Architectural Decision Records for pySysPass.
 - **Related Security Findings:** Backup encryption not mandatory, no integrity verification
 
 ### ADR-0014: Emergency Authentication and Offline Recovery Access
-- **Status:** Proposed
+- **Status:** Proposed (behaviours implemented 2026-11-27, IMPL-041)
 - **Decision:** Separate emergency_credentials table, 2-hour window, explicit activation, MFA mandatory
-- **Implementation:** Not implemented
-- **Verification:** Not verified
+- **Implementation:** Implemented (IMPL-041) — mode-gated `POST /api/v1/auth/emergency`, mandatory TOTP for all emergency identities, recovery-token semantics, 1-hour emergency sessions, CRITICAL audit events, 2-hour auto-deactivation, revocation on deactivation, fail-closed 401 when the Alembic 003 extension table is absent, and extension state on `/health/ready`
+- **Verification:** Verified (IMPL-041) — 18/18 unmodified defect tests in `tests/test_emergency_auth.py` pass, plus 4 new migration/readiness/fail-closed tests in `tests/test_emergency_migration.py`; 2 pre-existing timeout tests remain defect-documenting skips
 - **Dependencies:** ADR-0004, ADR-0013
 - **Outstanding Decisions:**
-  - Emergency credentials table creation
-  - CLI activation script
-  - Emergency authentication endpoint
-  - Audit logging integration
+  - Break-glass credential provisioning/runbook (operational, not endpoint behaviour)
+  - Recovery-token issuance tooling out-of-band
 - **Related Threats:** T-EVP-08, T-PM-07, T-EAM-01, T-EAM-02, T-EAM-03
 - **Related Security Findings:** LDAP-to-local fallback removed, emergency mode needed
 
@@ -265,8 +263,8 @@ This register tracks all Architectural Decision Records for pySysPass.
 | Audit log storage backend | ADR-0011 | Pending | High |
 | Backup encryption mandatory enforcement | ADR-0013 | Pending | Critical |
 | Asymmetric backup encryption | ADR-0013 | Pending | Medium |
-| Emergency authentication implementation | ADR-0014 | Pending | Critical |
-| Emergency credentials table creation | ADR-0014 | Pending | Critical |
+| Emergency authentication implementation | ADR-0014 | Closed — implemented + verified (IMPL-041) | Critical |
+| Emergency credentials table creation | ADR-0014 | Closed — Alembic 003 present, migration-presence test (IMPL-041) | Critical |
 | LDAP fallback removal | ADR-0004 | Pending | Critical |
 | MFA before vault unlock | ADR-0003 | Pending | High |
 | Master password not identity fallback | ADR-0003 | Pending | High |
@@ -333,7 +331,7 @@ ADR-0020 (Docs/Governance) ← All ADRs (documentation requirements)
 | Backup integrity verification missing | Medium | ADR-0013 | Not implemented |
 | Audit logging not implemented | High | ADR-0011 | Not implemented |
 | Service vault contexts partially implemented (keyring hierarchy present); keyring silently overrides SERVICE_VAULT_KEY — divergence recorded in ADR-0010 §17, unresolved | Medium | ADR-0010 | Partially implemented, not verified |
-| Emergency authentication not implemented | High | ADR-0014 | Not implemented |
+| Emergency authentication not implemented | High | ADR-0014 | Implemented and verified (IMPL-041) |
 | Vault unlock before MFA | Medium | ADR-0003 | Not remediated (deviation) |
 | Master password as identity fallback | Medium | ADR-0003 | Not remediated (deviation) |
 | Emergency admin auto-provisioning | Medium | ADR-0003 | Not remediated (deviation) |
@@ -353,8 +351,8 @@ ADR-0020 (Docs/Governance) ← All ADRs (documentation requirements)
 |----------|------|-----|--------|
 | Critical | Remove LDAP fallback to local auth | ADR-0004 | Medium |
 | Critical | Make backup encryption mandatory | ADR-0013 | High |
-| Critical | Implement emergency authentication | ADR-0014 | High |
-| Critical | Store emergency credentials independently | ADR-0014 | High |
+| Critical | Implement emergency authentication | ADR-0014 | ✅ Done (IMPL-041) |
+| Critical | Store emergency credentials independently | ADR-0014 | ✅ Done (Alembic 003 extension table) |
 | High | Enforce MFA before vault unlock | ADR-0003 | Medium |
 | High | Prevent master password identity fallback | ADR-0003 | Medium |
 | High | Verify service vault contexts and resolve the keyring/env precedence divergence (ADR-0010 §17) | ADR-0010 | High |

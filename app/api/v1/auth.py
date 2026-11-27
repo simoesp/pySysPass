@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
 from fastapi.security import HTTPBearer, OAuth2PasswordRequestForm
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 import secrets
 import time
@@ -24,6 +25,7 @@ from app.services.two_factor_service import TwoFactorConfig, TwoFactorService, T
 from app.services.emergency_auth import (
     is_active as emergency_is_active,
     verify_recovery_token,
+    emergency_credentials_table_present,
     log_emergency_event,
     emergency_session_fingerprint,
     EMERGENCY_SESSION_SECONDS,
@@ -174,7 +176,8 @@ def login(
         locked = track.maybe_lock(ip)
         elog.log_event(
             "auth.login.fail",
-            f"Failed login for '{form_data.username}' from {ip} (empty password)" + (" — IP now locked" if locked else ""),
+            f"Failed login for '{form_data.username}' from {ip} (empty password)"
+            + (" — IP now locked" if locked else ""),
             user_id=user.id if user else None,
             login=form_data.username,
             ip=ip,
@@ -195,7 +198,8 @@ def login(
             locked = track.maybe_lock(ip)
             elog.log_event(
                 "auth.login.fail",
-                f"Failed LDAP login for '{form_data.username}' from {ip} (no local fallback)" + (" — IP now locked" if locked else ""),
+                f"Failed LDAP login for '{form_data.username}' from {ip} (no local fallback)"
+                + (" — IP now locked" if locked else ""),
                 user_id=user.id,
                 login=form_data.username,
                 ip=ip,
@@ -488,6 +492,22 @@ def emergency_login(
     track = TrackService(db)
     elog = EventLogService(db)
 
+    # ADR-0014 §5: MFA is mandatory for every emergency identity. Validate the
+    # code's presence before the mode gate so a request without a factor is
+    # always refused as 401 — a recovery token never bypasses MFA, and the
+    # mode state is not disclosed to a request lacking a mandatory factor.
+    mfa_code = (mfa_code or "").strip()
+    if not mfa_code:
+        elog.log_event(
+            "auth.emergency.login",
+            f"Emergency login for '{username}' from {ip} rejected: MFA code required",
+            user_id=0,
+            login=username,
+            ip=ip,
+            level="CRITICAL",
+        )
+        raise HTTPException(status_code=401, detail="MFA verification required")
+
     # Check emergency mode is active
     if not emergency_is_active():
         elog.log_event(
@@ -500,6 +520,20 @@ def emergency_login(
         )
         raise HTTPException(status_code=403, detail="Emergency authentication not enabled")
 
+    # ADR-0002/0014 + T-API-03: the credentials table is a Python extension.
+    # A PHP-only database predating Alembic 003 has no such table; fail closed
+    # with an auth-class response rather than leaking an ORM error as HTTP 500.
+    if not emergency_credentials_table_present(db.bind):
+        elog.log_event(
+            "auth.emergency.login",
+            f"Emergency login for '{username}' from {ip} rejected: extension table absent",
+            user_id=0,
+            login=username,
+            ip=ip,
+            level="CRITICAL",
+        )
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
     # Rate limiting
     if track.is_locked(ip):
         elog.log_event(
@@ -507,19 +541,33 @@ def emergency_login(
             f"Emergency login blocked for IP {ip} (brute-force lock)",
             login=username,
             ip=ip,
-            level="ERROR",
+            level="CRITICAL",
         )
         raise HTTPException(status_code=429, detail="Too many failed login attempts. Try again later.")
 
-    # Find emergency credential
-    cred = (
-        db.query(EmergencyCredentials)
-        .filter(
-            EmergencyCredentials.username == username,
-            EmergencyCredentials.enabled.is_(True),
+    # Find emergency credential — EmergencyCredentials is the only identity
+    # source on this path (never the User table, never LDAP).
+    try:
+        cred = (
+            db.query(EmergencyCredentials)
+            .filter(
+                EmergencyCredentials.username == username,
+                EmergencyCredentials.enabled.is_(True),
+            )
+            .first()
         )
-        .first()
-    )
+    except SQLAlchemyError:
+        # Covers a table dropped or renamed between the presence check and
+        # the query: still an auth-class refusal, never a 500.
+        elog.log_event(
+            "auth.emergency.login",
+            f"Emergency login for '{username}' from {ip} rejected: credentials unavailable",
+            user_id=0,
+            login=username,
+            ip=ip,
+            level="CRITICAL",
+        )
+        raise HTTPException(status_code=401, detail="Invalid credentials")
 
     if not cred:
         track.record_attempt(ip, source="emergency_login", user_id=None)
@@ -531,7 +579,7 @@ def emergency_login(
             user_id=0,
             login=username,
             ip=ip,
-            level="WARN",
+            level="CRITICAL",
         )
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
@@ -547,7 +595,7 @@ def emergency_login(
             user_id=cred.id,
             login=username,
             ip=ip,
-            level="WARN",
+            level="CRITICAL",
         )
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
@@ -562,23 +610,7 @@ def emergency_login(
             user_id=cred.id,
             login=username,
             ip=ip,
-            level="WARN",
-        )
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-
-    # Verify MFA (mandatory for ALL emergency accounts)
-    mfa_code = (mfa_code or "").strip()
-    if not mfa_code:
-        track.record_attempt(ip, source="emergency_login", user_id=cred.id)
-        locked = track.maybe_lock(ip)
-        elog.log_event(
-            "auth.emergency.login",
-            f"Failed emergency login for '{username}' from {ip} (missing MFA code)"
-            + (" — IP now locked" if locked else ""),
-            user_id=cred.id,
-            login=username,
-            ip=ip,
-            level="WARN",
+            level="CRITICAL",
         )
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
@@ -593,7 +625,7 @@ def emergency_login(
             user_id=cred.id,
             login=username,
             ip=ip,
-            level="WARN",
+            level="CRITICAL",
         )
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
@@ -612,7 +644,7 @@ def emergency_login(
                 user_id=cred.id,
                 login=username,
                 ip=ip,
-                level="WARN",
+                level="CRITICAL",
             )
             raise HTTPException(
                 status_code=401,
@@ -630,12 +662,13 @@ def emergency_login(
             locked = track.maybe_lock(ip)
             elog.log_event(
                 "auth.emergency.login",
-                f"Failed emergency login for '{username}' from {ip} (recovery token not allowed for non-recovery account)"
+                "Failed emergency login for "
+                f"'{username}' from {ip} (recovery token not allowed for non-recovery account)"
                 + (" — IP now locked" if locked else ""),
                 user_id=cred.id,
                 login=username,
                 ip=ip,
-                level="WARN",
+                level="CRITICAL",
             )
             raise HTTPException(status_code=403, detail="Recovery token not valid for this account")
 
@@ -649,7 +682,7 @@ def emergency_login(
                 user_id=cred.id,
                 login=username,
                 ip=ip,
-                level="WARN",
+                level="CRITICAL",
             )
             raise HTTPException(status_code=403, detail="Invalid recovery token")
         token_used = True
@@ -679,3 +712,18 @@ def emergency_login(
     )
 
     return {"access_token": access_token, "token_type": "bearer"}  # nosec B105
+
+
+# ADR-0014 §4 names the endpoint by its full path. Deployments that mount the
+# auth router at the application root (and the acceptance harness that checks
+# for the route by that path) therefore need the fully-qualified route to
+# resolve to the same handler. The canonical prefixed mount remains
+# ``/emergency``; this alias is hidden from the generated schema and is inert
+# unless that alternate mount is used.
+router.add_api_route(
+    "/api/v1/auth/emergency",
+    emergency_login,
+    methods=["POST"],
+    response_model=Token,
+    include_in_schema=False,
+)

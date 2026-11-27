@@ -274,5 +274,13 @@ async def readiness():
     result["salt_provenance"] = salt_info
     return JSONResponse(
         status_code=200 if result["ready"] else 503,
-        content={"status": "ready" if result["ready"] else "not_ready", "checks": result["checks"]},
+        content={
+            "status": "ready" if result["ready"] else "not_ready",
+            "checks": result["checks"],
+            # ADR-0014: expose emergency extension-table state. The fallback
+            # keeps the contract stable when the checker is replaced in tests.
+            "extensions": result.get(
+                "extensions", {"emergency_credentials": {"present": False}}
+            ),
+        },
     )
