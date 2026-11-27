@@ -470,8 +470,10 @@ def test_schema_mutation_lock_mysql_timeout_distinct_from_duration(mysql_engine)
     holder_eng.dispose()
     waiter_eng.dispose()
 
-    assert 0.4 <= elapsed < hold_time, (
-        f"timeout fired after {elapsed:.3f}s; expected ~0s, well before {hold_time}s duration"
+    # timeout=0 -> GET_LOCK(wait=0) fails immediately; the acquisition timeout
+    # bounds the WAIT and is distinct from migration duration (1.5 s hold).
+    assert elapsed < hold_time * 0.5, (
+        f"timeout fired after {elapsed:.3f}s; expected fast failure, well before {hold_time}s duration"
     )
 
 
