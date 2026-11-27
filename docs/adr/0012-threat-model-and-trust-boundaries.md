@@ -185,6 +185,10 @@ This threat model documents the security threats, trust boundaries, and control 
 | T-CFG-03 | PHP password salt | Misconfigured deployment | `User.mPass` decryption | Empty `SYSPASS_PASSWORD_SALT` | All PHP-created credentials unreadable | Startup validation + runtime config fallback | **Critical** | Low | Partially mitigated (V-07) |
 | T-CFG-04 | Audit HMAC key | Internal attacker | Audit log integrity | Raw `AUDIT_HMAC_KEY` env var (no rotation) | Unsigned/forged audit entries | Add to Settings + rotation policy | Medium | Low | Gap (V-03) |
 | T-CFG-05 | Service vault key | Misconfigured deployment | Service API tokens | `SERVICE_VAULT_KEY` unset (no startup check) | Service vault operations fail at runtime, not startup | Add to `validate_production_settings` | Medium | Low | Gap (V-08) |
+| T-API-01 | PHP AuthToken | External attacker | API | Token guessing (64-hex = 2^256 space) | Unauthorized account access | Action scope enforcement + rate limiting at nginx | Low | Low | Action scoping implemented; rate limiting deployment-level only |
+| T-API-02 | Service account tokens | External attacker | API | Token replay / no overlap window | Credential vault exposure | Token rotation with grace period (ADR-0010) | Medium | Medium | No HTTP surface (V-02) |
+| T-API-03 | Extension table absence | Misconfigured deployment | `POST /api/v1/auth/emergency` | Alembic not run; `emergency_credentials` absent | 500 instead of 401 on emergency auth | Readiness check validates extension tables (IMPL-016) | Medium | Low | Gap (V-03) |
+| T-API-04 | API version confusion | Integration consumer | Clients | Inconsistent version metadata (2.2.2 vs 1.0.0) | Incorrect client version checks / migration timing | Single `__version__` source of truth (IMPL-026) | Low | Medium | Gap (V-01) |
 | T-IDI-08 | Service vault context | Compromised service | Server→DB | Service access | Context theft | Encrypted storage | Medium | Low | Key management |
 
 #### STRIDE: E - Elevation of Privilege

@@ -23,6 +23,7 @@ This register tracks all Architectural Decision Records for pySysPass.
 | ADR-0015 | Deployment Architecture and Infrastructure Requirements | **Active** | ⚠️ Partially Implemented | ⚠️ Partially Verified | T-DEP-01 to T-DEP-12 |
 | ADR-0016 | Database Schema Ownership and Migration Governance | **Active** | ⚠️ Partially Implemented | ⚠️ Partially Verified | T-MIG-01 to T-MIG-05 |
 | ADR-0017 | Configuration and Secret Management | **Active** | ⚠️ Partially Implemented | ✅ Discovery Verified | T-CFG-01 to T-CFG-05 |
+| ADR-0018 | API Versioning and Integration Compatibility | **Active** | ⚠️ Partially Implemented | ✅ Discovery Verified | T-API-01 to T-API-04 |
 
 ## Detailed ADR Status
 
@@ -208,6 +209,22 @@ This register tracks all Architectural Decision Records for pySysPass.
   - `secrets_dir` configuration (V-02)
 - **Related Threats:** T-CFG-01 through T-CFG-05
 - **Related Security Findings:** Raw env var secrets bypass validation (V-03); salt not validated at startup (V-07); JWT rotation without overlap invalidates sessions
+
+### ADR-0018: API Versioning and Integration Compatibility
+- **Status:** Active
+- **Decision:** URI-based major versioning; PHP AuthToken action-ID compatibility matrix; service account HTTP surface (ADR-0010 completion); `X-Request-ID` correlation header; OpenAPI as the authoritative client contract; XML-RPC explicitly out of scope
+- **Implementation:** Partially implemented — 202 endpoints registered across 29 modules; PHP AuthToken auth and action scoping verified; service account HTTP router NOT registered (V-02); no deprecation headers (V-06); version metadata inconsistent (V-01)
+- **Verification:** Discovery verified (V-01–V-08)
+- **Dependencies:** ADR-0002, ADR-0005, ADR-0009, ADR-0010, ADR-0015, ADR-0016, ADR-0017
+- **Outstanding Decisions:**
+  - Service account router registration and request/response schemas (V-02, IMPL-025)
+  - Single version source of truth `__version__` (V-01, IMPL-026)
+  - `X-Request-ID` response header for audit correlation (IMPL-027)
+  - Structured error contract (breaking — deferred until readiness review)
+  - PHP AuthToken action-ID coverage test (TEST-019)
+  - Service token authentication path integration test (TEST-020, blocks ADR-0010)
+- **Related Threats:** T-API-01 through T-API-04
+- **Related Security Findings:** Emergency auth 500 on missing extension table (V-03); error format inconsistency (V-05); header spoofing when TRUSTED_PROXY_HOSTS=["*"] (V-08)
 
 ## Outstanding Decisions
 

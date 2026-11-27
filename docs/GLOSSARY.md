@@ -319,6 +319,12 @@ This glossary defines all approved domain concepts from ADR-0001 through ADR-001
 | **Runtime JSON Config** | Mutable application settings stored in `/app/data/runtime-config.json`. Layer 6 in ADR-0017 precedence. Used for mail, LDAP, general, and wiki settings. | ADR-0017, ADR-0002 |
 | **PHP config.xml** | Legacy sysPass PHP configuration file. Layer 8 in ADR-0017 precedence. Read by `syspass_runtime_config.py` for `passwordSalt` and other PHP-owned values. | ADR-0017, ADR-0002 |
 | **Secret Age** | Time since a secret was last rotated. When exceeding the configured `*_MAX_AGE_DAYS` threshold, a warning is logged (or readiness degraded). Not yet enforced. | ADR-0017 |
+| **API Token (PHP AuthToken)** | A 64-hex secret token created in sysPass PHP's `authData` table with a numeric `actionId` scope. pySysPass replicates authentication via `_resolve_api_token` in `app/api/deps.py` and enforces `API_TOKEN_SCOPES` per request. | ADR-0018, ADR-0009 |
+| **API_TOKEN_SCOPES** | Static dict in `app/api/deps.py` mapping PHP action IDs (3, 4, 5, 6, 7, 8, 102–106, 202–206, 302–306, 802) to allowed `(method, path)` pairs. Unmapped IDs return 403 (fail-closed). | ADR-0018 |
+| **Service Token** | A server-random token (like a PHP AuthToken, but distinct) stored as a hash in `service_auth_tokens`. Authenticates a workload to the service-accounts API. NOT a JWT. No HTTP surface yet (V-02). | ADR-0018, ADR-0010 |
+| **URI Versioning** | pySysPass API versioning strategy: the major version is part of the URL prefix (`/api/v1`). Minor additions are backward-compatible; breaking changes require `/api/v2`. | ADR-0018 |
+| **Sunset Header** | `Sunset: <RFC-8594-date>` response header indicating a deprecation deadline for an API version. Target mechanism for communicating v1 retirement. Not yet implemented (V-06). | ADR-0018 |
+| **X-Request-ID** | Response header carrying a server-generated UUID for cross-system audit correlation. Target addition. Not yet implemented (V-05). | ADR-0018, ADR-0011 |
 
 ## Deprecated Terms
 
