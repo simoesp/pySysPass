@@ -221,10 +221,10 @@ def test_alembic_upgrade_on_php_bootstrapped_database(mysql_engine):
     # Run alembic upgrade head (first time, needs stamping)
     _run_alembic_upgrade(mysql_engine, "head", stamp_first=True)
 
-    # Verify alembic_version matches head (005)
+    # Verify alembic_version matches head (006)
     with mysql_engine.connect() as conn:
         version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
-        assert version == "005", f"Expected alembic_version '005', got '{version}'"
+        assert version == "006", f"Expected alembic_version '006', got '{version}'"
 
     # Verify alembic extension tables were created
     with mysql_engine.connect() as conn:
@@ -269,7 +269,7 @@ def test_alembic_upgrade_idempotent_on_php_bootstrapped_database(mysql_engine):
     # Verify alembic_version still matches head
     with mysql_engine.connect() as conn:
         version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
-        assert version == "005"
+        assert version == "006"
 
     # Verify data still intact
     _verify_data_intact(mysql_engine, fixture_ids)
@@ -289,13 +289,13 @@ def test_alembic_current_shows_head_after_upgrade(mysql_engine):
     with mysql_engine.connect() as conn:
         context = MigrationContext.configure(conn)
         current_rev = context.get_current_revision()
-        assert current_rev == "005", f"Expected current revision '005', got '{current_rev}'"
+        assert current_rev == "006", f"Expected current revision '006', got '{current_rev}'"
 
         # Also verify via script directory
         cfg = Config("alembic.ini")
         script = ScriptDirectory.from_config(cfg)
         heads = script.get_heads()
-        assert "005" in heads, f"Expected head '005' in {heads}"
+        assert "006" in heads, f"Expected head '006' in {heads}"
 
 
 if __name__ == "__main__":
