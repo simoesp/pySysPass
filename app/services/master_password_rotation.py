@@ -168,6 +168,23 @@ class MasterPasswordRotation:
             self._set_config("lastupdatempass", str(int(now or time.time())))
             # A temporary master password unlocks the old master; retire it.
             TemporaryMasterPasswordService(self.db).expire_pending()
+            # ADR-0010 §5: a master rotation invalidates every service vault
+            # context (sealed against the old master). Service token
+            # identities are untouched. Fail-closed for services: the next
+            # request re-provisions a context; a failure here must not abort
+            # the already-verified rotation of user data.
+            try:
+                from app.services.service_vault_context_service import ServiceVaultContextService
+
+                ServiceVaultContextService(self.db).rotate_master_password(
+                    old_master=current, new_master=new
+                )
+            except Exception:  # pragma: no cover - defensive
+                import logging
+
+                logging.getLogger(__name__).exception(
+                    "service vault context invalidation failed after master password rotation"
+                )
             self.db.commit()
         except Exception:
             self.db.rollback()

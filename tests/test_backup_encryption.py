@@ -1,4 +1,4 @@
-"""ADR-0013 IMPL-007 tests: AES-256-GCM mandatory backup encryption.
+"""ADR-0013 IMPL-007/009 tests: AES-256-GCM mandatory backup encryption + Ed25519 manifest signing.
 
 Covers:
 - Keyring configuration and validation
@@ -8,7 +8,9 @@ Covers:
 - Wrong key -> decryption error
 - Tampered ciphertext -> authentication failure
 - Legacy (pre-ADR-0013) archive still restorable
+- Ed25519 manifest signing for authenticity (IMPL-009)
 """
+import base64
 import json
 import os
 import stat
@@ -19,6 +21,7 @@ import pytest
 
 from app.core import backup_crypto
 from app.services.backup_service import BackupService
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -406,3 +409,318 @@ def test_create_backup_route_no_audit_when_encrypted(tmp_path, monkeypatch):
         result = create_backup(include_db=False, db=FakeDB(), current_user={"id": 3, "login": "admin"})
     assert result["encryption"]["audit_required"] is False
     assert add_calls == []
+
+
+# ── IMPL-009: Ed25519 Manifest Signing for Authenticity ──────────────────────
+
+
+def _signing_keyring(tmp_path: Path, *, current="sig-v1", keys=None, mode=0o400) -> Path:
+    """Create a signing keyring with Ed25519 key pair."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    path = tmp_path / "backup-signing-keyring.json"
+
+    if keys is None:
+        private_key = Ed25519PrivateKey.generate()
+        public_key = private_key.public_key()
+        private_b64 = base64.b64encode(private_key.private_bytes_raw()).decode("ascii")
+        public_b64 = base64.b64encode(public_key.public_bytes_raw()).decode("ascii")
+        keys = {current: {"private": private_b64, "public": public_b64}}
+
+    data = {"current": current, "keys": keys}
+    path.write_text(json.dumps(data))
+    os.chmod(path, mode)
+    return path
+
+
+def _verification_keyring(tmp_path: Path, *, current="sig-v1", keys=None, mode=0o400) -> Path:
+    """Create a verification keyring (public keys only)."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    path = tmp_path / "backup-verification-keyring.json"
+
+    if keys is None:
+        private_key = Ed25519PrivateKey.generate()
+        public_key = private_key.public_key()
+        public_b64 = base64.b64encode(public_key.public_bytes_raw()).decode("ascii")
+        keys = {current: {"public": public_b64}}
+
+    data = {"current": current, "keys": keys}
+    path.write_text(json.dumps(data))
+    os.chmod(path, mode)
+    return path
+
+
+def test_signing_keyring_loads_private_key(tmp_path):
+    kr = _signing_keyring(tmp_path)
+    key_id, private_key = backup_crypto.load_signing_keyring(str(kr))
+    assert key_id == "sig-v1"
+    assert isinstance(private_key, Ed25519PrivateKey)
+
+
+def test_signing_keyring_historical_key_available(tmp_path):
+    key1 = Ed25519PrivateKey.generate()
+    key2 = Ed25519PrivateKey.generate()
+    keys = {
+        "sig-v1": {
+            "private": base64.b64encode(key1.private_bytes_raw()).decode("ascii"),
+            "public": base64.b64encode(key1.public_key().public_bytes_raw()).decode("ascii"),
+        },
+        "sig-v2": {
+            "private": base64.b64encode(key2.private_bytes_raw()).decode("ascii"),
+            "public": base64.b64encode(key2.public_key().public_bytes_raw()).decode("ascii"),
+        },
+    }
+    kr = _signing_keyring(tmp_path, keys=keys)
+    _, pk1 = backup_crypto.load_signing_keyring(str(kr), key_id="sig-v1")
+    _, pk2 = backup_crypto.load_signing_keyring(str(kr), key_id="sig-v2")
+    assert pk1.private_bytes_raw() == key1.private_bytes_raw()
+    assert pk2.private_bytes_raw() == key2.private_bytes_raw()
+
+
+def test_signing_keyring_invalid_private_rejected(tmp_path):
+    kr = _signing_keyring(tmp_path, keys={"sig-v1": {"private": "not-valid-base64", "public": "dGVzdA=="}})
+    with pytest.raises(backup_crypto.BackupKeyUnreadable, match="not valid Ed25519 private key"):
+        backup_crypto.load_signing_keyring(str(kr))
+
+
+def test_signing_keyring_missing_private_rejected(tmp_path):
+    kr = _signing_keyring(tmp_path, keys={"sig-v1": {"public": "dGVzdA=="}})
+    with pytest.raises(backup_crypto.BackupKeyUnreadable, match="missing 'private' field"):
+        backup_crypto.load_signing_keyring(str(kr))
+
+
+def test_signing_keyring_world_readable_refused(tmp_path):
+    kr = _signing_keyring(tmp_path, mode=0o644)
+    with pytest.raises(backup_crypto.BackupKeyUnreadable):
+        backup_crypto.load_signing_keyring(str(kr))
+
+
+def test_verification_keyring_loads_public_keys(tmp_path):
+    kr = _verification_keyring(tmp_path)
+    pub_keys = backup_crypto.load_verification_keyring(str(kr))
+    assert "sig-v1" in pub_keys
+    assert isinstance(pub_keys["sig-v1"], Ed25519PublicKey)
+
+
+def test_verification_keyring_multiple_keys(tmp_path):
+    key1 = Ed25519PrivateKey.generate()
+    key2 = Ed25519PrivateKey.generate()
+    keys = {
+        "sig-v1": {"public": base64.b64encode(key1.public_key().public_bytes_raw()).decode("ascii")},
+        "sig-v2": {"public": base64.b64encode(key2.public_key().public_bytes_raw()).decode("ascii")},
+    }
+    kr = _verification_keyring(tmp_path, keys=keys)
+    pub_keys = backup_crypto.load_verification_keyring(str(kr))
+    assert set(pub_keys.keys()) == {"sig-v1", "sig-v2"}
+
+
+def test_verification_keyring_invalid_key_skipped(tmp_path):
+    kr = _verification_keyring(tmp_path, keys={"sig-v1": {"public": "not-valid-base64"}})
+    with pytest.raises(backup_crypto.BackupKeyUnreadable, match="no valid public keys"):
+        backup_crypto.load_verification_keyring(str(kr))
+
+
+def test_sign_verify_manifest_round_trip():
+    private_key = Ed25519PrivateKey.generate()
+    public_key = private_key.public_key()
+
+    manifest = {
+        "version": "1.0",
+        "algorithm": "AES-256-GCM",
+        "encrypted": True,
+        "created_at": "2026-11-27T00:00:00Z",
+        "members": {"data/test.txt": {"encrypted": True, "nonce": "00" * 12, "tag": "00" * 16, "size": 100}},
+        "key_id": "v1",
+        "hmac": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+    }
+
+    signature = backup_crypto.sign_manifest(manifest, private_key)
+    assert len(signature) == 64  # Ed25519 signature is 64 bytes
+
+    assert backup_crypto.verify_manifest_signature(manifest, public_key, signature) is True
+
+    # Tampered manifest should fail
+    tampered = dict(manifest)
+    tampered["members"]["data/test.txt"]["size"] = 999
+    assert backup_crypto.verify_manifest_signature(tampered, public_key, signature) is False
+
+    # Wrong key should fail
+    other_key = Ed25519PrivateKey.generate().public_key()
+    assert backup_crypto.verify_manifest_signature(manifest, other_key, signature) is False
+
+
+def test_backup_signing_and_verification_round_trip(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(backup_crypto.KEYRING_ENV, str(_keyring(tmp_path)))
+    monkeypatch.delenv(backup_crypto.EXCEPTION_ENV, raising=False)
+
+    signing_kr = _signing_keyring(tmp_path / "signing")
+    verify_kr = _verification_keyring(tmp_path / "verify", keys={
+        "sig-v1": {"public": json.loads(signing_kr.read_text())["keys"]["sig-v1"]["public"]}
+    })
+
+    monkeypatch.setenv(backup_crypto.SIGNING_KEYRING_ENV, str(signing_kr))
+    monkeypatch.setenv(backup_crypto.VERIFICATION_KEYRING_ENV, str(verify_kr))
+    monkeypatch.setenv(backup_crypto.REQUIRE_SIGNATURE_ENV, "true")
+
+    _data_dir(tmp_path)
+    service = BackupService(backup_dir=str(tmp_path / "backups"))
+    backup = service.create_full_backup()
+
+    # Verify manifest has signature
+    with zipfile.ZipFile(backup["path"]) as zf:
+        manifest = json.loads(zf.read("manifest.json"))
+        assert "signature" in manifest
+        assert "signing_key_id" in manifest
+        assert manifest["signing_key_id"] == "sig-v1"
+
+    # Restore should succeed
+    import shutil
+    shutil.rmtree(tmp_path / "data")
+    (tmp_path / "data").mkdir()
+    result = service.restore_backup(backup["filename"], offline=True)
+    assert result["data_restored"] is True
+    assert result["encrypted"] is True
+
+
+def test_backup_tampered_signature_fails_restore(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(backup_crypto.KEYRING_ENV, str(_keyring(tmp_path)))
+    monkeypatch.delenv(backup_crypto.EXCEPTION_ENV, raising=False)
+
+    signing_kr = _signing_keyring(tmp_path / "signing")
+    verify_kr = _verification_keyring(tmp_path / "verify", keys={
+        "sig-v1": {"public": json.loads(signing_kr.read_text())["keys"]["sig-v1"]["public"]}
+    })
+
+    monkeypatch.setenv(backup_crypto.SIGNING_KEYRING_ENV, str(signing_kr))
+    monkeypatch.setenv(backup_crypto.VERIFICATION_KEYRING_ENV, str(verify_kr))
+    monkeypatch.setenv(backup_crypto.REQUIRE_SIGNATURE_ENV, "true")
+
+    _data_dir(tmp_path)
+    service = BackupService(backup_dir=str(tmp_path / "backups"))
+    backup = service.create_full_backup()
+
+    # Tamper with signature
+    archive_path = Path(backup["path"])
+    with zipfile.ZipFile(archive_path, "r") as zf:
+        members = {n: zf.read(n) for n in zf.namelist()}
+    manifest = json.loads(members["manifest.json"])
+    manifest["signature"] = base64.b64encode(b"tampered").decode("ascii")
+    members["manifest.json"] = json.dumps(manifest, indent=2).encode()
+    with zipfile.ZipFile(archive_path, "w") as zf:
+        for name, data in members.items():
+            zf.writestr(name, data)
+
+    import shutil
+    shutil.rmtree(tmp_path / "data")
+    (tmp_path / "data").mkdir()
+    with pytest.raises(RuntimeError, match="signature verification failed|tampered"):
+        service.restore_backup(backup["filename"], offline=True)
+
+
+def test_backup_require_signature_without_verification_keyring_fails(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(backup_crypto.KEYRING_ENV, str(_keyring(tmp_path)))
+    monkeypatch.delenv(backup_crypto.EXCEPTION_ENV, raising=False)
+
+    signing_kr = _signing_keyring(tmp_path / "signing")
+    monkeypatch.setenv(backup_crypto.SIGNING_KEYRING_ENV, str(signing_kr))
+    # NO verification keyring
+    monkeypatch.setenv(backup_crypto.REQUIRE_SIGNATURE_ENV, "true")
+
+    _data_dir(tmp_path)
+    service = BackupService(backup_dir=str(tmp_path / "backups"))
+    backup = service.create_full_backup()
+
+    import shutil
+    shutil.rmtree(tmp_path / "data")
+    (tmp_path / "data").mkdir()
+    with pytest.raises(RuntimeError, match="verification keyring"):
+        service.restore_backup(backup["filename"], offline=True)
+
+
+def test_backup_unsigned_when_required_fails(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(backup_crypto.KEYRING_ENV, str(_keyring(tmp_path)))
+    monkeypatch.delenv(backup_crypto.EXCEPTION_ENV, raising=False)
+
+    verify_kr = _verification_keyring(tmp_path / "verify")
+    monkeypatch.setenv(backup_crypto.VERIFICATION_KEYRING_ENV, str(verify_kr))
+    monkeypatch.setenv(backup_crypto.REQUIRE_SIGNATURE_ENV, "true")
+
+    _data_dir(tmp_path)
+    service = BackupService(backup_dir=str(tmp_path / "backups"))
+    backup = service.create_full_backup()
+
+    import shutil
+    shutil.rmtree(tmp_path / "data")
+    (tmp_path / "data").mkdir()
+    with pytest.raises(RuntimeError, match="missing signature"):
+        service.restore_backup(backup["filename"], offline=True)
+
+
+def test_backup_legacy_unsigned_restores_when_not_required(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(backup_crypto.KEYRING_ENV, str(_keyring(tmp_path)))
+    monkeypatch.delenv(backup_crypto.EXCEPTION_ENV, raising=False)
+
+    verify_kr = _verification_keyring(tmp_path / "verify")
+    monkeypatch.setenv(backup_crypto.VERIFICATION_KEYRING_ENV, str(verify_kr))
+    monkeypatch.setenv(backup_crypto.REQUIRE_SIGNATURE_ENV, "false")
+
+    _data_dir(tmp_path)
+    service = BackupService(backup_dir=str(tmp_path / "backups"))
+    backup = service.create_full_backup()
+
+    import shutil
+    shutil.rmtree(tmp_path / "data")
+    (tmp_path / "data").mkdir()
+    result = service.restore_backup(backup["filename"], offline=True)
+    assert result["data_restored"] is True
+    assert result["encrypted"] is True
+
+
+def test_backup_signed_optional_verification_succeeds(tmp_path, monkeypatch):
+    """Signed backup restores successfully when verification keyring provided but not required."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(backup_crypto.KEYRING_ENV, str(_keyring(tmp_path)))
+    monkeypatch.delenv(backup_crypto.EXCEPTION_ENV, raising=False)
+
+    signing_kr = _signing_keyring(tmp_path / "signing")
+    verify_kr = _verification_keyring(tmp_path / "verify", keys={
+        "sig-v1": {"public": json.loads(signing_kr.read_text())["keys"]["sig-v1"]["public"]}
+    })
+
+    monkeypatch.setenv(backup_crypto.SIGNING_KEYRING_ENV, str(signing_kr))
+    monkeypatch.setenv(backup_crypto.VERIFICATION_KEYRING_ENV, str(verify_kr))
+    # REQUIRE_SIGNATURE not set (defaults to false)
+
+    _data_dir(tmp_path)
+    service = BackupService(backup_dir=str(tmp_path / "backups"))
+    backup = service.create_full_backup()
+
+    import shutil
+    shutil.rmtree(tmp_path / "data")
+    (tmp_path / "data").mkdir()
+    result = service.restore_backup(backup["filename"], offline=True)
+    assert result["data_restored"] is True
+    assert result["encrypted"] is True
+
+
+def test_list_backups_reports_signature_info(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(backup_crypto.KEYRING_ENV, str(_keyring(tmp_path)))
+    monkeypatch.delenv(backup_crypto.EXCEPTION_ENV, raising=False)
+
+    signing_kr = _signing_keyring(tmp_path / "signing")
+    monkeypatch.setenv(backup_crypto.SIGNING_KEYRING_ENV, str(signing_kr))
+
+    _data_dir(tmp_path)
+    service = BackupService(backup_dir=str(tmp_path / "backups"))
+    backup = service.create_full_backup()
+
+    rows = service.list_backups()
+    assert len(rows) == 1
+    assert rows[0]["signature_present"] is True
+    assert rows[0]["hmac_present"] is True
+    assert rows[0]["signing_key_id"] == "sig-v1"

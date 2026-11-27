@@ -60,8 +60,9 @@ def test_production_rejects_empty_short_and_example_keys(production_environment,
 def test_production_accepts_effective_dotenv_secrets(production_environment, tmp_path):
     env = tmp_path / ".env"
     env.write_text("DEBUG=false\nDATABASE_URL=sqlite://\nSECRET_KEY=" + "a" * 64
-                   + "\nENCRYPTION_KEY=" + "b" * 64 + "\n")
-    validate_production_settings(Settings(_env_file=env))
+                   + "\nENCRYPTION_KEY=" + "b" * 64 + "\nSYSPASS_PASSWORD_SALT=salt-value\n"
+                   + "SERVICE_VAULT_KEY=" + "c" * 64 + "\n")
+    validate_production_settings(Settings(_env_file=str(env)))
 
 
 def test_production_rejects_missing_database_and_wildcard_proxy(production_environment):

@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from app.core.config import settings, validate_production_settings
+from app.core.runtime_json_config import load_runtime_json_config
 from app.db.bootstrap import bootstrap_database_on_startup
 from app.db import base as db_base
 from app.db.base import SchemaMutationError
@@ -11,7 +12,7 @@ from app.api.v1 import (
     accounts, auth, categories, clients, users, two_factor, tags, history,
     files, public_links, notifications, user_groups, user_profiles, security,
     config_settings, custom_fields, account_sharing, import_export, auth_tokens,
-    security_logs, password_reset, ldap, item_presets, backup, plugins,
+    security_logs, password_reset, ldap, item_presets, backup, plugins, audit,
 )
 from app.services.readiness_service import run_readiness_checks
 from app.services.runtime_policy import get_policy
@@ -92,6 +93,18 @@ def _get_user_from_request(request: Request):
 async def lifespan(application: FastAPI):
     validate_production_settings(settings)
     bootstrap_database_on_startup()
+    # IMPL-036: Generate salt on fresh install bootstrap; adopted installs
+    # must already have SYSPASS_PASSWORD_SALT set (validated above).
+    if not _is_adopted_install(settings):
+        from app.core.syspass_runtime_config import save_runtime_json_config, load_runtime_json_config
+        import secrets
+        runtime = load_runtime_json_config()
+        runtime.setdefault("compatibility", {})
+        runtime["compatibility"]["passwordSalt"] = secrets.token_hex(32)
+        save_runtime_json_config(runtime)
+        logger.warning(
+            "Fresh pySysPass install: generated and persisted passwordSalt to runtime JSON."
+        )
     # No jobs are registered by default: backups and expiry notices are not
     # automated (docs/installation.md). Do not run an empty scheduler thread.
     if task_service.tasks:
@@ -212,6 +225,7 @@ app.include_router(account_sharing.router, prefix="/api/v1", tags=["Account Shar
 app.include_router(import_export.router, prefix="/api/v1", tags=["Import/Export"])
 app.include_router(auth_tokens.router, prefix="/api/v1", tags=["API Authorizations"])
 app.include_router(security_logs.router, prefix="/api/v1", tags=["Security & Audit"])
+app.include_router(audit.router, prefix="/api/v1", tags=["Audit Logging"])
 app.include_router(password_reset.router, prefix="/api/v1/auth", tags=["Password Reset"])
 app.include_router(ldap.router, prefix="/api/v1", tags=["LDAP"])
 app.include_router(item_presets.router, prefix="/api/v1", tags=["Item Presets"])
@@ -240,6 +254,24 @@ async def health():
 async def readiness():
     """Readiness: configuration, database, canonical schema, and storage."""
     result = await run_readiness_checks(db_base.engine)
+    # Expose get_password_salt() provenance for IMPL-036 / ADR-0017 V-02
+    from app.core.syspass_runtime_config import load_syspass_runtime_config
+    runtime = load_syspass_runtime_config()
+    salt = runtime.get("passwordSalt") or settings.SYSPASS_PASSWORD_SALT or ""
+    # Determine provenance following the same priority: JSON -> XML -> cache -> env
+    provenance = "none"
+    if salt:
+        # Check runtime JSON compatibility first
+        try:
+            rj = load_runtime_json_config()
+            if rj.get("compatibility", {}).get("passwordSalt") == salt:
+                provenance = "runtime-config.json"
+            else:
+                provenance = "config.xml"
+        except Exception:
+            provenance = "config.xml"
+    salt_info = {"salt": salt, "provenance": provenance} if salt or salt == "" else {"salt": "", "provenance": "none"}
+    result["salt_provenance"] = salt_info
     return JSONResponse(
         status_code=200 if result["ready"] else 503,
         content={"status": "ready" if result["ready"] else "not_ready", "checks": result["checks"]},

@@ -26,9 +26,15 @@ def _make_client(db_session):
     return app, TestClient(app)
 
 
-def _make_user(db_session, username: str, password: str) -> User:
+def _make_user(db_session, username: str, password: str, user_id: int = None) -> User:
+    if user_id is None:
+        # Use max existing ID + 1 to avoid conflicts
+        from sqlalchemy import func
+        from app.models.account import User as UserModel
+        max_id = db_session.query(func.max(UserModel.id)).scalar() or 0
+        user_id = max_id + 1
     user = User(
-        id=1,
+        id=user_id,
         name=username,
         username=username,
         email=f"{username}@example.com",
@@ -233,3 +239,77 @@ def test_login_rejects_disabled_ldap_user_via_db_fallback(db_session):
         "/api/v1/auth/login", data={"username": "alice", "password": "pass1234"},
     )
     assert response.status_code == 401
+
+
+def test_login_ldap_failure_no_local_fallback(db_session, monkeypatch, tmp_path):
+    """LDAP-bound user (isLdap=True) must not fall back to local auth on LDAP failure.
+
+    Per ADR-0004: "No provider fallback: LDAP failure → reject, no local auth attempt".
+    """
+    import app.services.ldap_service as ldap_module
+    from app.core import runtime_json_config
+
+    # Create an LDAP-bound user with a known local password
+    user = _make_user(db_session, "ldapuser", "localpass")
+    store_user_master_pass(user, "localpass", "vault-master")
+    user.isLdap = True
+    db_session.add(Config(parameter="masterPwd", value=get_password_hash("vault-master")))
+    db_session.commit()
+
+    # Enable LDAP in runtime config
+    runtime_path = tmp_path / "runtime-config.json"
+    monkeypatch.setattr(
+        runtime_json_config.settings,
+        "SYSPASS_RUNTIME_CONFIG_JSON_PATH",
+        str(runtime_path),
+    )
+    runtime_json_config.set_runtime_config_value("ldap_enabled", "true")
+    runtime_json_config.set_runtime_config_value("ldap_server", "ldap://ldap.example:389")
+    runtime_json_config.set_runtime_config_value("ldap_base", "dc=example,dc=com")
+    runtime_json_config.set_runtime_config_value("ldap_defaultgroup", "1")
+
+    # Mock LDAP to always fail authentication (wrong password simulation)
+    class FailingLdapService:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def connect(self):
+            return True
+
+        def disconnect(self):
+            pass
+
+        def authenticate(self, username, password):
+            return None  # Always fail
+
+        def get_user_info(self, username):
+            return None
+
+        def user_in_group(self, username, user_dn, group):
+            return False
+
+    monkeypatch.setattr(ldap_module, "LdapService", FailingLdapService)
+    monkeypatch.setattr(ldap_module, "_LDAP_AVAILABLE", True)
+
+    app, client = _make_client(db_session)
+
+    # Attempt login with the CORRECT local password — must fail because
+    # LDAP is enabled, user is LDAP-bound, and LDAP auth fails.
+    response = client.post(
+        "/api/v1/auth/login", data={"username": "ldapuser", "password": "localpass"},
+    )
+    assert response.status_code == 401, (
+        f"Expected 401 (no fallback), got {response.status_code}: {response.json()}"
+    )
+
+    # Also verify that a non-LDAP user CAN still use local auth
+    local_user = _make_user(db_session, "localuser", "localpass")
+    store_user_master_pass(local_user, "localpass", "vault-master")
+    local_user.isLdap = False
+    db_session.commit()
+
+    response = client.post(
+        "/api/v1/auth/login", data={"username": "localuser", "password": "localpass"},
+    )
+    assert response.status_code == 200, "Local user should still authenticate via database"
+    assert "access_token" in response.json()

@@ -3,12 +3,14 @@ from fastapi.security import HTTPBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 import secrets
 import time
+from datetime import UTC, datetime
 from app.db.base import get_db
 from app.api.deps import enforce_maintenance, get_current_user, reject_during_maintenance
 from app.schemas.install import InstallRequest, InstallResponse, InstallStatusResponse
 from app.schemas.user import UserCreate, UserResponse, Token
 from app.services.auth_service import (
     get_password_hash, hash_master_key, verify_password, issue_session_token,
+    issue_emergency_session_token,
     decrypt_user_master_pass, get_master_password_hash_row,
     finalize_user_master_pass, migrate_user_master_pass,
     verify_master_password_hash, store_user_master_pass,
@@ -19,7 +21,14 @@ from app.services.user_service import UserService
 from app.services.security_log_service import TrackService, EventLogService
 from app.services.ldap_service import authenticate_ldap_login
 from app.services.two_factor_service import TwoFactorConfig, TwoFactorService, TwoFactorStore
-from app.models.account import Config, User, UserGroup
+from app.services.emergency_auth import (
+    is_active as emergency_is_active,
+    verify_recovery_token,
+    log_emergency_event,
+    emergency_session_fingerprint,
+    EMERGENCY_SESSION_SECONDS,
+)
+from app.models.account import Config, User, UserGroup, EmergencyCredentials
 from app.core.security import get_encryption_service
 from app.core.rsa_service import maybe_decrypt
 from app.services.temporary_master_password_service import TemporaryMasterPasswordService
@@ -160,21 +169,51 @@ def login(
 
     user = db.query(User).filter(User.username == form_data.username).first()
     plain_password = _decode_secret(form_data.password, "password")
+    if not plain_password:
+        track.record_attempt(ip, source="login", user_id=user.id if user else None)
+        locked = track.maybe_lock(ip)
+        elog.log_event(
+            "auth.login.fail",
+            f"Failed login for '{form_data.username}' from {ip} (empty password)" + (" — IP now locked" if locked else ""),
+            user_id=user.id if user else None,
+            login=form_data.username,
+            ip=ip,
+            level="WARN",
+        )
+        raise HTTPException(status_code=401, detail="Incorrect username or password")
     # PHP AuthProvider tries LDAP before database auth when it is enabled;
     # on LDAP success the local row is provisioned/synced (isLdap).
     ldap_user = authenticate_ldap_login(db, form_data.username, plain_password)
     if ldap_user is not None:
         user = ldap_user
-    if ldap_user is None and (not user or not verify_password(plain_password, user.password)):
-        track.record_attempt(ip, source="login", user_id=user.id if user else None)
-        locked = track.maybe_lock(ip)
-        elog.log_event(
-            "auth.login.fail",
-            f"Failed login for '{form_data.username}' from {ip}" + (" — IP now locked" if locked else ""),
-            user_id=user.id if user else None,
-            login=form_data.username, ip=ip, level="WARN",
-        )
-        raise HTTPException(status_code=401, detail="Incorrect username or password")
+    # ADR-0004: No provider fallback — LDAP-bound users (isLdap=True) must
+    # fail when LDAP auth fails; they must not fall back to local database auth.
+    if ldap_user is None:
+        if user and user.isLdap:
+            # LDAP is enabled (or was tried), user is LDAP-bound, LDAP failed → reject
+            track.record_attempt(ip, source="login", user_id=user.id)
+            locked = track.maybe_lock(ip)
+            elog.log_event(
+                "auth.login.fail",
+                f"Failed LDAP login for '{form_data.username}' from {ip} (no local fallback)" + (" — IP now locked" if locked else ""),
+                user_id=user.id,
+                login=form_data.username,
+                ip=ip,
+                level="WARN",
+            )
+            raise HTTPException(status_code=401, detail="Incorrect username or password")
+        if not user or not verify_password(plain_password, user.password):
+            track.record_attempt(ip, source="login", user_id=user.id if user else None)
+            locked = track.maybe_lock(ip)
+            elog.log_event(
+                "auth.login.fail",
+                f"Failed login for '{form_data.username}' from {ip}" + (" — IP now locked" if locked else ""),
+                user_id=user.id if user else None,
+                login=form_data.username,
+                ip=ip,
+                level="WARN",
+            )
+            raise HTTPException(status_code=401, detail="Incorrect username or password")
 
     # PHP LoginService rejects disabled users after credential checks. This
     # also covers disabled LDAP users whose synced password hash would
@@ -189,6 +228,34 @@ def login(
     # Credentials are checked first so the response does not reveal whether
     # a non-admin account exists while maintenance is on.
     enforce_maintenance(db, user)
+
+    # ADR-0003: Check MFA enrollment status BEFORE vault unlock.
+    # We can check enrollment without master_pass (returns False for no row,
+    # True for any existing row). This allows us to challenge for MFA
+    # before deriving the master password.
+    mfa_mode = TwoFactorConfig(db).get_mode()
+    mfa_required = False
+    mfa_enrolled = False
+    if mfa_mode != "disabled":
+        tf_store_pre = TwoFactorStore(db, get_encryption_service(), master_pass=None)
+        mfa_enrolled = tf_store_pre.is_enabled(user.id)
+        if mfa_enrolled:
+            mfa_required = True
+        elif mfa_mode == "enforced":
+            # Enforced mode: all users must have 2FA enrolled.
+            # Challenge for enrollment (TWO_FACTOR_REQUIRED).
+            mfa_required = True
+
+    otp = (otp or "").strip()
+    if mfa_required and not otp:
+        # MFA challenge before any vault unlock.
+        raise HTTPException(
+            status_code=428,
+            detail={
+                "code": "TWO_FACTOR_REQUIRED",
+                "message": "Two-factor authentication code required",
+            },
+        )
 
     supplied_master_pass = _decode_secret(mpass or None, "master password")
     old_password = _decode_secret(oldpass or None, "previous password")
@@ -254,22 +321,13 @@ def login(
                 },
             )
 
-    # PHP Authenticator parity: when the global 2FA mode is not disabled,
-    # enrolled users must supply a TOTP (or recovery) code. As in PHP, this
-    # runs after the vault is unlocked (login.finish): the plugin's data is
-    # encrypted under the master password.
-    if TwoFactorConfig(db).get_mode() != "disabled":
+    # Verify MFA code if one was supplied (after vault unlock so we can decrypt the secret).
+    if mfa_required and otp:
         tf_store = TwoFactorStore(db, get_encryption_service(), master_pass=master_pass)
-        if tf_store.is_enabled(user.id):
-            otp = (otp or "").strip()
-            if not otp:
-                raise HTTPException(
-                    status_code=428,
-                    detail={
-                        "code": "TWO_FACTOR_REQUIRED",
-                        "message": "Two-factor authentication code required",
-                    },
-                )
+        # Re-check enrollment in case it changed; but we already know it's enrolled
+        # or enforced mode. For enforced mode without enrollment, we would have
+        # challenged above, so here we only verify if enrolled.
+        if mfa_enrolled:
             secret = tf_store.get_secret(user.id)
             valid = bool(secret) and TwoFactorService.verify_token(secret, otp)
             if not valid:
@@ -294,6 +352,26 @@ def login(
                         "message": "Invalid two-factor code",
                     },
                 )
+        else:
+            # Enforced mode but user not enrolled - they should have been
+            # challenged above. If they somehow got here with an OTP, reject.
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "code": "TWO_FACTOR_INVALID",
+                    "message": "Invalid two-factor code",
+                },
+            )
+
+    # ADR-0010: a password-authenticated login unlocks the service vault for
+    # that user's services. Fire-and-forget: never break the login path.
+    if master_pass is not None:
+        try:
+            from app.core.service_vault_key import master_key_provider
+
+            master_key_provider.note_login(db, user, plain_password)
+        except Exception:  # pragma: no cover - defensive
+            pass
 
     access_token = issue_session_token(
         user, master_pass=master_pass, timeout_seconds=resolve_session_timeout(db, user.id, ip),
@@ -307,6 +385,26 @@ def get_current_user_info(
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    # Handle emergency tokens
+    if current_user.get("is_emergency"):
+        cred = db.query(EmergencyCredentials).filter(EmergencyCredentials.id == current_user["id"]).first()
+        if not cred or not cred.enabled:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        return UserResponse(
+            id=cred.id,
+            username=cred.username,
+            email=None,
+            name=cred.username,
+            is_admin=False,
+            is_active=True,
+            is_ldap=False,
+            user_profile_id=None,
+            user_group_id=None,
+            two_factor_enabled=True,
+            created_at=cred.created_at,
+            permissions=None,
+        )
+
     user = db.query(User).filter(User.id == current_user["id"]).one()
 
     permissions = None
@@ -364,3 +462,220 @@ def refresh_session(request: Request, current_user: dict = Depends(get_current_u
     )
     session_store.revoke_token(session["jti"], session["exp"] or time.time() + MAX_SESSION_SECONDS)
     return {"access_token": token, "token_type": "bearer"}  # nosec B105
+
+
+@router.post("/emergency", response_model=Token)
+def emergency_login(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    mfa_code: str = Form(""),
+    recovery_token: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    """Emergency authentication endpoint (ADR-0014).
+
+    Authenticates break-glass administrators and designated recovery personnel
+    when emergency mode is explicitly activated. Requires:
+    - Emergency mode flag active (via CLI activation script)
+    - Valid emergency credentials (username/password)
+    - Mandatory MFA verification (TOTP)
+    - Optional recovery token for recovery personnel (does NOT bypass MFA)
+
+    Returns a short-lived session token (1 hour max).
+    """
+    ip = _client_ip(request)
+    track = TrackService(db)
+    elog = EventLogService(db)
+
+    # Check emergency mode is active
+    if not emergency_is_active():
+        elog.log_event(
+            "auth.emergency.login",
+            f"Emergency login attempt for '{username}' from {ip} rejected: mode not active",
+            user_id=0,
+            login=username,
+            ip=ip,
+            level="CRITICAL",
+        )
+        raise HTTPException(status_code=403, detail="Emergency authentication not enabled")
+
+    # Rate limiting
+    if track.is_locked(ip):
+        elog.log_event(
+            "auth.emergency.login",
+            f"Emergency login blocked for IP {ip} (brute-force lock)",
+            login=username,
+            ip=ip,
+            level="ERROR",
+        )
+        raise HTTPException(status_code=429, detail="Too many failed login attempts. Try again later.")
+
+    # Find emergency credential
+    cred = (
+        db.query(EmergencyCredentials)
+        .filter(
+            EmergencyCredentials.username == username,
+            EmergencyCredentials.enabled.is_(True),
+        )
+        .first()
+    )
+
+    if not cred:
+        track.record_attempt(ip, source="emergency_login", user_id=None)
+        locked = track.maybe_lock(ip)
+        elog.log_event(
+            "auth.emergency.login",
+            f"Failed emergency login for '{username}' from {ip} (account not found or disabled)"
+            + (" — IP now locked" if locked else ""),
+            user_id=0,
+            login=username,
+            ip=ip,
+            level="WARN",
+        )
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    # Verify password
+    plain_password = _decode_secret(password, "password")
+    if not plain_password:
+        track.record_attempt(ip, source="emergency_login", user_id=cred.id)
+        locked = track.maybe_lock(ip)
+        elog.log_event(
+            "auth.emergency.login",
+            f"Failed emergency login for '{username}' from {ip} (empty password)"
+            + (" — IP now locked" if locked else ""),
+            user_id=cred.id,
+            login=username,
+            ip=ip,
+            level="WARN",
+        )
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    stored_hash = cred.password_hash.decode() if isinstance(cred.password_hash, bytes) else cred.password_hash
+    if not verify_password(plain_password, stored_hash):
+        track.record_attempt(ip, source="emergency_login", user_id=cred.id)
+        locked = track.maybe_lock(ip)
+        elog.log_event(
+            "auth.emergency.login",
+            f"Failed emergency login for '{username}' from {ip} (wrong password)"
+            + (" — IP now locked" if locked else ""),
+            user_id=cred.id,
+            login=username,
+            ip=ip,
+            level="WARN",
+        )
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    # Verify MFA (mandatory for ALL emergency accounts)
+    mfa_code = (mfa_code or "").strip()
+    if not mfa_code:
+        track.record_attempt(ip, source="emergency_login", user_id=cred.id)
+        locked = track.maybe_lock(ip)
+        elog.log_event(
+            "auth.emergency.login",
+            f"Failed emergency login for '{username}' from {ip} (missing MFA code)"
+            + (" — IP now locked" if locked else ""),
+            user_id=cred.id,
+            login=username,
+            ip=ip,
+            level="WARN",
+        )
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    # Get MFA secret
+    if not cred.mfa_secret:
+        track.record_attempt(ip, source="emergency_login", user_id=cred.id)
+        locked = track.maybe_lock(ip)
+        elog.log_event(
+            "auth.emergency.login",
+            f"Failed emergency login for '{username}' from {ip} (no MFA secret configured)"
+            + (" — IP now locked" if locked else ""),
+            user_id=cred.id,
+            login=username,
+            ip=ip,
+            level="WARN",
+        )
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    mfa_secret = cred.mfa_secret.decode() if isinstance(cred.mfa_secret, bytes) else cred.mfa_secret
+    valid = TwoFactorService.verify_token(mfa_secret, mfa_code)
+    if not valid:
+        # Check backup codes
+        ok, remaining = TwoFactorService.verify_backup_code([], mfa_code)  # No backup codes for emergency
+        if not ok:
+            track.record_attempt(ip, source="emergency_login", user_id=cred.id)
+            locked = track.maybe_lock(ip)
+            elog.log_event(
+                "auth.emergency.login",
+                f"Failed emergency login for '{username}' from {ip} (invalid MFA code)"
+                + (" — IP now locked" if locked else ""),
+                user_id=cred.id,
+                login=username,
+                ip=ip,
+                level="WARN",
+            )
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "code": "MFA_INVALID",
+                    "message": "Invalid two-factor code",
+                },
+            )
+
+    # Verify recovery token if provided (for recovery personnel)
+    token_used = False
+    if recovery_token:
+        if not cred.is_recovery_account:
+            track.record_attempt(ip, source="emergency_login", user_id=cred.id)
+            locked = track.maybe_lock(ip)
+            elog.log_event(
+                "auth.emergency.login",
+                f"Failed emergency login for '{username}' from {ip} (recovery token not allowed for non-recovery account)"
+                + (" — IP now locked" if locked else ""),
+                user_id=cred.id,
+                login=username,
+                ip=ip,
+                level="WARN",
+            )
+            raise HTTPException(status_code=403, detail="Recovery token not valid for this account")
+
+        if not verify_recovery_token(username, recovery_token, db):
+            track.record_attempt(ip, source="emergency_login", user_id=cred.id)
+            locked = track.maybe_lock(ip)
+            elog.log_event(
+                "auth.emergency.login",
+                f"Failed emergency login for '{username}' from {ip} (invalid recovery token)"
+                + (" — IP now locked" if locked else ""),
+                user_id=cred.id,
+                login=username,
+                ip=ip,
+                level="WARN",
+            )
+            raise HTTPException(status_code=403, detail="Invalid recovery token")
+        token_used = True
+
+    # Update last_used_at
+    cred.last_used_at = datetime.now(UTC).replace(tzinfo=None)
+    db.commit()
+
+    # Log successful emergency login
+    log_emergency_event(
+        db,
+        "auth.emergency.login",
+        f"Emergency login for '{username}' from {ip}",
+        username=username,
+        ip=ip,
+        user_id=cred.id,
+        level="CRITICAL",
+        mfa_verified=True,
+        token_used=token_used,
+    )
+
+    # Issue short-lived emergency session token (1 hour max per ADR-0014)
+    # Emergency sessions have no master_pass (no vault access by default)
+    access_token = issue_emergency_session_token(
+        cred,  # type: ignore[arg-type]
+        timeout_seconds=EMERGENCY_SESSION_SECONDS,
+    )
+
+    return {"access_token": access_token, "token_type": "bearer"}  # nosec B105

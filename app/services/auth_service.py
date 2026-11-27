@@ -7,6 +7,7 @@ import bcrypt as bcrypt_lib
 from app.core.config import settings
 from app.core.syspass_runtime_config import get_password_salt
 from app.models.account import Config, User
+from app.services.emergency_auth import emergency_session_fingerprint
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -223,6 +224,7 @@ def issue_session_token(
     master_pass: Optional[str] = None,
     timeout_seconds: Optional[int] = None,
     auth_time: Optional[float] = None,
+    is_emergency: bool = False,
 ) -> str:
     """Mint a revocable, inactivity-limited session token (see session_service)."""
     from app.services.session_service import (
@@ -241,12 +243,47 @@ def issue_session_token(
         "jti": new_session_id(),
         "sfp": session_fingerprint(user),
     }
+    if is_emergency:
+        data["is_emergency"] = True
     return create_access_token(
         data,
         expires_delta=timedelta(seconds=lifetime),
         master_pass=master_pass,
         is_admin_app=bool(user.isAdminApp),
         is_admin_acc=bool(user.isAdminAcc),
+    )
+
+
+def issue_emergency_session_token(
+    cred,
+    *,
+    timeout_seconds: Optional[int] = None,
+    auth_time: Optional[float] = None,
+) -> str:
+    """Mint a revocable, inactivity-limited session token for emergency credentials."""
+    from app.services.session_service import (
+        DEFAULT_SESSION_TIMEOUT, MAX_SESSION_SECONDS, new_session_id,
+    )
+
+    now = time()
+    started = now if auth_time is None else float(auth_time)
+    lifetime = min(timeout_seconds or DEFAULT_SESSION_TIMEOUT, max(0.0, started + MAX_SESSION_SECONDS - now))
+    data = {
+        "user_id": cred.id,
+        "username": cred.username,
+        # Float timestamps keep tokens minted right after a revocation valid.
+        "iat": now,
+        "auth_time": started,
+        "jti": new_session_id(),
+        "sfp": emergency_session_fingerprint(cred),
+        "is_emergency": True,
+    }
+    return create_access_token(
+        data,
+        expires_delta=timedelta(seconds=lifetime),
+        master_pass=None,
+        is_admin_app=False,
+        is_admin_acc=False,
     )
 
 
@@ -257,4 +294,16 @@ def decode_token(token: str) -> Optional[dict]:
             payload["master_pass"] = _decrypt_short(payload["mpass"], payload.get("user_id"))
         return payload
     except jwt.PyJWTError:
-        return None
+        pass
+
+    # Try previous SECRET_KEY if available
+    if settings.SECRET_KEY_PREVIOUS is not None:
+        try:
+            payload = jwt.decode(token, settings.SECRET_KEY_PREVIOUS, algorithms=["HS256"])
+            if "mpass" in payload:
+                payload["master_pass"] = _decrypt_short(payload["mpass"], payload.get("user_id"))
+            return payload
+        except jwt.PyJWTError:
+            pass
+
+    return None

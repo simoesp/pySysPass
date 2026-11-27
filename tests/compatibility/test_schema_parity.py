@@ -34,7 +34,7 @@ def _orm_tables():
     return {
         name: table
         for name, table in Base.metadata.tables.items()
-        if name not in ORM_VIEWS
+        if name not in ORM_VIEWS and not table.info.get("is_php_extension")
     }
 
 

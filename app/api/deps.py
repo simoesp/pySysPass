@@ -9,7 +9,8 @@ from app.db.base import get_db
 from app.services.auth_service import decode_token
 from app.services.runtime_policy import get_policy
 from app.services.session_service import session_fingerprint, session_store
-from app.models.account import User
+from app.services.emergency_auth import is_active as emergency_is_active
+from app.models.account import User, EmergencyCredentials
 
 security = HTTPBearer()
 
@@ -132,11 +133,37 @@ def get_current_user(
 ) -> dict:
     payload = decode_token(credentials.credentials)
     if not payload:
-        # Not a JWT — try it as a sysPass API token (Authorization: Bearer <token>).
+        # Not a JWT — try it as a sysPass API token (Authorization: Bearer ***
         return _resolve_api_token(db, credentials.credentials, request)
     user_id = payload.get("user_id")
     if not isinstance(user_id, int) or isinstance(user_id, bool):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+
+    # Handle emergency tokens (issued for EmergencyCredentials, not User)
+    if payload.get("is_emergency"):
+        if not emergency_is_active():
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Emergency mode deactivated")
+        cred = db.query(EmergencyCredentials).filter(EmergencyCredentials.id == user_id).first()
+        if not cred or not cred.enabled:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+        # Emergency sessions end on deactivation (checked above) or explicit revocation
+        if session_store.is_revoked(payload):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired or revoked")
+        return {
+            "id": cred.id,
+            "username": cred.username,
+            "master_pass": None,
+            "is_admin": False,
+            "is_admin_app": False,
+            "is_admin_acc": False,
+            "is_emergency": True,
+            "session": {
+                "jti": payload["jti"],
+                "exp": payload.get("exp"),
+                "auth_time": payload.get("auth_time", payload.get("iat")),
+            },
+        }
+
     user = db.query(User).filter(User.id == user_id).first()
     if user is None or not user.isUserEnabled:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")

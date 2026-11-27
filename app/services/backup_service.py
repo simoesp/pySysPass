@@ -11,7 +11,11 @@ plaintext ``manifest.json`` records the key version and per-member nonces/tags.
 Restore decrypts transparently into the staging tree, so the path-traversal
 and symlink defenses validate authenticated plaintext. Pre-encryption archives
 (no manifest) remain restorable and are reported as ``encrypted=False``.
+
+IMPL-008: HMAC-SHA256 integrity verification over encrypted member ciphertexts.
+IMPL-009: Optional Ed25519 manifest signing for authenticity verification.
 """
+import base64
 import json
 import os
 import shutil
@@ -203,6 +207,10 @@ class BackupService:
         payload_files = sorted(
             path for path in staging.rglob("*") if path.is_file()
         )
+        
+        # Collect encrypted member ciphertexts for HMAC computation
+        encrypted_ciphertexts = []
+        
         with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
             for path in payload_files:
                 name = path.relative_to(staging).as_posix()
@@ -220,6 +228,30 @@ class BackupService:
                         "tag": tag.hex(),
                         "size": len(plaintext),
                     }
+                    encrypted_ciphertexts.append(ciphertext)
+            
+            # Compute HMAC-SHA256 over concatenated encrypted ciphertexts (IMPL-008)
+            if not exception and encrypted_ciphertexts:
+                hmac_key = key  # Use the current encryption key for HMAC
+                hmac_data = b"".join(encrypted_ciphertexts)
+                hmac_digest = backup_crypto.compute_hmac_sha256(hmac_data, hmac_key)
+                manifest["hmac"] = base64.b64encode(hmac_digest).decode("ascii")
+            
+            # Sign manifest with Ed25519 if signing keyring provided (IMPL-009)
+            signing_keyring = os.environ.get(backup_crypto.SIGNING_KEYRING_ENV)
+            if signing_keyring and not exception:
+                try:
+                    signing_key_id, private_key = backup_crypto.load_signing_keyring(signing_keyring)
+                    signature = backup_crypto.sign_manifest(manifest, private_key)
+                    manifest["signature"] = base64.b64encode(signature).decode("ascii")
+                    manifest["signing_key_id"] = signing_key_id
+                except Exception as exc:
+                    # Signing is optional; warn but don't fail backup creation
+                    import logging
+                    logging.getLogger(__name__).warning(
+                        "Backup manifest signing failed (backup will be created without signature): %s", exc
+                    )
+
             manifest["backup_size"] = archive_path.stat().st_size
             zf.writestr(backup_crypto.MANIFEST_NAME, json.dumps(manifest, indent=2))
 
@@ -241,6 +273,19 @@ class BackupService:
         plaintext archives).
         """
         target_dir = target_dir.resolve()
+        
+        # Verify archive integrity and authenticity before extraction (IMPL-008/009)
+        encryption_keyring = os.environ.get(backup_crypto.KEYRING_ENV)
+        verification_keyring = os.environ.get(backup_crypto.VERIFICATION_KEYRING_ENV)
+        require_signature = os.environ.get(backup_crypto.REQUIRE_SIGNATURE_ENV, "").strip().lower() in ("1", "true", "yes", "on")
+        
+        backup_crypto.verify_archive_before_extract(
+            archive_path,
+            encryption_keyring=encryption_keyring,
+            verification_keyring=verification_keyring,
+            require_signature=require_signature,
+        )
+        
         with zipfile.ZipFile(archive_path, "r") as archive:
             names = [n for n in archive.namelist() if n.strip("/") != backup_crypto.MANIFEST_NAME]
             manifest = self._read_manifest(archive_path) or {}
@@ -362,7 +407,7 @@ class BackupService:
                 continue
             stat = file.stat()
             contents = self._inspect_archive(file)
-            backups.append({
+            backup_info = {
                 'filename': file.name,
                 'path': str(file),
                 'size': stat.st_size,
@@ -370,7 +415,15 @@ class BackupService:
                 'db_included': contents["db_included"],
                 'data_included': contents["data_included"],
                 'encrypted': contents["encrypted"],
-            })
+            }
+            # Add HMAC and signature presence info (IMPL-008/009)
+            manifest = self._read_manifest(file)
+            if manifest:
+                backup_info['hmac_present'] = 'hmac' in manifest
+                backup_info['signature_present'] = 'signature' in manifest
+                if 'signing_key_id' in manifest:
+                    backup_info['signing_key_id'] = manifest['signing_key_id']
+            backups.append(backup_info)
 
         # Sort by creation time (newest first)
         backups.sort(key=lambda x: x['created_at'], reverse=True)

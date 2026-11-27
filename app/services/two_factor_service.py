@@ -1,3 +1,20 @@
+import base64
+
+import pyotp
+
+# Patch pyotp.TOTP to accept shorter secrets (for PHP Authenticator compatibility)
+# PHP Authenticator uses 16-char base32 secrets (80 bits), but pyotp 2.9.0+ requires 112 bits.
+class _LenientTOTP(pyotp.TOTP):
+    def byte_secret(self):
+        s = self.secret
+        missing_padding = len(s) % 8
+        if missing_padding != 0:
+            s += "=" * (8 - missing_padding)
+        return base64.b32decode(s, casefold=True)
+
+pyotp.TOTP = _LenientTOTP
+
+
 import json
 from pathlib import Path
 import time

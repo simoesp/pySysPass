@@ -855,6 +855,54 @@ class PluginData(Base):
 
 
 # ---------------------------------------------------------------------------
+# Emergency Authentication (ADR-0014)
+# ---------------------------------------------------------------------------
+
+class EmergencyCredentials(Base):
+    """Break-glass administrator and LDAP recovery accounts for disaster recovery.
+
+    Independent of LDAP and regular User table. Used only when emergency
+    authentication mode is explicitly activated via out-of-band CLI.
+    """
+    __tablename__ = 'emergency_credentials'
+    __table_args__ = (
+        UniqueConstraint('username', name='uk_emergency_credentials_01'),
+        Index('idx_emergency_credentials_01', 'username'),
+        Index('idx_emergency_credentials_02', 'enabled'),
+        Index('fk_emergency_credentials_created_by', 'created_by'),
+        {"info": {"is_php_extension": True}},
+    )
+
+    id                    = Column(mysql_integer(width=11, unsigned=True), primary_key=True, autoincrement=True)
+    username              = Column(String(50), nullable=False)
+    password_hash         = Column('password_hash', FlexibleBinary(500, mysql_type=mysql.VARBINARY(500)), nullable=False)
+    password_salt         = Column('password_salt', FlexibleBinary(255, mysql_type=mysql.VARBINARY(255)), nullable=False)
+    mfa_secret            = Column('mfa_secret', FlexibleBinary(2000, mysql_type=mysql.VARBINARY(2000)), nullable=True)
+    mfa_enabled           = Column(Boolean, default=True, server_default=text("1"), nullable=False)
+    enabled               = Column(Boolean, default=False, server_default=text("0"), nullable=False)
+    is_recovery_account   = Column(Boolean, default=False, server_default=text("0"), nullable=False)
+    created_at            = Column(DateTime, default=_utc_now_naive, nullable=False)
+    last_used_at          = Column(DateTime, nullable=True)
+    recovery_token        = Column('recovery_token', FlexibleBinary(64, mysql_type=mysql.VARBINARY(64)), nullable=True)
+    recovery_token_expires_at = Column(DateTime, nullable=True)
+    created_by            = Column(mysql_smallint(), ForeignKey('User.id', name='fk_emergency_credentials_created_by'), nullable=True)
+
+    # -- Relationships -------------------------------------------------------
+    creator = relationship('User', foreign_keys=[created_by])
+
+    # -- Python-only helpers -------------------------------------------------
+    @property
+    def is_active(self) -> bool:
+        """Check if this emergency credential is active for authentication."""
+        return self.enabled and (self.mfa_secret is not None)
+
+    @property
+    def is_recovery(self) -> bool:
+        """Check if this is a designated LDAP recovery personnel account."""
+        return self.is_recovery_account
+
+
+# ---------------------------------------------------------------------------
 # SQL views
 # ---------------------------------------------------------------------------
 
