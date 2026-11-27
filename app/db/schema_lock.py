@@ -77,6 +77,19 @@ def schema_mutation_lock(engine_obj: Engine, timeout: float | None = None) -> Ge
             try:
                 yield connection
             finally:
+                # The migration transaction (and the alembic_version stamp for
+                # the final revision) is emitted on this connection but is only
+                # committed when the caller's transaction context closes.  Commit
+                # here so the version stamp is durable *before* the lock is
+                # released; otherwise MySQL closes the connection and rolls the
+                # final stamp back, leaving alembic_version one revision short.
+                try:
+                    connection.commit()
+                except Exception:
+                    logger.exception(
+                        "Schema-mutation lock '%s': commit failed before release",
+                        SCHEMA_MUTATION_LOCK_NAME,
+                    )
                 try:
                     released = connection.execute(
                         text(f"SELECT RELEASE_LOCK(:name)"),

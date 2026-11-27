@@ -194,16 +194,28 @@ def execute_schema_statements(
     if owns_connection:
         connection = engine_obj.raw_connection()
     assert connection is not None
-    cursor = connection.cursor()
+    # `connection` is either a SQLAlchemy Connection (from schema_mutation_lock,
+    # which uses .exec_driver_sql) or a raw DB-API connection (from
+    # engine_obj.raw_connection(), which exposes .cursor()).
+    from sqlalchemy.engine import Connection as SAConnection
+    _is_sa = isinstance(connection, SAConnection)
     try:
-        for statement in statements:
-            cursor.execute(statement)
-        connection.commit()
+        if _is_sa:
+            for statement in statements:
+                connection.exec_driver_sql(statement)
+            connection.commit()
+        else:
+            cursor = connection.cursor()
+            try:
+                for statement in statements:
+                    cursor.execute(statement)
+                connection.commit()
+            finally:
+                cursor.close()
     except Exception:
         connection.rollback()
         raise
     finally:
-        cursor.close()
         if owns_connection:
             connection.close()
 
@@ -233,15 +245,26 @@ def bootstrap_database(engine_obj: Engine = engine) -> bool:
         return False
 
     logger.warning("Incomplete or virgin sysPass database detected; applying bootstrap schema.")
-    statements = [statement for statement in _load_schema_statements() if not _view_name(statement)]
-    statements.extend(_missing_view_statements(engine_obj))
 
     # The coordinated schema-mutation lock serializes bootstrap against Alembic
     # and against other bootstrappers; DDL runs on the lock-holding connection
-    # so ownership stays tied to the acquiring connection.  Statements are
-    # idempotent (IF NOT EXISTS / INSERT IGNORE / CREATE OR REPLACE), so a
-    # re-check after acquiring the lock is unnecessary.
+    # so ownership stays tied to the acquiring connection.  A double-checked
+    # re-check of database_requires_bootstrap() *inside* the lock is required:
+    # table DDL is idempotent (IF NOT EXISTS) but PHP view DDL is not, so a
+    # worker that lost the startup race must skip rather than re-create views
+    # a winner has already committed ("Table ... already exists").  Without the
+    # re-check the loser crashes instead of returning False.
     with schema_mutation_lock(engine_obj) as connection:
+        if not database_requires_bootstrap(engine_obj):
+            logger.info(
+                "Schema already bootstrapped by a concurrent worker; skipping."
+            )
+            return False
+        statements = [
+            statement for statement in _load_schema_statements()
+            if not _view_name(statement)
+        ]
+        statements.extend(_missing_view_statements(engine_obj))
         execute_schema_statements(statements, engine_obj=engine_obj, connection=connection)
     logger.warning("sysPass bootstrap schema applied successfully.")
     return True
