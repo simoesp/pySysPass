@@ -133,3 +133,8 @@ Thumbs.db
 e2e/node_modules/
 e2e/test-results/
 e2e/playwright-report/
+
+# Deployment key material (ADR-0010 §3 / ADR-0013): keyrings hold real keys,
+# never commit them from the working tree (IMPL-010 security ruling).
+config/service-vault-keyring.json
+config/backup-keyring.json

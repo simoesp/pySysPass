@@ -270,21 +270,22 @@ This register tracks all Architectural Decision Records for pySysPass.
 | LDAP fallback removal | ADR-0004 | Pending | Critical |
 | MFA before vault unlock | ADR-0003 | Pending | High |
 | Master password not identity fallback | ADR-0003 | Pending | High |
-| Redis session vs DB-backed session target architecture | ADR-0015 | Pending (decision needed) | **Critical** |
-| Redis mandatory vs optional for basic deployments | ADR-0015 | Pending (decision needed) | High |
-| Vault context: JWT-embedded (current) vs server-side (ADR-0009) | ADR-0015 | Pending (decision needed) | **Critical** |
-| MySQL 8.4 LTS vs 8.0 support | ADR-0015 | Pending (decision needed) | High |
-| UBI/OpenShift target: supported vs documented experimental | ADR-0015 | Pending (decision needed) | **Critical** |
-| Risk register approval | ADR-0015 | Pending (approval needed) | **Critical** |
-| Alembic lock name and timeout | ADR-0016 | Pending (decision needed) | Medium |
+| Redis session vs DB-backed session target architecture | ADR-0015 | **APPROVED 2026-11-27** — DB-backed authoritative, Redis optional-only (Decision 2) | Closed |
+| Redis mandatory vs optional for basic deployments | ADR-0015 | **APPROVED 2026-11-27** — optional; absence must not block multi-replica | Closed |
+| Vault context: JWT-embedded (current) vs server-side (ADR-0009) | ADR-0015 | **APPROVED 2026-11-27** — server-side target; JWT-embedded = migration debt (Decision 1) | Closed |
+| MySQL 8.4 LTS vs 8.0 support | ADR-0015 | Pending (T-DEP-12 disposition) | High |
+| UBI/OpenShift target: supported vs documented experimental | ADR-0015 | **APPROVED 2026-11-27** — official enterprise support targets; maturity states tracked (Decision 3) | Closed |
+| Risk register approval | ADR-0015 | Pending — consolidated matrix at `docs/security/risk-register.md`; per-risk dispositions required (Decision 5) | **Critical** |
+| Alembic lock name and timeout | ADR-0016 | **APPROVED W/ CORRECTION 2026-11-27** — 600 s acquisition timeout; single coordinated schema-mutation lock, independent locks rejected; Alembic 001 must not re-execute PHP schema as second authority (Decision 6) | Closed |
 | Migration privilege separation enforcement | ADR-0016 | Pending (decision needed) | Medium |
 | Raw `os.environ` secret policy (bring into Settings or exempt) | ADR-0017 | Pending (decision needed) | Medium |
-| `SYSPASS_PASSWORD_SALT` mandatory in production | ADR-0017 | Pending (decision needed) | **Critical** |
-| `SERVICE_VAULT_KEY` startup validation when service accounts enabled | ADR-0017 | Pending (decision needed) | High |
+| `SYSPASS_PASSWORD_SALT` mandatory in production | ADR-0017 | **CONDITIONALLY APPROVED 2026-11-27** — compatibility-aware validation; never substitute salt on adopted data; effective-salt ≠ env-var-only check (Decision 4; semantics table in ADR-0017) | Closed (impl: IMPL-019 re-scoped) |
+| `SERVICE_VAULT_KEY` startup validation when service accounts enabled | ADR-0017 | **PEND** — presented for approval (with keyring bootstrap decisions, see risk register T-CFG-05) | High |
+| Service-vault keyring bootstrap: rotation state on read-only mounted secret vs writable volume vs DB backend | ADR-0010/0017 | **PEND** — presented for approval (multi-replica + OpenShift interaction) | High |
 | Structured error contract (breaking change for /api/v1) | ADR-0018 | Deferred (post-readiness) | Medium |
-| Enable feature branch CI | ADR-0019 | Pending (IMPL-028) | **High** |
-| Alembic-on-populated-DB integration test before ADR-0016 verification | ADR-0019 | Pending (IMPL-028) | **High** |
-| Create unified ADR verification matrix | ADR-0019/0020 | Pending (IMPL-030) | **High** |
+| Enable feature branch CI | ADR-0019 | **AUTHORIZED 2026-11-27** — triggers widened; commit pending push observation | In progress (IMPL-028) |
+| Alembic-on-populated-DB integration test before ADR-0016 verification | ADR-0019 | **AUTHORIZED** — test written+executed locally 2026-11-27; commit lands with Phase-2 migration cluster | In progress (IMPL-028) |
+| Create unified ADR verification matrix | ADR-0019/0020 | **APPROVED & DELIVERED 2026-11-27** — `docs/tests/verification-matrix.md` | Closed |
 
 ## Dependencies
 

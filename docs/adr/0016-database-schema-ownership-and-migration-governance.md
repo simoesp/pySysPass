@@ -432,3 +432,50 @@ This section corrects ADR-0015's file-based session approval.
 | TEST-013 | Schema guard blocks runtime DDL test — **new** |
 | TEST-014 | Alembic idempotency after bootstrap test — **new** |
 | TEST-015 | PHP rollback compatibility test (drop extensions, PHP reads base) — **new** |
+---
+
+## Approved Decisions (Architecture Implementation Readiness Review, 2026-11-27)
+
+### Decision 6 — Migration Locking: APPROVED WITH CORRECTION
+
+A configurable **600-second default lock acquisition timeout** is approved.
+
+**Correction to the previously proposed design:** independent bootstrap and
+Alembic locks (`pysyspass_bootstrap` + `pysyspass_alembic`) are **not
+approved** as-is, because two independent lock identities permit bootstrap and
+Alembic to mutate shared schema **concurrently**. The contract is amended to a
+**single coordinated migration authority**:
+
+- Bootstrap and Alembic must participate in **compatible locking semantics** —
+  both acquire the same lock identity before any schema mutation.
+- Schema initialization and schema migration must never run concurrently
+  against the same database.
+- Lock identity must be scoped to the target database/schema.
+- Lock ownership must remain tied to the acquiring connection (MySQL
+  connection-scoped `GET_LOCK` satisfies this; release on the same
+  connection).
+- Lock acquisition failure must **abort safely** (no partial mutation, clear
+  error).
+- Lock release must occur reliably (context-managed release; `RELEASE_LOCK`
+  result checked and logged).
+- **Connection loss must be handled explicitly**: MySQL releases
+  connection-scoped locks on disconnect — the losing side must not assume its
+  mutation completed; recovery follows the interrupted-migration procedure.
+- **Lock acquisition timeout (600 s) is distinct from migration duration** —
+  a long migration holds the lock for its full duration; the timeout bounds
+  only the wait to acquire.
+- Interrupted migrations have documented recovery procedures — and MySQL DDL
+  is **not** assumed transactional.
+- **Alembic revision 001 must stop acting as an independent mutation authority
+  over the PHP-owned `dbstructure.sql`.** Baseline rule (finalized under
+  IMPL-015): when base tables already exist, Alembic **stamps** revision 001
+  rather than re-executing the PHP schema (the working tree already performs
+  `stamp_revision("001")` in this case — make it the governed rule, and
+  reconcile the standalone `alembic upgrade head` path against it).
+
+No two independent authorities may mutate the same shared schema.
+
+Kanban impact: IMPL-015 is **re-scoped** from "add independent
+`pysyspass_alembic` lock" to "single coordinated schema-mutation lock shared
+by bootstrap and Alembic"; TEST-011 gains a bootstrap-vs-Alembic
+mutual-exclusion scenario and a lock-timeout-vs-duration assertion.

@@ -278,6 +278,11 @@ This glossary defines all approved domain concepts from ADR-0001 through ADR-001
 | ADR-0013 | Backup, Disaster Recovery and Cryptographic Recoverability |
 | ADR-0014 | Emergency Authentication and Offline Recovery Access |
 | ADR-0015 | Deployment Architecture and Infrastructure Requirements |
+| ADR-0016 | Database Schema Ownership and Migration Governance |
+| ADR-0017 | Configuration and Secret Management |
+| ADR-0018 | API Surface, Versioning and Integration Contract Governance |
+| ADR-0019 | Testing Strategy and Verification Gates |
+| ADR-0020 | Documentation Governance and Architecture Traceability |
 
 ## Deployment Architecture
 
@@ -327,8 +332,23 @@ This glossary defines all approved domain concepts from ADR-0001 through ADR-001
 | **X-Request-ID** | Response header carrying a server-generated UUID for cross-system audit correlation. Target addition. Not yet implemented (V-05). | ADR-0018, ADR-0011 |
 | **ADR Lifecycle** | ADR status progression: Proposed → Active → Completed / Superseded / Deprecated. ADR cannot be Completed without test evidence. Superseded ADRs move to archive with a `Superseded by: ADR-NNNN` header. | ADR-0020 |
 | **Canonical Location** | The single authoritative file for a given document type. Any other copies are derived and must be kept in sync or marked as non-authoritative. | ADR-0020 |
-| **Verification Matrix** | `docs/tests/verification-matrix.md` (to be created): maps every ADR architectural claim to its test evidence and CI status. An ADR cannot be marked Completed while its claims appear as Gap in this matrix. | ADR-0019, ADR-0020 |
+| **Verification Matrix** | `docs/tests/verification-matrix.md` (created 2026-11-27): maps every ADR architectural claim through requirement → invariant → threat → implementation task → test scenario → executable test → verification result → release gate. An ADR cannot be marked Completed while its claims appear as Gap in this matrix. | ADR-0019, ADR-0020 |
 | **Atomic Update Rule** | When an ADR status changes, the ADR, REGISTER.md, Kanban DB, and verification matrix must be updated in the same commit. Partial updates create documentation drift. | ADR-0020 |
+
+## AIRR Governance (Architecture Implementation Readiness Review, 2026-11-27)
+
+| Term | Definition | Source |
+|------|------------|--------|
+| **Gate 1 — Architectural Readiness** | Determines whether implementation MAY START: architectural decisions established, blocking risks identified, dependencies documented, cards have acceptance criteria, verification requirements established, authorized scope defined. Does not require any implementation to be complete. | ADR-0015 |
+| **Gate 2 — Implementation Verification** | Determines whether implementation MAY BE CONSIDERED COMPLETE: behavioural changes implemented, migration/security/PHP-interoperability tests pass, feature-branch CI operational, deployment tests pass, threat mitigations verified. | ADR-0015 |
+| **Gate 3 — Release Readiness** | Determines whether the software MAY BE RELEASED: no unresolved release-blocking security defects, residual risks explicitly accepted, supported deployment targets verified, backup/restore and upgrade/rollback verified, documentation accurate, mandatory CI gates pass. | ADR-0015 |
+| **Platform Support Maturity State** | Four independent states for a deployment platform: **Targeted** (approved support goal), **Implemented** (artifacts exist), **Tested** (verification evidence exists), **Production-supported** (released and supported). A platform is never advanced by claim alone; UBI/OpenShift are currently Targeted only. | ADR-0015 (Decision 3) |
+| **Coordinated Schema-Mutation Lock** | A single lock identity, scoped to the target database/schema (working name `pysyspass_schema_mutation`), acquired by BOTH bootstrap and Alembic before any schema mutation, with configurable acquisition timeout (default 600 s), ownership tied to the acquiring connection, safe abort on acquisition failure, explicit handling of connection loss, and timeout distinguished from migration duration. Independent bootstrap/Alembic lock identities are NOT approved. | ADR-0016 (Decision 6) |
+| **Migration Authority** | The single coordinated mechanism (above) that owns all schema mutation; bootstrap and Alembic are its phases, not peers. Alembic revision 001 must not act as a second authority over PHP-owned `dbstructure.sql`. | ADR-0016 (Decision 6) |
+| **Implementation Debt (Vault Claim Migration)** | JWT-embedded encrypted master-password material (`mpass`) is the CURRENT implementation, not the approved architecture; the approved target is server-side vault contexts. Recorded as a migration requirement (Phase 4). | ADR-0009, ADR-0015 (Decision 1) |
+| **Effective Salt** | The password salt actually used for key derivation (`make_user_key`): resolved from the full discovery chain (runtime JSON → config.xml → PHP cache → environment), not solely the `SYSPASS_PASSWORD_SALT` environment variable. Compatibility validation applies to the effective salt. | ADR-0017 (Decision 4) |
+| **Risk Disposition** | The owner-authorized classification for each risk: Mitigate before production / Mitigate before feature release / Accept temporarily with compensating controls and expiration / Accept as explicit architectural limitation / Avoid by changing the architecture / Pending decision. No risk is accepted without an explicit entry in `docs/security/risk-register.md`. | ADR-0015 (Decision 5) |
+| **Defect-Documenting Test** | A test written to expose a known current defect; it is expected to FAIL initially and must be tracked as Failed, never skipped or weakened to obtain green. | AIRR foundation-work authorization |
 
 ## Deprecated Terms
 
@@ -342,3 +362,5 @@ This glossary defines all approved domain concepts from ADR-0001 through ADR-001
 | Local auth fallback | Violates fail-closed policy | Explicit break-glass accounts |
 | Implicit admin provisioning | Security hardening | Explicit admin assignment |
 | Master password as identity | Violates separation of concerns | Master password as crypto unlock only |
+| Independent `pysyspass_bootstrap` + `pysyspass_alembic` locks | Two lock identities permit concurrent mutation of shared schema (Decision 6, 2026-11-27) | Coordinated Schema-Mutation Lock |
+| Migration Lock (`pysyspass_alembic`, 600 s) | Superseded by coordinated-authority correction | Coordinated Schema-Mutation Lock |

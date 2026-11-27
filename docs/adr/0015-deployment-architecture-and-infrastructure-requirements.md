@@ -464,8 +464,105 @@ The following must be resolved before claiming HA support:
 
 ---
 
+## Approved Decisions (Architecture Implementation Readiness Review, 2026-11-27)
+
+The following decisions were resolved by the project owner on 2026-11-27 and are
+**closed** — they must not be reopened without materially new evidence.
+
+### Decision 1 — Vault Context Architecture: APPROVED
+
+Server-side vault contexts (ADR-0008/ADR-0009) are the **approved target
+architecture**. The current JWT-embedded encrypted master password (`mpass`
+claim) is **implementation debt**, not an alternative architecture.
+
+Target invariants:
+- Short-lived JWT access tokens.
+- No plaintext or encrypted master password material inside client-held JWTs.
+- Authoritative server-side session state.
+- Independently managed server-side vault contexts.
+- Immediate or explicitly bounded revocation.
+- Independent session and vault lifetimes.
+- Compatible with single-instance and distributed deployments.
+
+The JWT-embedded implementation is recorded as a **migration requirement**
+(Kanban: Phase 4 — session architecture and server-side vault contexts).
+
+### Decision 2 — Redis and Session Consistency: APPROVED
+
+Database-backed authoritative session state **must work without Redis**.
+Redis remains optional (cache/performance optimization only).
+
+| Tier | Session mechanism | Redis required |
+|------|-------------------|----------------|
+| Single-instance development | In-memory where appropriate | No |
+| Production self-hosted | Database-backed authoritative state | No |
+| Multi-worker | Shared authoritative state (DB) | No |
+| Multi-replica | Shared state with verified concurrency + revocation | No |
+| Optional optimization | Redis backend | Optional |
+
+Constraints attached to this approval:
+- Session metadata and sensitive cryptographic vault material have **distinct
+  security requirements** — DB-backed sessions do not by themselves solve
+  distributed vault context handling.
+- Any distributed vault storage must comply with ADR-0008/ADR-0009:
+  authenticated encryption, independent key management.
+- **No plaintext master passwords in the database.**
+- Session or vault backend failure must **fail securely** (deny, not degrade
+  to unencrypted or stale-context acceptance).
+
+### Decision 3 — RHEL UBI and OpenShift: APPROVED as official support targets
+
+Red Hat UBI and OpenShift are **official enterprise support targets**, not
+experimental directions. Support maturity is tracked in four distinct states:
+
+1. **Targeted** — architecturally committed (current status: YES)
+2. **Implemented** — UBI image and manifests exist (current status: NO)
+3. **Tested** — CI verifies restricted-SCC/SELinux/arbitrary-UID behavior
+   (current status: NO)
+4. **Production-supported** — released and documented as supported
+   (current status: NO)
+
+Verification scope (Kanban: Phase 7): UBI-based image, non-root execution,
+arbitrary runtime UID, standard restricted SCC compatibility, SELinux,
+read-only root filesystem, persistent volume permissions, mounted secrets,
+external DB connectivity, health probes, OpenShift Routes, graceful
+termination, Migration Jobs, upgrade/rollback, multi-replica.
+
+Custom SCCs, privileged init containers and fixed-UID exceptions are
+deployment workarounds, **not** the intended architecture. Existing Debian,
+Alpine and Distroless variants remain where justified.
+
+### Decision 5 — Risk Register: NO blanket acceptance
+
+T-DEP-01 through T-DEP-12 and other material risks are consolidated in
+`docs/security/risk-register.md` for per-risk disposition. No risk is
+accepted without explicit authorization. The approved server-trusted
+cryptographic architecture does not imply acceptance of every associated
+threat.
+
+### Gate model correction (replaces the former circular readiness gate)
+
+- **Gate 1 — Architectural Readiness** (may implementation start?): decisions
+  established, blocking risks identified, dependencies documented, cards have
+  acceptance criteria, verification requirements established, authorized scope
+  defined. → **PASSES on completion of this AIRR update** (residual: risk
+  register dispositions pending).
+- **Gate 2 — Implementation Verification** (is implementation complete?):
+  behavioural changes implemented, migration/security/PHP-interop/deployment
+  tests pass, feature-branch CI operational, threat mitigations verified.
+- **Gate 3 — Release Readiness** (may this release?): no unresolved
+  release-blocking security defects, residual risks explicitly accepted,
+  supported deployment targets verified, backup/restore and upgrade/rollback
+  verified, documentation reflects implemented behaviour, mandatory CI gates
+  pass.
+
+Gate 2 does **not** gate the tasks required to satisfy Gate 2.
+
+---
+
 ## References
 
+- `docs/security/risk-register.md` (T-DEP consolidated risk matrix)
 - `Dockerfile`, `frontend/Dockerfile`
 - `podman-compose.yml`, `podman-compose.external.yml`, `portainer-stack.yml`
 - `docs/installation.md`, `docs/backup-recovery.md`

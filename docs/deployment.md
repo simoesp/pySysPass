@@ -137,7 +137,7 @@ networks:
 
 ### Environment Variables
 
-| Variable | Required | Description |
+|| Variable | Required | Description |
 |----------|----------|-------------|
 | `DB_PASSWORD` | ✅ | Database password |
 | `MYSQL_ROOT_PASSWORD` | ✅ | MySQL root password |
@@ -151,6 +151,12 @@ networks:
 | `LDAP_BIND_DN` | If LDAP | LDAP bind DN |
 | `LDAP_BIND_PASSWORD` | If LDAP | LDAP bind password |
 | `CERT_EMAIL` | ✅ | Email for Let's Encrypt |
+
+**PYSYSPASS_ prefix mapping** (per ADR-0017 V-01):
+- The `.env.external.example` uses `PYSYSPASS_` prefix for environment variables
+- pydantic `Settings` uses bare names (e.g., `SECRET_KEY`, not `PYSYSPASS_SECRET_KEY`)
+- Docker Compose maps `${PYSYSPASS_...}` → bare names inside the container
+- For local `.env` development, use bare names directly (no `PYSYSPASS_` prefix)
 
 ### Starting the Application
 

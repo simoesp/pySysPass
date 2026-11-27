@@ -394,6 +394,55 @@ spec:
 - **Rotation with overlap**: Zero-downtime key rotation; grace periods prevent lockout
 - **Audit trail**: Every secret operation logged to `EventLog` with operator, timestamp, reason
 
+## Approved Decisions (Architecture Implementation Readiness Review, 2026-11-27)
+
+### Decision 4 — `SYSPASS_PASSWORD_SALT`: CONDITIONALLY APPROVED
+
+Production configuration must fail securely when required cryptographic
+compatibility parameters are missing or invalid — but validation must be
+**compatibility-aware**, not a blanket non-empty check.
+
+#### Verified salt semantics (investigated 2026-11-27)
+
+| Question | Verified finding | Evidence |
+|----------|------------------|----------|
+| Does the salt participate in password hashing, key derivation or credential decryption? | **Key derivation and credential decryption.** `make_user_key(login, user) = login_password + username + salt` (PHP `UserPassService::makeKeyForUser`) is the key that decrypts `User.mKey` → `User.mPass` → master password/vault unlock. Also feeds the import/export PBKDF2 key and the public-link hash. It is **not** used in the identity-password hash (`User.pass`). | `app/models/user.py:87-92`, `app/services/auth_service.py:112-116`, `app/services/import_export_service.py:673`, `app/services/public_link_service.py:54` |
+| Is it an original PHP configuration parameter? | **Yes.** `passwordSalt` exists in the PHP `Config` key/value table (`test_migrate_php_password_changes` adds `Config(parameter="passwordSalt", ...)`), the serialized PHP cache (`s:N:"passwordSalt";s:M:"..."`) and PHP `config.xml` (`<passwordSalt>`). | `tests/compatibility/test_bidirectional_interop.py:113`, `app/core/syspass_runtime_config.py:57-81` |
+| Can its expected value be established from existing installation configuration? | **Yes** — discovery chain (runtime JSON → config.xml → PHP cache → env) already implements this. `SYSPASS_PASSWORD_SALT` is only a **fallback layer** when no PHP config artifact is present. | `app/core/syspass_runtime_config.py:113-125` |
+| Do missing, empty and incorrect values have distinct effects? | **Yes.** (a) *Present-but-incorrect*: master-password decryption fails (`decrypt_user_master_pass` returns `None`) → all PHP-created vault unlocks fail; deterministic, recoverable by supplying the correct salt. (b) *Empty where PHP data expects a salt*: same failure mode as incorrect for vault unlock; **public links fail closed** (`read_public_link_snapshot` returns `None` without consuming a view; `write_public_link_vault` raises). (c) *Missing from env but present in PHP config*: no effect — discovery resolves it. | `app/services/auth_service.py:116-119`, `tests/compatibility/test_php_public_link_fixture.py:130-136`, `app/core/php_public_link.py:136,239` |
+| Is an empty salt valid for any supported installation? | **Possibly, for fresh pySysPass-created installs only** — Python-created users are wrapped with the same empty-salt key, so the system is internally consistent. PHP-created data in the fixture corpus always carries a non-empty salt. **Not yet demonstrated for any PHP-created dataset.** | `tests/fixtures/php_syspass_3211_crypto.json:4` |
+| Do fresh installations differ from adopted PHP databases? | **Yes.** Fresh installs control their own salt; adopted PHP databases **must** match the installation's salt or vault unlock breaks. | `docs/adr/0017` Context §2 |
+
+#### Approved validation policy (compatibility-aware)
+
+1. **Never silently generate or substitute a salt for an existing/adopted
+   installation.** (Working tree currently violates this for *fresh* installs
+   only: `salt = ... or secrets.token_hex(32)` — acceptable for fresh
+   installations, must never apply to adopted data.)
+2. **Missing required salt** (no PHP config source, no env value, adopted PHP
+   data present): **reject at startup**.
+3. **Incorrect salt**: detect at first vault unlock (deterministic decryption
+   failure); startup cannot verify salt correctness without user credentials —
+   readiness surface should expose salt-source provenance.
+4. **Explicit legacy empty salt**: permitted **only** where verified valid for
+   the installation format (fresh pySysPass-created data) and documented. Not
+   verified valid for any PHP-created format to date.
+5. **Fresh installations**: initialize with a generated salt per the approved
+   secure-configuration policy.
+6. Distinguish **effective salt** (`get_password_salt()` — PHP config or env)
+   from the **`SYSPASS_PASSWORD_SALT` env var** in all validation and error
+   messages. Validating only the env var is wrong when PHP config supplies the
+   salt.
+
+The working-tree validation (`if not config.SYSPASS_PASSWORD_SALT: error`) is
+classified as **preliminary**: it checks only the env var, not the effective
+salt, and does not distinguish adopted vs fresh installations. IMPL-019 and
+T-CFG-03 are updated accordingly. The issue is **not** classified as
+credential corruption or universal incompatibility — the failure mode is
+detectable, deterministic and recoverable.
+
+---
+
 ## References
 
 - `docs/adr/0002-bidirectional-database-interoperability-and-extension-isolation.md`: PHP config compatibility

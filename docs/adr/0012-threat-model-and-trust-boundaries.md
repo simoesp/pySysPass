@@ -193,6 +193,33 @@ This threat model documents the security threats, trust boundaries, and control 
 | T-TEST-02 | Migration path untested | Operator | Alembic upgrade path | Alembic never exercised on populated PHP database in CI | Incompatible migration discovers at deploy time, not CI | Alembic-on-populated-DB integration test (IMPL-028) | Medium | Low | Gap (V-02) |
 | T-IDI-08 | Service vault context | Compromised service | Server→DB | Service access | Context theft | Encrypted storage | Medium | Low | Key management |
 
+#### Deployment threats (T-DEP — ADR-0015; dispositions in `docs/security/risk-register.md`)
+
+| Threat | Asset | Actor | Boundary | Prerequisites | Impact | Existing Controls | Effectiveness | Residual Risk | Mitigation |
+|--------|-------|-------|----------|---------------|--------|-------------------|---------------|---------------|------------|
+| T-DEP-01 No shared authoritative session state across replicas | Sessions | Operator scale-out | Server↔Server | Multi-replica deploy | Revocation/session skew | File/in-process sessions | Gap | High | DB-backed sessions (Decision 2; IMPL-017) |
+| T-DEP-02 Vault material embedded in client-held JWT; bounded-only revocation | Vault contexts | External attacker | Server→Client | Captured JWT | Vault readable until expiry | Encrypted claim | Gap (migration debt) | High | Server-side vault contexts (Decision 1) |
+| T-DEP-03 Per-process auto-generated `SECRET_KEY`/`ENCRYPTION_KEY` | JWT signing/encryption | Misconfigured deploy | Config | Multi-worker without env keys | Cross-worker auth failures | Production validator requires keys | Partial | Medium | Fail-fast multi-worker + docs (IMPL-013) |
+| T-DEP-04 Single-host scheduler (file lock, local state) | Scheduled tasks | Operator | Server↔Server | Multi-replica | Duplicate/missed tasks | File advisory lock | Limitation | Medium | DB-coordinated claims (Phase 4+) |
+| T-DEP-05 Env-only secrets visible via inspect/proc | All secrets | Host observer | Process | Shared host | Secret exposure | Compose indirection | Gap | Medium | `secrets_dir` mounted secrets (IMPL-022) |
+| T-DEP-06 OpenShift restricted SCC / SELinux / arbitrary UID unverified | Platform support | Enterprise operator | Container↔Host | OpenShift deploy | Platform claim unverifiable | Non-root Dockerfile user | Gap | High | UBI image + SCC CI (Decision 3; Phase 7) |
+| T-DEP-07 `TRUSTED_PROXY_HOSTS=["*"]` permits XFF spoofing | Audit IP fidelity | External attacker | Client→Server | Proxied request | Spoofed source IPs in audit | Validation when configured | Gap | Low | Secure-by-default list (IMPL-013) |
+| T-DEP-08 Session/vault backend failure behaviour unverified | Sessions/vault | Infra failure | Server↔Backend | Backend down | Possible fail-open | None verified | Gap | High | Fail-secure contract + tests (Decision 2) |
+| T-DEP-09 No readiness gate on schema/migration version | Schema consistency | Rolling upgrade | Deploy | Version skew | Old replica vs new schema errors | Manual runbook | Gap | High | Readiness version gate (IMPL-016) |
+| T-DEP-10 Backup encryption key rotation unimplemented | Backup confidentiality | Long-lived operator | Backup storage | Key longevity | Extended key exposure | Offline restore verified | Gap | Medium | Rotation + rewrap (ADR-0013) |
+| T-DEP-11 Writable runtime config/cache paths vs read-only rootfs | Config storage | Hardened deploy | Container FS | Read-only rootfs | Startup/runtime failure | Volume mounts | Gap | Medium | Declared writable paths (Phase 7) |
+| T-DEP-12 MySQL 8.4 LTS absent from CI matrix | DB compatibility | Operator choice | Server↔DB | 8.4 deployment | Untested regressions | CI pins 8.0 | Gap | Medium | Add 8.4 CI job (IMPL-028 scope) |
+
+#### Migration threats (T-MIG — ADR-0016; Decision 6 coordinated authority)
+
+| Threat | Asset | Actor | Boundary | Prerequisites | Impact | Existing Controls | Effectiveness | Residual Risk | Mitigation |
+|--------|-------|-------|----------|---------------|--------|-------------------|---------------|---------------|------------|
+| T-MIG-01 Concurrent bootstrap/Alembic schema mutation | Schema | Replica race/operator | Server↔DB | Independent authorities | Schema corruption | Bootstrap `GET_LOCK` only | Gap | High | Single coordinated schema-mutation lock, 600 s acquisition timeout (IMPL-015 re-scoped) |
+| T-MIG-02 Silent schema mutation at startup | Schema | First-boot surprise | App↔DB | `AUTO_INIT_DB_ON_STARTUP=true` | Unnoticed runtime DDL | Idempotent bootstrap | Gap | Medium | Validate-not-modify + privilege split (IMPL-016/014) |
+| T-MIG-03 App starts against incomplete extension schema | Availability | Deploy gap | Deploy | `alembic upgrade` skipped | 500s at first use | None | Gap | Medium | Readiness version gate (IMPL-016) |
+| T-MIG-04 `dbstructure.sql` lags PHP increments | Schema parity | Manual PHP upgrade | PHP↔SQL files | Applied `.sql` not merged | Drift on adoption | Parity tests vs canonical file | Partial | High | Parity + runbook gate (TEST-015 area) |
+| T-MIG-05 Downgrade drops extension data unbacked | Extension data | Operator | Alembic downgrade | No backup gate | Unrecoverable loss | Runbook only | Gap | Medium | Pre-downgrade backup verification gate (ADR-0013) |
+
 #### STRIDE: E - Elevation of Privilege
 
 || Threat | Asset | Actor | Boundary | Prerequisites | Impact | Existing Controls | Effectiveness | Residual Risk | Mitigation |
