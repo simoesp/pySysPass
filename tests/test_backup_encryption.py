@@ -60,25 +60,25 @@ def test_keyring_historical_key_available(tmp_path):
 
 def test_keyring_invalid_hex_rejected(tmp_path):
     kr = _keyring(tmp_path, keys={"v1": "zz" * 32})
-    with pytest.raises(backup_crypto.BackupKeyUnreadable, match="not valid hex"):
+    with pytest.raises(backup_crypto.BackupKeyUnreadableError, match="not valid hex"):
         backup_crypto.current_key(str(kr))
 
 
 def test_keyring_short_key_rejected(tmp_path):
     kr = _keyring(tmp_path, keys={"v1": "abcd"})
-    with pytest.raises(backup_crypto.BackupKeyUnreadable, match="32 bytes"):
+    with pytest.raises(backup_crypto.BackupKeyUnreadableError, match="32 bytes"):
         backup_crypto.current_key(str(kr))
 
 
 def test_keyring_world_readable_refused(tmp_path):
     kr = _keyring(tmp_path, mode=0o644)
-    with pytest.raises(backup_crypto.BackupKeyUnreadable, match="0400"):
+    with pytest.raises(backup_crypto.BackupKeyUnreadableError, match="0400"):
         backup_crypto.current_key(str(kr))
 
 
 def test_keyring_missing_current_id_rejected(tmp_path):
     kr = _keyring(tmp_path, current="v9", keys={"v1": KEY_HEX_A})
-    with pytest.raises(backup_crypto.BackupKeyUnreadable, match="current"):
+    with pytest.raises(backup_crypto.BackupKeyUnreadableError, match="current"):
         backup_crypto.current_key(str(kr))
 
 
@@ -91,7 +91,7 @@ def test_keyring_historical_key_required_for_old_backup(tmp_path):
 
 def test_keyring_historical_key_retired_raises(tmp_path):
     kr = _keyring(tmp_path, keys={"v2": KEY_HEX_B})
-    with pytest.raises(backup_crypto.BackupKeyMissing, match="not in keyring"):
+    with pytest.raises(backup_crypto.BackupKeyMissingError, match="not in keyring"):
         backup_crypto.key_for_id("v1", str(kr))
 
 
@@ -100,7 +100,7 @@ def test_no_keyring_raises_backup_key_missing(tmp_path, monkeypatch):
     monkeypatch.setattr(
         backup_crypto, "DEFAULT_KEYRING_PATHS", (tmp_path / "absent.json",)
     )
-    with pytest.raises(backup_crypto.BackupKeyMissing):
+    with pytest.raises(backup_crypto.BackupKeyMissingError):
         backup_crypto.current_key()
 
 
@@ -116,7 +116,7 @@ def test_open_wrong_key_raises():
     key_a = bytes.fromhex(KEY_HEX_A)
     key_b = bytes.fromhex(KEY_HEX_B)
     ct, nonce, tag = backup_crypto.seal_bytes(b"secret", key_a)
-    with pytest.raises(backup_crypto.BackupDecryptionFailed, match="wrong key"):
+    with pytest.raises(backup_crypto.BackupDecryptionFailedError, match="wrong key"):
         backup_crypto.open_bytes(ct, nonce, tag, key_b)
 
 
@@ -124,7 +124,7 @@ def test_open_tampered_ciphertext_raises():
     key = bytes.fromhex(KEY_HEX_A)
     ct, nonce, tag = backup_crypto.seal_bytes(b"secret", key)
     tampered = bytes([ct[0] ^ 0xFF]) + ct[1:]
-    with pytest.raises(backup_crypto.BackupDecryptionFailed, match="tampered"):
+    with pytest.raises(backup_crypto.BackupDecryptionFailedError, match="tampered"):
         backup_crypto.open_bytes(tampered, nonce, tag, key)
 
 

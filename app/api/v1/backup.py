@@ -96,9 +96,9 @@ def create_backup(
         logger.exception("Backup creation failed")
         # Distinguish a missing/unreadable key (operational config error) from
         # other failures so callers get a clear signal to fix the deployment.
-        from app.core.backup_crypto import BackupKeyMissing, BackupKeyUnreadable
+        from app.core.backup_crypto import BackupKeyMissingError, BackupKeyUnreadableError
         cause = exc.__cause__ or exc
-        if isinstance(cause, (BackupKeyMissing, BackupKeyUnreadable)):
+        if isinstance(cause, (BackupKeyMissingError, BackupKeyUnreadableError)):
             raise HTTPException(
                 status_code=503,
                 detail=(
