@@ -15,19 +15,19 @@ jobs:
     name: Lint (ruff / PEP 8)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install ruff==0.15.5
+      - run: pip install ruff==0.16.1
       - run: ruff check app/ tests/ scripts/ init_db.py
 
   backend-tests:
     name: Backend tests (pytest)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
@@ -42,8 +42,8 @@ jobs:
     name: Frontend tests + build (vitest / vite)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version-file: frontend/.nvmrc
           cache: npm
@@ -70,10 +70,10 @@ jobs:
     name: Security scan (bandit / pip-audit / npm audit / gitleaks)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
       - run: pip install bandit pip-audit
@@ -110,8 +110,8 @@ jobs:
           --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
           --health-interval=5s --health-timeout=5s --health-retries=20
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
@@ -130,8 +130,8 @@ jobs:
     name: Browser acceptance tests (Playwright)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
@@ -150,7 +150,7 @@ jobs:
         working-directory: e2e
       - name: Upload traces
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: playwright-traces
           path: e2e/test-results/
@@ -163,8 +163,8 @@ jobs:
     name: sysPass PHP web UI reads pySysPass data
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
@@ -191,7 +191,7 @@ jobs:
           INTEROP_2FA: "1"
       - name: Upload traces
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: php-interop-traces
           path: e2e/test-results/
@@ -209,8 +209,8 @@ jobs:
       PLUGIN_2FA_REF: b3046617b51656999fe7e277a1ec4a4d7e374732
       PHP_IMAGE: docker.io/library/php:8.2-cli@sha256:2d72ff4b0cfe82e22f01f15223bc4ab4c825d318cb2e3275554cd32299a5ea50
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
@@ -257,8 +257,8 @@ jobs:
       SECRET_KEY: ci-secret
       ENCRYPTION_KEY: ci-encryption-key-32-bytes-long!!
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
