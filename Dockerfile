@@ -1,6 +1,6 @@
 # Base image pinned by digest (python:3.11-slim, multi-arch index) so a rebuild
 # cannot silently change the OS layer. Update the tag and digest together.
-FROM docker.io/library/python:3.11-slim@sha256:b7a9e5f6a93d6d4a31f129bbd4bdee69efccb6ded0fb230d78aafaf37af98377
+FROM docker.io/library/python:3.15-slim@sha256:63bb298d2b7b88f176f51b5189f54ce6535c997682ea70885d2132f5d473a8a5
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
