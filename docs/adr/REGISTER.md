@@ -22,7 +22,7 @@ This register tracks all Architectural Decision Records for pySysPass.
 | ADR-0014 | Emergency Authentication and Offline Recovery Access | **Proposed** | ❌ Not Implemented | ❌ Not Verified | T-EVP-08, T-PM-07, T-EAM-01, T-EAM-02, T-EAM-03 |
 | ADR-0015 | Deployment Architecture and Infrastructure Requirements | **Active** | ⚠️ Partially Implemented | ⚠️ Partially Verified | T-DEP-01 to T-DEP-12 |
 | ADR-0016 | Database Schema Ownership and Migration Governance | **Active** | ⚠️ Partially Implemented | ⚠️ Partially Verified | T-MIG-01 to T-MIG-05 |
-| ADR-0017 | Configuration and Secret Management | **Proposed** | ❌ Not Implemented | ❌ Not Verified | T-DEP-07, T-DEP-08, T-IDI-01, T-IDI-03, T-IDI-07 |
+| ADR-0017 | Configuration and Secret Management | **Active** | ⚠️ Partially Implemented | ✅ Discovery Verified | T-CFG-01 to T-CFG-05 |
 
 ## Detailed ADR Status
 
@@ -195,12 +195,19 @@ This register tracks all Architectural Decision Records for pySysPass.
 - **Related Security Findings:** No Alembic check at startup; concurrent migration without lock; schema guard correct for runtime
 
 ### ADR-0017: Configuration and Secret Management
-- **Status:** Proposed
-- **Decision:** 8-layer configuration precedence, mounted secrets + external providers (Vault, AWS, Azure, GCP), secret lifecycle with rotation schedules, startup validation with fail-fast production checks, key rotation with overlapping validity, consolidated recovery material
-- **Implementation:** Not implemented
-- **Verification:** Not verified
-- **Dependencies:** ADR-0008, ADR-0013, ADR-0014, ADR-0015
-- **Related Security Findings:** Auto-generated secrets in production, no mounted secret support, no rotation policy, no external provider support
+- **Status:** Active
+- **Decision:** 8-layer configuration precedence; mounted secrets (Docker/K8s) + optional external providers; secret lifecycle with rotation schedules and overlapping validity; fail-fast startup validation; consolidated recovery material
+- **Implementation:** Partially implemented — layers 2/4/5/6/7/8 implemented and verified; layers 1 (mounted secrets) and 3 (external providers) not implemented; 9+ secrets bypass Settings via raw `os.environ.get()`
+- **Verification:** Discovery verified (V-01–V-08); 8 findings documented against codebase
+- **Dependencies:** ADR-0008, ADR-0009, ADR-0013, ADR-0014, ADR-0015, ADR-0016
+- **Outstanding Decisions:**
+  - `AUDIT_HMAC_KEY` and backup keyring vars: add to Settings or document as operator-level env only
+  - `SYSPASS_PASSWORD_SALT` production validation (V-04)
+  - `SERVICE_VAULT_KEY` startup validation (V-08)
+  - `SECRET_KEY_PREVIOUS` overlapping rotation field (V-05)
+  - `secrets_dir` configuration (V-02)
+- **Related Threats:** T-CFG-01 through T-CFG-05
+- **Related Security Findings:** Raw env var secrets bypass validation (V-03); salt not validated at startup (V-07); JWT rotation without overlap invalidates sessions
 
 ## Outstanding Decisions
 

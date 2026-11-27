@@ -180,6 +180,11 @@ This threat model documents the security threats, trust boundaries, and control 
 | T-IDI-05 | Audit logs | Unauthorized user | Audit | Audit access | Sensitive info disclosure | Access control | High | None | Role-based access |
 | T-IDI-06 | JWT secrets | External attacker | Config | Config access | JWT forgery | Secret protection | High | Low | Secure config storage |
 | T-IDI-07 | Backup data | Backup operator | Backup Storage | Backup access | Data theft | Backup encryption | Medium | Low | Backup key management |
+| T-CFG-01 | Application secrets | External attacker | Process memory / `/proc` | `ps aux` or `docker inspect` | Secret exposure via env vars | Mounted secret files (`/run/secrets/`) | High | Medium | Not implemented (V-02) |
+| T-CFG-02 | JWT signing key | Malicious operator | Client token | `SECRET_KEY` rotation without overlap | All sessions invalidated on rotation | Overlapping validity window (`SECRET_KEY_PREVIOUS`) | High | Medium | Not implemented (V-05) |
+| T-CFG-03 | PHP password salt | Misconfigured deployment | `User.mPass` decryption | Empty `SYSPASS_PASSWORD_SALT` | All PHP-created credentials unreadable | Startup validation + runtime config fallback | **Critical** | Low | Partially mitigated (V-07) |
+| T-CFG-04 | Audit HMAC key | Internal attacker | Audit log integrity | Raw `AUDIT_HMAC_KEY` env var (no rotation) | Unsigned/forged audit entries | Add to Settings + rotation policy | Medium | Low | Gap (V-03) |
+| T-CFG-05 | Service vault key | Misconfigured deployment | Service API tokens | `SERVICE_VAULT_KEY` unset (no startup check) | Service vault operations fail at runtime, not startup | Add to `validate_production_settings` | Medium | Low | Gap (V-08) |
 | T-IDI-08 | Service vault context | Compromised service | Server→DB | Service access | Context theft | Encrypted storage | Medium | Low | Key management |
 
 #### STRIDE: E - Elevation of Privilege

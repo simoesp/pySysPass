@@ -311,6 +311,14 @@ This glossary defines all approved domain concepts from ADR-0001 through ADR-001
 | **Schema Guard** | `before_cursor_execute` SQLAlchemy event blocking DDL (CREATE/ALTER/DROP/TRUNCATE/RENAME/GRANT/REVOKE) at application runtime. Bypassed by bootstrap and Alembic (by design). | ADR-0016 |
 | **Shared Schema** | The 18 PHP base tables + 2 views that constitute the bidirectional compatibility contract between pySysPass and sysPass PHP. Owned by PHP schema definition; pySysPass mirrors but does not mutate. | ADR-0016, ADR-0002 |
 | **Extension Tables** | Python-native tables not present in PHP: `emergency_credentials`, `audit_events`, `audit_archives`, `audit_retention_policies`, `audit_access_logs`, `service_accounts`, `service_auth_tokens`, `service_vault_contexts`. Alembic owns these. | ADR-0016 |
+| **Configuration Layer** | One of the 8 ordered sources that can supply a setting. Higher layers override lower. See ADR-0017 §1 for the full precedence order. | ADR-0017 |
+| **Mounted Secret** | A secret provided as a file (typically `/run/secrets/<name>`) by the container runtime. Layer 1 in ADR-0017 precedence. Not yet implemented. | ADR-0017 |
+| **Secret Provider** | An abstraction for external secret storage (HashiCorp Vault, AWS Secrets Manager, Azure Key Vault, GCP Secret Manager). Layer 3 in ADR-0017 precedence. Not yet implemented. | ADR-0017 |
+| **Overlapping Validity Window** | A key rotation pattern where both the current and previous key are accepted for decryption/verification during a grace period, preventing immediate session/data loss. Implemented via `SECRET_KEY_PREVIOUS` (proposed) and `ENCRYPTION_KEY_PREVIOUS` (proposed). | ADR-0017 |
+| **Breaking Rotation** | Key rotation without an overlapping validity window — all existing JWTs or encrypted data become unreadable immediately. Current risk for `SECRET_KEY` (T-CFG-02). | ADR-0017 |
+| **Runtime JSON Config** | Mutable application settings stored in `/app/data/runtime-config.json`. Layer 6 in ADR-0017 precedence. Used for mail, LDAP, general, and wiki settings. | ADR-0017, ADR-0002 |
+| **PHP config.xml** | Legacy sysPass PHP configuration file. Layer 8 in ADR-0017 precedence. Read by `syspass_runtime_config.py` for `passwordSalt` and other PHP-owned values. | ADR-0017, ADR-0002 |
+| **Secret Age** | Time since a secret was last rotated. When exceeding the configured `*_MAX_AGE_DAYS` threshold, a warning is logged (or readiness degraded). Not yet enforced. | ADR-0017 |
 
 ## Deprecated Terms
 

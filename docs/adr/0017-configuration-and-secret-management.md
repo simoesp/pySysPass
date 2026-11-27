@@ -44,6 +44,48 @@ pySysPass operates in multiple deployment modes (local development, Docker Compo
 
 ## Decision
 
+### 0. Verified Implementation Deviations (ADR-0017 Discovery)
+
+The following findings were verified against the codebase and represent deviations from the design in this ADR. Each is tagged with its current status.
+
+| # | Finding | Severity | Status |
+|---|---------|----------|--------|
+| **V-01** | `Settings` has no `env_prefix` — all fields use bare names (`SECRET_KEY`, `ENCRYPTION_KEY`, `DATABASE_URL`). The `PYSYSPASS_` prefix in `.env.external.example` is a **host-level only** mechanism: docker-compose maps `${PYSYSPASS_SECRET_KEY}` → `SECRET_KEY` inside the container. Operators using `.env` directly must use bare names. | Low | Documented |
+| **V-02** | `secrets_dir` is **not configured** in `Settings.model_config`. Layer 1 (mounted secrets) is proposed, not implemented. Currently secrets must come via env vars (compose mapping). | Medium | Gap |
+| **V-03** | Multiple secrets bypass `Settings` entirely via raw `os.environ.get()`: `AUDIT_HMAC_KEY`, `BACKUP_KEYRING_PATH`, `BACKUP_SIGNING_KEYRING`, `BACKUP_VERIFICATION_KEYRING`, `BACKUP_REQUIRE_SIGNATURE`, `BACKUP_ALLOW_UNENCRYPTED`, `SERVICE_VAULT_KEYRING_PATH`, `PYSYSPASS_CURRENT_MASTER_PASSWORD`, `PYSYSPASS_NEW_MASTER_PASSWORD`. These cannot be validated at startup, managed by the precedence layers, or mounted via `secrets_dir`. | **High** | Gap |
+| **V-04** | `validate_production_settings` checks only `SECRET_KEY`, `ENCRYPTION_KEY`, `DATABASE_URL`, and `TRUSTED_PROXY_HOSTS`. It does **not** check `SYSPASS_PASSWORD_SALT` (required for PHP interop) or `SERVICE_VAULT_KEY` (required for service accounts). PHP-created databases without a salt in config are silently incompatible. | **High** | Gap |
+| **V-05** | No `SECRET_KEY_PREVIOUS` or `ENCRYPTION_KEY_PREVIOUS` fields — the overlapping validity window (Layer 5 rotation) described in §5 is proposed but not implemented. Rotating `SECRET_KEY` immediately invalidates all outstanding JWTs. | Medium | Gap |
+| **V-06** | `SECRET_KEY` and `ENCRYPTION_KEY` default to `_generated_secret()` (random 48-byte token) when not explicitly set. In development with `DEBUG=true`, this is fine. In production, `validate_production_settings` correctly rejects auto-generated values. This is working as designed. | — | Verified ✓ |
+| **V-07** | `SYSPASS_PASSWORD_SALT` is not validated at startup — an empty value is accepted. But `defuse_compat.py` uses it to construct the PHP-compatible user encryption key `(loginPass + loginUser + passwordSalt).strip()`. A missing salt makes all PHP-created `User.mPass` values undecryptable. The runtime JSON config (`syspass_runtime_config.py`) can supply it from PHP's `config.xml` or serialized cache; this fallback is the current mechanism. | Medium | Partially mitigated |
+| **V-08** | `SERVICE_VAULT_KEY` is validated at the point of use (`service_vault_crypto.py`) via fail-closed check, not at startup. If service accounts are deployed but `SERVICE_VAULT_KEY` is unset, failures are deferred to the first API call rather than caught at startup. | Medium | Gap |
+
+**Precedence layers confirmed implemented:**
+
+| Layer | Status | Evidence |
+|-------|--------|---------|
+| 1 — Mounted secrets (`/run/secrets/`) | **Not implemented** | No `secrets_dir` in `Settings.model_config` |
+| 2 — Environment variables | **Implemented** ✓ | pydantic-settings, `case_sensitive=False` |
+| 3 — External secret provider | **Not implemented** | No `SecretProvider` class in codebase |
+| 4 — `.env` file | **Implemented** ✓ | `env_file=".env"` in `model_config` |
+| 5 — Pydantic defaults | **Implemented** ✓ | Defaults in `Settings` class |
+| 6 — Runtime JSON config | **Implemented** ✓ | `runtime_json_config.py` → `SECTION_KEYS` |
+| 7 — Database `Config` table | **Implemented** ✓ | `config_service.py` reads PHP key/value rows |
+| 8 — PHP `config.xml` / cache | **Implemented** ✓ | `syspass_runtime_config.py` XML + PHP serialized cache regex |
+
+**Raw environment variables bypassing Settings (Layer 2 only):**
+
+| Variable | Consumer | Purpose |
+|----------|----------|---------|
+| `AUDIT_HMAC_KEY` | `audit_service.py` | HMAC for audit log integrity |
+| `BACKUP_KEYRING_PATH` | `backup_crypto.py` | Path to backup encryption keyring file |
+| `BACKUP_SIGNING_KEYRING` | `backup_service.py` | Path to backup signing keyring |
+| `BACKUP_VERIFICATION_KEYRING` | `backup_service.py` | Path to backup signature verification keyring |
+| `BACKUP_REQUIRE_SIGNATURE` | `backup_crypto.py` | Enforce signature check on restore |
+| `BACKUP_ALLOW_UNENCRYPTED` | `backup_crypto.py` | Allow unencrypted backup (exception) |
+| `SERVICE_VAULT_KEYRING_PATH` | `service_vault_keyring.py` | Path to service vault keyring file |
+| `PYSYSPASS_CURRENT_MASTER_PASSWORD` | `rotate_master_password.py` | CLI rotation input |
+| `PYSYSPASS_NEW_MASTER_PASSWORD` | `rotate_master_password.py` | CLI rotation input |
+
 ### 1. Configuration Precedence (Highest → Lowest)
 
 | Layer | Source | Scope | Mutability | Example |
@@ -359,7 +401,7 @@ spec:
 - `docs/adr/0013-backup-disaster-recovery-and-cryptographic-recoverability.md`: Backup policy
 - `docs/adr/0014-emergency-authentication-mode.md`: Temporary master password, break-glass
 - `docs/adr/0015-deployment-architecture-and-infrastructure-requirements.md`: Deployment constraints
-- `docs/adr/0016-database-migration-governance.md`: Migration locking (coordination model)
+- `docs/adr/0016-database-schema-ownership-and-migration-governance.md`: Migration locking (coordination model)
 - `app/core/config.py`: Settings, validation
 - `app/core/runtime_json_config.py`: Runtime JSON config (Layer 6)
 - `app/core/syspass_runtime_config.py`: PHP config fallback (Layer 7–8)
