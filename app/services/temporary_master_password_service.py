@@ -86,6 +86,11 @@ class TemporaryMasterPasswordService:
         }
 
     def expire(self) -> None:
+        self.expire_pending()
+        self.db.commit()
+
+    def expire_pending(self) -> None:
+        """Clear the temporary master password in the current transaction."""
         self._set_many({
             self.PARAM_PASS: "",
             self.PARAM_KEY: "",
@@ -94,7 +99,6 @@ class TemporaryMasterPasswordService:
             self.PARAM_MAX_TIME: "0",
             self.PARAM_ATTEMPTS: "0",
         })
-        self.db.commit()
 
     def _is_expired(self, now: Optional[int] = None) -> bool:
         now = now or int(time.time())

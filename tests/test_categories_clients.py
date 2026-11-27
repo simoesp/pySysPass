@@ -24,7 +24,8 @@ async def test_get_categories(db_session):
 
     categories = service.get_categories()
 
-    assert len(categories) == 3
+    # Plus the shared reference row every test database provides.
+    assert len(categories) == 4
 
 @pytest.mark.asyncio
 async def test_get_category(db_session):
@@ -77,7 +78,8 @@ async def test_get_clients(db_session):
 
     clients = service.get_clients()
 
-    assert len(clients) == 3
+    # Plus the shared reference row every test database provides.
+    assert len(clients) == 4
 
 @pytest.mark.asyncio
 async def test_update_client(db_session):

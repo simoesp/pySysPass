@@ -1,17 +1,18 @@
 import pytest
 import base64
 from app.services.file_service import FileService
+from tests.account_refs import TEST_MASTER_PASSWORD
 
 @pytest.mark.asyncio
 async def test_create_file(db_session, encryption_service, test_user):
     """Test creating a file attachment"""
     from app.services.account_service import AccountService
-    from app.schemas.account import AccountCreate
+    from tests.account_refs import account_create
 
     account_service = AccountService(db_session, encryption_service)
     account = account_service.create_account(
-        AccountCreate(title="Test Account", password="secret"),
-        test_user.id
+        account_create(title="Test Account", password="secret"),
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     service = FileService(db_session)
@@ -37,12 +38,12 @@ async def test_create_file(db_session, encryption_service, test_user):
 async def test_get_files(db_session, encryption_service, test_user):
     """Test listing files for an account"""
     from app.services.account_service import AccountService
-    from app.schemas.account import AccountCreate
+    from tests.account_refs import account_create
 
     account_service = AccountService(db_session, encryption_service)
     account = account_service.create_account(
-        AccountCreate(title="Test Account", password="secret"),
-        test_user.id
+        account_create(title="Test Account", password="secret"),
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     service = FileService(db_session)
@@ -67,12 +68,12 @@ async def test_get_files(db_session, encryption_service, test_user):
 async def test_get_file(db_session, encryption_service, test_user):
     """Test getting a specific file"""
     from app.services.account_service import AccountService
-    from app.schemas.account import AccountCreate
+    from tests.account_refs import account_create
 
     account_service = AccountService(db_session, encryption_service)
     account = account_service.create_account(
-        AccountCreate(title="Test Account", password="secret"),
-        test_user.id
+        account_create(title="Test Account", password="secret"),
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     service = FileService(db_session)
@@ -96,12 +97,12 @@ async def test_get_file(db_session, encryption_service, test_user):
 async def test_get_file_content(db_session, encryption_service, test_user):
     """Test getting file content"""
     from app.services.account_service import AccountService
-    from app.schemas.account import AccountCreate
+    from tests.account_refs import account_create
 
     account_service = AccountService(db_session, encryption_service)
     account = account_service.create_account(
-        AccountCreate(title="Test Account", password="secret"),
-        test_user.id
+        account_create(title="Test Account", password="secret"),
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     service = FileService(db_session)
@@ -124,12 +125,12 @@ async def test_get_file_content(db_session, encryption_service, test_user):
 async def test_delete_file(db_session, encryption_service, test_user):
     """Test deleting a file"""
     from app.services.account_service import AccountService
-    from app.schemas.account import AccountCreate
+    from tests.account_refs import account_create
 
     account_service = AccountService(db_session, encryption_service)
     account = account_service.create_account(
-        AccountCreate(title="Test Account", password="secret"),
-        test_user.id
+        account_create(title="Test Account", password="secret"),
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     service = FileService(db_session)
@@ -152,12 +153,12 @@ async def test_delete_file(db_session, encryption_service, test_user):
 async def test_get_file_count(db_session, encryption_service, test_user):
     """Test getting file count for an account"""
     from app.services.account_service import AccountService
-    from app.schemas.account import AccountCreate
+    from tests.account_refs import account_create
 
     account_service = AccountService(db_session, encryption_service)
     account = account_service.create_account(
-        AccountCreate(title="Test Account", password="secret"),
-        test_user.id
+        account_create(title="Test Account", password="secret"),
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     service = FileService(db_session)
@@ -184,11 +185,11 @@ async def test_cannot_access_others_files(db_session, encryption_service, test_u
     from app.services.account_service import AccountService
     from app.models.account import User
     from app.services.auth_service import get_password_hash
-    from app.schemas.account import AccountCreate
+    from tests.account_refs import account_create
 
     # Create another user
     other_user = User(
-        username="otheruser",
+        name="otheruser", userProfileId=1, hashSalt=b"s" * 32, username="otheruser",
         email="other@example.com",
         password=get_password_hash("password"),
         isUserAdmin=False,
@@ -200,8 +201,8 @@ async def test_cannot_access_others_files(db_session, encryption_service, test_u
 
     account_service = AccountService(db_session, encryption_service)
     account = account_service.create_account(
-        AccountCreate(title="Private Account", password="secret"),
-        test_user.id
+        account_create(title="Private Account", password="secret"),
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     service = FileService(db_session)
@@ -223,12 +224,12 @@ async def test_cannot_access_others_files(db_session, encryption_service, test_u
 async def test_file_with_various_types(db_session, encryption_service, test_user):
     """Test creating files with different MIME types"""
     from app.services.account_service import AccountService
-    from app.schemas.account import AccountCreate
+    from tests.account_refs import account_create
 
     account_service = AccountService(db_session, encryption_service)
     account = account_service.create_account(
-        AccountCreate(title="Test Account", password="secret"),
-        test_user.id
+        account_create(title="Test Account", password="secret"),
+        test_user.id, master_pass=TEST_MASTER_PASSWORD
     )
 
     service = FileService(db_session)

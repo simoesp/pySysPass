@@ -174,13 +174,14 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, defineComponent, h } from 'vue'
+import { ref, computed, onMounted, onUnmounted, defineComponent, h } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useQuasar } from 'quasar'
 import { useMainStore } from '@/stores'
 import { Notify } from 'quasar'
 import api from '@/api/axios'
 import { themes, applyTheme, getSavedTheme } from '@/composables/useTheme'
+import { useSessionKeepAlive } from '@/composables/useSessionKeepAlive'
 
 // ── Inline nav-item component ─────────────────────────────────────────────
 const SpNavItem = defineComponent({
@@ -283,7 +284,11 @@ async function fetchNotifications() {
   } catch { /* silent */ }
 }
 
-function logout() {
+const keepAlive = useSessionKeepAlive()
+
+async function logout() {
+  // Revoke the token server-side; a copied bearer must stop working too.
+  try { await api.post('/auth/logout') } catch { /* already expired or revoked */ }
   store.clearToken()
   Notify.create({ message: 'Signed out', color: 'grey-8', icon: 'logout' })
   router.push('/login')
@@ -302,12 +307,20 @@ async function fetchCurrentUser() {
   } catch { /* silent — user will just see no items */ }
 }
 
+let notificationTimer = null
+
 onMounted(() => {
   if (store.isAuthenticated) {
     fetchCurrentUser()
     fetchNotifications()
-    setInterval(fetchNotifications, 30000)
+    notificationTimer = setInterval(fetchNotifications, 30000)
+    keepAlive.start()
   }
+})
+
+onUnmounted(() => {
+  clearInterval(notificationTimer)
+  keepAlive.stop()
 })
 </script>
 

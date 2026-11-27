@@ -17,7 +17,7 @@ class PluginConfigUpdate(BaseModel):
 
 
 @router.get("/plugins", response_model=List[Dict[str, Any]])
-async def list_plugins(
+def list_plugins(
     db: Session = Depends(get_db),
     current_user=Depends(require_admin),
 ):
@@ -25,7 +25,7 @@ async def list_plugins(
 
 
 @router.post("/plugins/sync", response_model=List[Dict[str, Any]])
-async def sync_plugins(
+def sync_plugins(
     db: Session = Depends(get_db),
     current_user=Depends(require_admin),
 ):
@@ -33,7 +33,7 @@ async def sync_plugins(
 
 
 @router.get("/plugins/hooks", response_model=List[Dict[str, str]])
-async def list_plugin_hooks(
+def list_plugin_hooks(
     db: Session = Depends(get_db),
     current_user=Depends(require_admin),
 ):
@@ -41,7 +41,7 @@ async def list_plugin_hooks(
 
 
 @router.get("/plugins/{plugin_name}", response_model=Dict[str, Any])
-async def get_plugin(
+def get_plugin(
     plugin_name: str,
     db: Session = Depends(get_db),
     current_user=Depends(require_admin),
@@ -53,7 +53,7 @@ async def get_plugin(
 
 
 @router.post("/plugins/{plugin_name}/enable")
-async def enable_plugin(
+def enable_plugin(
     plugin_name: str,
     db: Session = Depends(get_db),
     current_user=Depends(require_admin),
@@ -64,7 +64,7 @@ async def enable_plugin(
 
 
 @router.post("/plugins/{plugin_name}/disable")
-async def disable_plugin(
+def disable_plugin(
     plugin_name: str,
     db: Session = Depends(get_db),
     current_user=Depends(require_admin),
@@ -75,7 +75,7 @@ async def disable_plugin(
 
 
 @router.put("/plugins/{plugin_name}/config", response_model=Dict[str, Any])
-async def update_plugin_config(
+def update_plugin_config(
     plugin_name: str,
     body: PluginConfigUpdate,
     db: Session = Depends(get_db),

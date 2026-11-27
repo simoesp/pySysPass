@@ -4,16 +4,13 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.db.base import get_db
+from app.core.php_item_presets import PresetError
 from app.services.item_preset_service import ItemPresetService, VALID_TYPES
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, require_permission
 
 router = APIRouter()
-
-
-def require_admin(current_user=Depends(get_current_user)):
-    from app.db.base import get_db as _get_db
-    # Actual admin check happens in the route via injected db; this just threads the user
-    return current_user
+# sysPass PHP Acl::ITEMPRESET: profile permission mgmItemsPreset (or app admin).
+manage_presets = require_permission("mgm_items_preset")
 
 
 class ItemPresetCreate(BaseModel):
@@ -33,24 +30,27 @@ class ItemPresetUpdate(BaseModel):
 
 
 @router.get("/item-presets", response_model=List[Dict])
-async def list_presets(
+def list_presets(
     preset_type: Optional[str] = None,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(manage_presets),
 ):
-    return ItemPresetService(db).list(preset_type)
+    try:
+        return ItemPresetService(db).list(preset_type)
+    except PresetError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.get("/item-presets/types")
-async def list_preset_types(current_user=Depends(get_current_user)):
+def list_preset_types(current_user=Depends(get_current_user)):
     return sorted(VALID_TYPES)
 
 
 @router.get("/item-presets/{preset_id}", response_model=Dict)
-async def get_preset(
+def get_preset(
     preset_id: int,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(manage_presets),
 ):
     row = ItemPresetService(db).get(preset_id)
     if not row:
@@ -59,24 +59,24 @@ async def get_preset(
 
 
 @router.get("/item-presets/context/{preset_type}", response_model=Optional[Dict])
-async def get_preset_for_context(
+def get_preset_for_context(
     preset_type: str,
-    user_id: Optional[int] = None,
-    user_group_id: Optional[int] = None,
-    user_profile_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    return ItemPresetService(db).get_for_context(
-        preset_type, user_id, user_group_id, user_profile_id
-    )
+    """The preset that applies to the caller (PHP getForCurrentUser)."""
+    try:
+        resolved = ItemPresetService(db).get_for_user(preset_type, current_user["id"])
+    except PresetError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return resolved.__dict__ if resolved else None
 
 
 @router.post("/item-presets", status_code=status.HTTP_201_CREATED, response_model=Dict)
-async def create_preset(
+def create_preset(
     body: ItemPresetCreate,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(manage_presets),
 ):
     try:
         return ItemPresetService(db).create(
@@ -93,25 +93,28 @@ async def create_preset(
 
 
 @router.put("/item-presets/{preset_id}", response_model=Dict)
-async def update_preset(
+def update_preset(
     preset_id: int,
     body: ItemPresetUpdate,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(manage_presets),
 ):
-    row = ItemPresetService(db).update(
-        preset_id, fixed=body.fixed, priority=body.priority, data=body.data
-    )
+    try:
+        row = ItemPresetService(db).update(
+            preset_id, fixed=body.fixed, priority=body.priority, data=body.data
+        )
+    except PresetError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     if not row:
         raise HTTPException(status_code=404, detail="Preset not found")
     return row
 
 
 @router.delete("/item-presets/{preset_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_preset(
+def delete_preset(
     preset_id: int,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(manage_presets),
 ):
     if not ItemPresetService(db).delete(preset_id):
         raise HTTPException(status_code=404, detail="Preset not found")

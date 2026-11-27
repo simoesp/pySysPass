@@ -19,6 +19,7 @@ from app.db.base import get_db
 from app.models.account import Account
 from app.models.account import PublicLink
 from app.services.public_link_service import PublicLinkService
+from tests.account_refs import TEST_CATEGORY_ID, TEST_CLIENT_ID
 
 
 FIXTURE_PATH = Path(__file__).parents[1] / 'fixtures/php_public_link_vault.json'
@@ -144,6 +145,7 @@ def test_php_snapshot_ignores_live_edits_and_updates_account_counters(
         pass_=b'new-ciphertext', key=b'new-key', userId=test_user.id,
         userEditId=test_user.id, userGroupId=test_user.userGroupId,
         countView=10, countDecrypt=20,
+        clientId=TEST_CLIENT_ID, categoryId=TEST_CATEGORY_ID,
     )
     db_session.add(account)
     db_session.commit()

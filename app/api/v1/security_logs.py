@@ -13,7 +13,7 @@ router = APIRouter()
 # ── Event Log ──────────────────────────────────────────────────────────────
 
 @router.get("/audit-log", response_model=List[EventLogResponse])
-async def list_event_log(
+def list_event_log(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     level: Optional[str] = Query(None),
@@ -25,7 +25,7 @@ async def list_event_log(
 
 
 @router.get("/audit-log/count")
-async def count_event_log(
+def count_event_log(
     level: Optional[str] = Query(None),
     login: Optional[str] = Query(None),
     db: Session = Depends(get_db),
@@ -35,7 +35,7 @@ async def count_event_log(
 
 
 @router.delete("/audit-log", status_code=status.HTTP_200_OK)
-async def clear_event_log(
+def clear_event_log(
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('evl')),
 ):
@@ -46,7 +46,7 @@ async def clear_event_log(
 # ── Tracks ─────────────────────────────────────────────────────────────────
 
 @router.get("/tracks", response_model=List[TrackResponse])
-async def list_tracks(
+def list_tracks(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     locked_only: bool = Query(False),
@@ -57,7 +57,7 @@ async def list_tracks(
 
 
 @router.get("/tracks/count")
-async def count_tracks(
+def count_tracks(
     locked_only: bool = Query(False),
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('evl')),
@@ -66,7 +66,7 @@ async def count_tracks(
 
 
 @router.post("/tracks/{track_id}/unlock", status_code=status.HTTP_200_OK)
-async def unlock_track(
+def unlock_track(
     track_id: int,
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('evl')),
@@ -77,7 +77,7 @@ async def unlock_track(
 
 
 @router.delete("/tracks/{track_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_track(
+def delete_track(
     track_id: int,
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('evl')),
@@ -87,7 +87,7 @@ async def delete_track(
 
 
 @router.delete("/tracks", status_code=status.HTTP_200_OK)
-async def clear_tracks(
+def clear_tracks(
     db: Session = Depends(get_db),
     current_user=Depends(require_permission('evl')),
 ):

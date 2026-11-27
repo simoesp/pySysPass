@@ -63,7 +63,7 @@ def _require_group_member_or_admin(db: Session, user_group_id: int, current_user
 
 
 @router.post("/{account_id}/share/users")
-async def share_account_with_user(
+def share_account_with_user(
     account_id: int,
     user_id: int,
     is_edit: bool = False,
@@ -88,7 +88,7 @@ async def share_account_with_user(
 
 
 @router.delete("/{account_id}/share/users/{user_id}")
-async def unshare_account_with_user(
+def unshare_account_with_user(
     account_id: int,
     user_id: int,
     db: Session = Depends(get_db),
@@ -104,7 +104,7 @@ async def unshare_account_with_user(
 
 
 @router.get("/{account_id}/share/users", response_model=List[dict])
-async def get_account_shared_users(
+def get_account_shared_users(
     account_id: int,
     db: Session = Depends(get_db),
     current_user=Depends(account_permission),
@@ -116,7 +116,7 @@ async def get_account_shared_users(
 
 
 @router.put("/{account_id}/share/users/{user_id}/permission")
-async def update_user_permission(
+def update_user_permission(
     account_id: int,
     user_id: int,
     is_edit: bool,
@@ -133,7 +133,7 @@ async def update_user_permission(
 
 
 @router.get("/users/{user_id}/shared-accounts", response_model=List[dict])
-async def get_user_shared_accounts(
+def get_user_shared_accounts(
     user_id: int,
     db: Session = Depends(get_db),
     current_user=Depends(account_view),
@@ -145,7 +145,7 @@ async def get_user_shared_accounts(
 
 
 @router.post("/{account_id}/share/groups")
-async def share_account_with_user_group(
+def share_account_with_user_group(
     account_id: int,
     user_group_id: int,
     is_edit: bool = False,
@@ -168,7 +168,7 @@ async def share_account_with_user_group(
 
 
 @router.delete("/{account_id}/share/groups/{user_group_id}")
-async def unshare_account_with_user_group(
+def unshare_account_with_user_group(
     account_id: int,
     user_group_id: int,
     db: Session = Depends(get_db),
@@ -184,7 +184,7 @@ async def unshare_account_with_user_group(
 
 
 @router.get("/{account_id}/share/groups", response_model=List[dict])
-async def get_account_shared_user_groups(
+def get_account_shared_user_groups(
     account_id: int,
     db: Session = Depends(get_db),
     current_user=Depends(account_permission),
@@ -196,7 +196,7 @@ async def get_account_shared_user_groups(
 
 
 @router.put("/{account_id}/share/groups/{user_group_id}/permission")
-async def update_user_group_permission(
+def update_user_group_permission(
     account_id: int,
     user_group_id: int,
     is_edit: bool,
@@ -213,7 +213,7 @@ async def update_user_group_permission(
 
 
 @router.get("/user-groups/{user_group_id}/accounts", response_model=List[dict])
-async def get_user_group_accounts(
+def get_user_group_accounts(
     user_group_id: int,
     db: Session = Depends(get_db),
     current_user=Depends(account_view),
@@ -225,7 +225,7 @@ async def get_user_group_accounts(
 
 
 @router.post("/{account_id}/share/users/bulk")
-async def share_account_with_multiple_users(
+def share_account_with_multiple_users(
     account_id: int,
     user_ids: List[int],
     is_edit: bool = False,
@@ -248,7 +248,7 @@ async def share_account_with_multiple_users(
 
 
 @router.post("/{account_id}/share/groups/bulk")
-async def share_account_with_multiple_groups(
+def share_account_with_multiple_groups(
     account_id: int,
     group_ids: List[int],
     is_edit: bool = False,
@@ -268,7 +268,7 @@ async def share_account_with_multiple_groups(
 
 
 @router.delete("/{account_id}/share/all")
-async def remove_all_shares(
+def remove_all_shares(
     account_id: int,
     db: Session = Depends(get_db),
     current_user=Depends(account_permission),

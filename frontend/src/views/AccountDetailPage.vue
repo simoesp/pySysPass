@@ -85,7 +85,8 @@
               <div class="sp-field-label">Password</div>
               <div class="sp-field-row">
                 <div class="sp-field-value sp-field-value--mono">
-                  {{ showPwd ? decryptedPwd : '••••••••••••' }}
+                  <img v-if="showPwd && pwdImage" :src="`data:image/png;base64,${pwdImage}`" alt="Password" />
+                  <template v-else>{{ showPwd ? decryptedPwd : '••••••••••••' }}</template>
                 </div>
                 <div class="row q-gutter-xs">
                   <q-btn flat round dense size="sm"
@@ -347,7 +348,7 @@
           </div>
           <q-input v-model="editForm.url" label="URL" outlined dense />
           <q-select v-model="editForm.category_id" :options="catOpts" option-label="name"
-            option-value="id" label="Category" outlined dense emit-value map-options clearable
+            option-value="id" label="Category *" outlined dense emit-value map-options
             use-input hide-selected fill-input input-debounce="0" @filter="filterCats" />
           <!-- Tags -->
           <q-select v-model="editForm.tag_ids" :options="tagOpts" option-label="name" option-value="id"
@@ -480,6 +481,7 @@ const tab = ref('details')
 
 const showPwd = ref(false)
 const decryptedPwd = ref(null)
+const pwdImage = ref(null)  // shown instead of the text when sysPass's image rule applies
 const pwdLoading = ref(false)
 const copied = ref(false)
 
@@ -673,12 +675,13 @@ function historyColor(action) {
 }
 
 // ── Password ──────────────────────────────────────────────────────────────
-async function fetchPassword() {
-  if (decryptedPwd.value !== null) return
+async function fetchPassword(purpose = 'copy') {
+  if (decryptedPwd.value !== null || (purpose === 'view' && pwdImage.value)) return
   pwdLoading.value = true
   try {
-    const r = await api.get(`/accounts/${account.value.id}/password`)
-    decryptedPwd.value = r.data.password
+    const r = await api.get(`/accounts/${account.value.id}/password`, { params: { purpose } })
+    if (r.data.use_image) pwdImage.value = r.data.password_image
+    else decryptedPwd.value = r.data.password
   } catch (e) {
     Notify.create({ message: e.response?.data?.detail || 'Failed to decrypt', color: 'negative' })
   } finally {
@@ -686,7 +689,7 @@ async function fetchPassword() {
   }
 }
 async function togglePassword() {
-  if (!showPwd.value) await fetchPassword()
+  if (!showPwd.value) await fetchPassword('view')
   showPwd.value = !showPwd.value
 }
 async function copyPassword() {
@@ -775,13 +778,14 @@ async function saveEdit() {
     const r = await api.put(`/accounts/${account.value.id}`, payload)
     account.value = r.data
     decryptedPwd.value = null
+    pwdImage.value = null
     await saveCustomFields(account.value.id)
     history.value = []
     if (tab.value === 'history') await loadHistory()
     showEdit.value = false
     Notify.create({ message: 'Account updated', color: 'positive' })
   } catch (e) {
-    Notify.create({ message: e.response?.data?.detail || 'Failed to save', color: 'negative' })
+    Notify.create({ message: e.response?.data?.detail?.message || e.response?.data?.detail || 'Failed to save', color: 'negative' })
   } finally {
     editSaving.value = false
   }
