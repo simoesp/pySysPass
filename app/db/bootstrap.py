@@ -194,6 +194,17 @@ def execute_schema_statements(
     if owns_connection:
         connection = engine_obj.raw_connection()
     assert connection is not None
+    if isinstance(connection, Connection):
+        # SQLAlchemy 2.x Connection (e.g. the lock-holding connection from
+        # schema_mutation_lock): it has no .cursor(); run driver SQL on it.
+        try:
+            for statement in statements:
+                connection.exec_driver_sql(statement)
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        return
     cursor = connection.cursor()
     try:
         for statement in statements:
@@ -233,15 +244,19 @@ def bootstrap_database(engine_obj: Engine = engine) -> bool:
         return False
 
     logger.warning("Incomplete or virgin sysPass database detected; applying bootstrap schema.")
-    statements = [statement for statement in _load_schema_statements() if not _view_name(statement)]
-    statements.extend(_missing_view_statements(engine_obj))
 
     # The coordinated schema-mutation lock serializes bootstrap against Alembic
     # and against other bootstrappers; DDL runs on the lock-holding connection
-    # so ownership stays tied to the acquiring connection.  Statements are
-    # idempotent (IF NOT EXISTS / INSERT IGNORE / CREATE OR REPLACE), so a
-    # re-check after acquiring the lock is unnecessary.
+    # so ownership stays tied to the acquiring connection.  Re-check *inside*
+    # the lock: another worker may have applied the schema while we waited, and
+    # only the first acquirer applies it (CREATE VIEW is not idempotent, so a
+    # stale pre-lock statement list would fail with "already exists").
     with schema_mutation_lock(engine_obj) as connection:
+        if not database_requires_bootstrap(engine_obj):
+            logger.info("Schema already bootstrapped by another worker; nothing to apply.")
+            return False
+        statements = [statement for statement in _load_schema_statements() if not _view_name(statement)]
+        statements.extend(_missing_view_statements(engine_obj))
         execute_schema_statements(statements, engine_obj=engine_obj, connection=connection)
     logger.warning("sysPass bootstrap schema applied successfully.")
     return True

@@ -153,8 +153,8 @@ Application Startup (main.py:94)
 
 | Operation | Lock | Scope | Status |
 |-----------|------|-------|--------|
-| Bootstrap (initial schema) | `GET_LOCK('pysyspass_schema_mutation', 600)` (coordinated) | MySQL server-wide | Implemented ✓ (IMPL-035) |
-| Alembic migration | `GET_LOCK('pysyspass_schema_mutation', 600)` (coordinated) | MySQL server-wide | Implemented ✓ (IMPL-035) |
+| Bootstrap (initial schema) | `GET_LOCK('pysyspass_schema_mutation:<db>', 600)` (coordinated; DB name embedded because MySQL lock names are server-wide, <= 64 chars) | Per database on the MySQL server | Implemented ✓ (IMPL-035) |
+| Alembic migration | `GET_LOCK('pysyspass_schema_mutation:<db>', 600)` (coordinated; DB name embedded because MySQL lock names are server-wide, <= 64 chars) | Per database on the MySQL server | Implemented ✓ (IMPL-035) |
 || Schema guard (runtime) | N/A (event-based block) | Per-process | Verified ✓ ||
 || Multi-replica Alembic | Operational runbook: one migration at a time | Process discipline | **Proposed** ||
 
@@ -168,7 +168,7 @@ MySQL DDL is **not** assumed transactional, and the lock is connection-scoped:
 if a migration process dies mid-migration, MySQL releases its `GET_LOCK`
 automatically — there is no stale lock to clear manually.
 
-1. Confirm the lock is free: `SELECT IS_FREE_LOCK('pysyspass_schema_mutation')` (expect 1).
+1. Confirm the lock is free: `SELECT IS_FREE_LOCK('pysyspass_schema_mutation:<db>')` (expect 1; substitute the target database).
 2. Assess what applied: check `alembic_version` and inspect the schema; some
    DDL statements may have executed while others did not.
 3. Restore the verified pre-migration backup (ADR-0013, mandatory before

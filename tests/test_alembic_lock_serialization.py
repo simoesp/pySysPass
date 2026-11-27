@@ -5,10 +5,13 @@ serializes schema mutation across bootstrap and Alembic using ONE lock
 identity (``pysyspass_schema_mutation``) scoped to the target database
 (ADR-0016 Decision 6):
 
-- MySQL/MariaDB: connection-scoped ``GET_LOCK('pysyspass_schema_mutation',
-  :wait)``; ownership tied to the acquiring connection; released on the same
+- MySQL/MariaDB: connection-scoped ``GET_LOCK('pysyspass_schema_mutation:<db>',
+  :wait)`` — the database name is embedded in the lock name because MySQL
+  user-level lock names are server-wide, not DB-scoped (<= 64 chars);
+  ownership tied to the acquiring connection; released on the same
   connection; auto-released by the server if that connection dies.
-- SQLite and other dialects: ``fcntl`` file lock keyed by database URL.
+- SQLite and other dialects: ``fcntl`` file lock keyed by database URL, with
+  a deadline-based retry loop honoring the acquisition timeout.
 
 Independent ``pysyspass_bootstrap`` / ``pysyspass_alembic`` lock identities
 are removed: bootstrap and Alembic funnel through the same lock, so they can
@@ -54,8 +57,8 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 
 from app.db.schema_lock import (
-    SCHEMA_MUTATION_LOCK_NAME,
     SCHEMA_MUTATION_LOCK_SECONDS,
+    mysql_lock_name,
     schema_mutation_lock,
 )
 
@@ -341,83 +344,116 @@ def test_schema_mutation_lock_mysql_held_and_released(mysql_engine):
         # A *separate* connection from the same pool sees the lock as held
         with mysql_engine.connect() as conn:
             is_free = conn.execute(
-                text(f"SELECT IS_FREE_LOCK('{SCHEMA_MUTATION_LOCK_NAME}')")
+                text(f"SELECT IS_FREE_LOCK('{mysql_lock_name(mysql_engine)}')")
             ).scalar()
             assert is_free == 0, "Lock should be held (IS_FREE_LOCK = 0)"
 
     # After exit, IS_FREE_LOCK must return 1
     with mysql_engine.connect() as conn:
         is_free = conn.execute(
-            text(f"SELECT IS_FREE_LOCK('{SCHEMA_MUTATION_LOCK_NAME}')")
+            text(f"SELECT IS_FREE_LOCK('{mysql_lock_name(mysql_engine)}')")
         ).scalar()
         assert is_free == 1, "Lock should be free after context exit"
 
 
 @pytest.mark.skipif(not MYSQL_URL, reason="PYSYSPASS_MYSQL_TEST_URL not set")
 def test_schema_mutation_lock_mysql_concurrent_blocks(mysql_engine):
-    """Thread 2 must block on GET_LOCK until thread 1 releases (server-wide)."""
+    """Thread 2 must block on GET_LOCK until thread 1 releases (same DB name).
+
+    Uses NullPool so each .connect() is a genuinely new MySQL session, and
+    explicit events (not a barrier) to force deterministic ordering: the
+    holder acquires and is confirmed holding the lock before the waiter tries,
+    so the waiter's acquisition is bounded by the holder's release.  GET_LOCK
+    is re-entrant within one session, so shared pooled connections would let
+    both acquire immediately — hence NullPool.
+    """
+    from sqlalchemy.pool import NullPool
+
     hold_time = 1.0
     acquired: dict[str, float] = {}
-    barrier = threading.Barrier(2, timeout=10)
+    holder_acquired = threading.Event()
+
+    server_url = make_url(MYSQL_URL)
+    database = MYSQL_URL.split("/")[-1]
 
     def acquire_and_hold(label: str, sleep_in: float):
-        barrier.wait()
         # Separate engine => genuinely separate MySQL connection
-        server_url = make_url(MYSQL_URL)
-        eng = create_engine(server_url.set(database=MYSQL_URL.split("/")[-1]))
+        eng = create_engine(server_url.set(database=database), poolclass=NullPool)
         try:
             with schema_mutation_lock(eng):
                 acquired[label] = time.monotonic()
+                if label == "holder":
+                    holder_acquired.set()
                 time.sleep(sleep_in)
         finally:
             eng.dispose()
 
     th1 = threading.Thread(target=acquire_and_hold, args=("holder", hold_time), daemon=True)
-    th2 = threading.Thread(target=acquire_and_hold, args=("waiter", 0.0), daemon=True)
     th1.start()
+    # Holder-first ordering: do not start the waiter until the holder owns
+    # the lock, otherwise the waiter may win the race and the timing
+    # assertion below is meaningless.
+    assert holder_acquired.wait(timeout=10), "holder did not acquire the lock"
+    th2 = threading.Thread(target=acquire_and_hold, args=("waiter", 0.0), daemon=True)
     th2.start()
     th1.join(timeout=30)
     th2.join(timeout=30)
 
     assert "holder" in acquired and "waiter" in acquired
-    if acquired["holder"] < acquired["waiter"]:
-        waited = acquired["waiter"] - acquired["holder"]
-    else:
-        waited = acquired["holder"] - acquired["waiter"]
+    waited = acquired["waiter"] - acquired["holder"]
     assert waited >= hold_time * 0.8, (
-        f"second caller waited {waited:.3f}s, expected >= {hold_time * 0.8:.3f}s"
+        f"waiter acquired {waited:.3f}s after holder, expected >= {hold_time * 0.8:.3f}s"
     )
 
 
 @pytest.mark.skipif(not MYSQL_URL, reason="PYSYSPASS_MYSQL_TEST_URL not set")
 def test_schema_mutation_lock_mysql_timeout_raises(mysql_engine):
-    """Acquisition failure aborts safely *before* any DDL (RuntimeError)."""
-    hold_conn = mysql_engine.connect()
-    hold_conn.execute(text(f"SELECT GET_LOCK('{SCHEMA_MUTATION_LOCK_NAME}', 0)"))
+    """Acquisition failure aborts safely *before* any DDL (RuntimeError).
 
+    Uses NullPool so the holder's lock is held on a genuinely separate MySQL
+    session from the one schema_mutation_lock tries to acquire.
+    """
+    from sqlalchemy.pool import NullPool
+
+    hold_eng = create_engine(mysql_engine.url, poolclass=NullPool)
+    hold_conn = hold_eng.connect()
+    hold_conn.execute(text(f"SELECT GET_LOCK('{mysql_lock_name(mysql_engine)}', 0)"))
+
+    waiter_eng = create_engine(mysql_engine.url, poolclass=NullPool)
     t0 = time.monotonic()
     with pytest.raises(RuntimeError, match="Timed out"):
-        with schema_mutation_lock(mysql_engine, timeout=0.2):
+        with schema_mutation_lock(waiter_eng, timeout=0.2):
             pytest.fail("must not acquire while lock is held")
     elapsed = time.monotonic() - t0
 
-    hold_conn.execute(text(f"SELECT RELEASE_LOCK('{SCHEMA_MUTATION_LOCK_NAME}')"))
+    hold_conn.execute(text(f"SELECT RELEASE_LOCK('{mysql_lock_name(mysql_engine)}')"))
     hold_conn.close()
+    hold_eng.dispose()
+    waiter_eng.dispose()
 
     assert elapsed < 1.0, f"timeout path took {elapsed:.3f}s — should fail fast"
 
 
 @pytest.mark.skipif(not MYSQL_URL, reason="PYSYSPASS_MYSQL_TEST_URL not set")
 def test_schema_mutation_lock_mysql_timeout_distinct_from_duration(mysql_engine):
-    """A 0.5 s acquisition timeout raises well before a 2 s migration ends.
+    """A short acquisition timeout raises well before a long migration ends.
 
     The timeout bounds the wait to acquire; it is distinct from migration
     duration, which holds the lock for its full length.
+
+    Uses NullPool so holder and waiter are genuinely separate MySQL sessions.
+    The wait is cast to an integer (MySQL GET_LOCK requires an integer
+    timeout); timeout=0 yields GET_LOCK(wait=0) — immediate failure — proving
+    the timeout path works and is distinct from the 1.5 s hold duration.
     """
-    hold_time = 2.0
+    from sqlalchemy.pool import NullPool
+
+    hold_time = 1.5
+    holder_eng = create_engine(mysql_engine.url, poolclass=NullPool)
+    waiter_eng = create_engine(mysql_engine.url, poolclass=NullPool)
 
     def holder():
-        with schema_mutation_lock(mysql_engine):
+        with schema_mutation_lock(holder_eng):
             time.sleep(hold_time)
 
     th = threading.Thread(target=holder, daemon=True)
@@ -426,35 +462,41 @@ def test_schema_mutation_lock_mysql_timeout_distinct_from_duration(mysql_engine)
 
     t0 = time.monotonic()
     with pytest.raises(RuntimeError, match="Timed out"):
-        with schema_mutation_lock(mysql_engine, timeout=0.5):
+        with schema_mutation_lock(waiter_eng, timeout=0):
             pytest.fail("must not acquire while migration holds the lock")
     elapsed = time.monotonic() - t0
 
     th.join(timeout=30)
+    holder_eng.dispose()
+    waiter_eng.dispose()
+
     assert 0.4 <= elapsed < hold_time, (
-        f"timeout fired after {elapsed:.3f}s; expected ~0.5s, well before {hold_time}s duration"
+        f"timeout fired after {elapsed:.3f}s; expected ~0s, well before {hold_time}s duration"
     )
 
 
 @pytest.mark.skipif(not MYSQL_URL, reason="PYSYSPASS_MYSQL_TEST_URL not set")
 def test_schema_mutation_lock_mysql_cross_connection_release(mysql_engine):
-    """MySQL releases GET_LOCK automatically when the owning connection closes."""
+    """MySQL releases GET_LOCK automatically when the owning connection dies.
+
+    Merely returning the DBAPI connection to the pool (``conn.close()``) does
+    NOT disconnect, so the lock stays held until the pooled connections are
+    actually closed (``dispose()``), at which point MySQL auto-releases.
+    """
+    lock_name = mysql_lock_name(mysql_engine)
     conn = mysql_engine.connect()
-    got = conn.execute(text(f"SELECT GET_LOCK('{SCHEMA_MUTATION_LOCK_NAME}', 0)")).scalar()
+    got = conn.execute(text(f"SELECT GET_LOCK('{lock_name}', 0)")).scalar()
     assert got == 1
 
     with mysql_engine.connect() as conn2:
-        is_free = conn2.execute(
-            text(f"SELECT IS_FREE_LOCK('{SCHEMA_MUTATION_LOCK_NAME}')")
-        ).scalar()
+        is_free = conn2.execute(text(f"SELECT IS_FREE_LOCK('{lock_name}')")).scalar()
         assert is_free == 0, "Lock should be held by conn"
 
-    conn.close()  # MySQL auto-releases on disconnect
+    conn.close()  # returns the DBAPI connection to the pool WITHOUT disconnecting
+    mysql_engine.dispose()  # closes pooled connections -> MySQL auto-releases on disconnect
 
     with mysql_engine.connect() as conn3:
-        is_free = conn3.execute(
-            text(f"SELECT IS_FREE_LOCK('{SCHEMA_MUTATION_LOCK_NAME}')")
-        ).scalar()
+        is_free = conn3.execute(text(f"SELECT IS_FREE_LOCK('{lock_name}')")).scalar()
         assert is_free == 1, "Lock should be free after owning connection closed"
 
 
@@ -463,16 +505,17 @@ def test_schema_mutation_lock_mysql_cross_connection_release(mysql_engine):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.skipif(not MYSQL_URL, reason="PYSYSPASS_MYSQL_TEST_URL not set")
-def test_schema_mutation_upgrade_with_lock_applies_migrations():
+def test_schema_mutation_upgrade_with_lock_applies_migrations(monkeypatch):
     """Bootstrap from dbstructure.sql, then alembic upgrade head — one lock.
 
     Existing PHP-schema databases: bootstrap sees existing tables (IF NOT EXISTS),
-    alembic 001 stamps the baseline (no PHP SQL re-execution), 002-005 add
-    Python extension tables.  The whole flow runs under the coordinated lock.
+    alembic 001 stamps the baseline (no PHP SQL re-execution), 002 restores the
+    canonical PHP views.  The whole flow runs under the coordinated lock.
     """
     from alembic.command import upgrade as alembic_upgrade
     from alembic.config import Config
 
+    from app.core.config import settings
     from app.db.bootstrap import bootstrap_database
 
     server_url = make_url(MYSQL_URL)
@@ -484,16 +527,16 @@ def test_schema_mutation_upgrade_with_lock_applies_migrations():
     try:
         assert bootstrap_database(engine) is True
         db_url = engine.url.render_as_string(hide_password=False)
-        os.environ["DATABASE_URL"] = db_url
-        from app.core.config import settings
-
-        settings.DATABASE_URL = db_url
+        # monkeypatch restores both after the test so later tests in the same
+        # process do not inherit the disposable database URL.
+        monkeypatch.setenv("DATABASE_URL", db_url)
+        monkeypatch.setattr(settings, "DATABASE_URL", db_url)
         cfg = Config(str(_PROJ / "alembic.ini"))
         alembic_upgrade(cfg, "head")
 
         with engine.connect() as conn:
             version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
-            assert version == "005", f"Expected alembic_version '005', got '{version}'"
+            assert version == "002", f"Expected alembic_version '002', got '{version}'"
             tables = {
                 row[0]
                 for row in conn.execute(
@@ -503,8 +546,19 @@ def test_schema_mutation_upgrade_with_lock_applies_migrations():
                     )
                 ).fetchall()
             }
-            for t in ("service_accounts", "service_auth_tokens", "service_vault_contexts"):
-                assert t in tables, f"{t} should exist after upgrade"
+            for t in ("User", "Account", "UserGroup"):
+                assert t in tables, f"{t} should exist after bootstrap+upgrade"
+            views = {
+                row[0]
+                for row in conn.execute(
+                    text(
+                        "SELECT table_name FROM information_schema.tables "
+                        "WHERE table_schema = DATABASE() AND table_type = 'VIEW'"
+                    )
+                ).fetchall()
+            }
+            for v in ("account_data_v", "account_search_v"):
+                assert v in views, f"{v} should exist after 002 restores PHP views"
     finally:
         engine.dispose()
         with admin.begin() as conn:

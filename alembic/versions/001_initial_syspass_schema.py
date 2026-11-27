@@ -14,7 +14,7 @@ Databases already stamped at 001: upgrade is an idempotent no-op.
 """
 
 from alembic import op
-from sqlalchemy import inspect, text
+from sqlalchemy import inspect
 
 from app.db.bootstrap import _schema_table_names
 
@@ -39,19 +39,15 @@ def upgrade() -> None:
             "before 'alembic upgrade head'. Revision 001 is a baseline stamp "
             "only and does not create the PHP-owned schema."
         )
-
-    current = connection.execute(text("SELECT version_num FROM alembic_version")).scalar()
-    if current is None:
-        connection.execute(text("INSERT INTO alembic_version (version_num) VALUES ('001')"))
-    elif current != "001":
-        # Restamp path: record the base schema as baselined without touching
-        # any PHP-owned table.  Safe on databases stamped at a later revision
-        # too — Alembic would not run 001 in that case; this is defensive.
-        connection.execute(text("UPDATE alembic_version SET version_num = '001'"))
+    # Baseline stamp only: Alembic's migration context writes the
+    # alembic_version row itself after this revision runs.  Never INSERT or
+    # UPDATE alembic_version manually here — the writer's own insert would
+    # collide with ours (IntegrityError 1062, duplicate entry '001').
 
 
 def downgrade() -> None:
-    # 001 is a baseline record only: drop the stamp, never the PHP-owned
-    # base tables (PHP-created databases must remain unaffected).
-    connection = op.get_bind()
-    connection.execute(text("DELETE FROM alembic_version WHERE version_num = '001'"))
+    # 001 is a baseline record only: Alembic removes the alembic_version row
+    # itself when downgrading past this revision — never DELETE from
+    # alembic_version manually, and never drop the PHP-owned base tables
+    # (PHP-created databases must remain unaffected).
+    op.get_bind()

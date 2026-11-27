@@ -13,11 +13,13 @@ logger = logging.getLogger(__name__)
 # this is the Alembic Config object
 config = context.config
 
-# Interpret the config file for Python logging
+# Interpret the config file for Python logging.  Keep existing (application)
+# loggers enabled: fileConfig defaults to disable_existing_loggers=True, which
+# would silence app loggers for the rest of the process (e.g. under pytest).
 if config.config_file_name is not None:
     from logging.config import fileConfig
 
-    fileConfig(config.config_file_name)
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # Set target metadata for autogenerate support
 target_metadata = Base.metadata
@@ -67,6 +69,15 @@ def run_migrations_online() -> None:
 
         with context.begin_transaction():
             context.run_migrations()
+
+        # The lock-holding connection is already in a transaction when
+        # configure() runs, so Alembic treats it as externally managed and its
+        # begin_transaction() is a no-op: on non-transactional-DDL dialects
+        # (MySQL/MariaDB) the DDL implicit-commits, but the alembic_version
+        # bump would be rolled back when the lock connection closes.  Commit
+        # explicitly so the final revision survives (no-op when Alembic
+        # already committed its own transaction).
+        connection.commit()
 
 
 if context.is_offline_mode():
