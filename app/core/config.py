@@ -41,7 +41,9 @@ class Settings(BaseSettings):
     SCHEMA_MUTATION_LOCK_SECONDS: int = 600
     SQLALCHEMY_READ_ONLY: Any = None
     SECRET_KEY: str = _generated_secret()
+    SECRET_KEY_PREVIOUS: Optional[str] = None
     ENCRYPTION_KEY: str = _generated_secret()
+    SERVICE_VAULT_KEY: Optional[str] = None
     SYSPASS_PASSWORD_SALT: str = ""
     SYSPASS_RUNTIME_CONFIG_JSON_PATH: str = str(BASE_DIR / "config" / "runtime-config.json")
     SYSPASS_CONFIG_XML_PATH: str = ""
