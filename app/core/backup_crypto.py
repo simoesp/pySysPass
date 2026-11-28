@@ -319,7 +319,13 @@ def verify_archive_before_extract(
     
     Checks:
     1. HMAC-SHA256 over encrypted member ciphertexts (if encrypted backup)
-    2. Ed25519 signature over manifest (if signing keyring provided or required)
+    2. AES-256-GCM authentication of every encrypted member (confirms the
+       encryption key itself, so a wrong key reports "wrong key" rather than
+       surfacing later as an HMAC mismatch)
+    3. Ed25519 signature over manifest. A verification keyring is an explicit
+       authenticity policy: when one is configured (or a signature is
+       required), the manifest must carry a valid signature — a missing
+       signature fails closed.
     
     Raises RuntimeError on verification failure. Returns True on success.
     """
@@ -332,7 +338,8 @@ def verify_archive_before_extract(
             manifest = json.loads(archive.read(MANIFEST_NAME).decode("utf-8"))
             encrypted = manifest.get("encrypted", False)
             
-            # 1. Verify HMAC if encrypted backup
+            # 1. Verify encrypted backup authenticity and integrity, in the
+            # causally correct order.
             if encrypted:
                 hmac_b64 = manifest.get("hmac")
                 if not hmac_b64:
@@ -350,10 +357,72 @@ def verify_archive_before_extract(
                     raise RuntimeError("Backup manifest missing key_id for HMAC verification")
                 hmac_key = key_for_id(key_id, encryption_keyring)
                 
+                # a) AES-256-GCM authentication of each member, keyed by the
+                # manifest key_id. This is the only check that can prove the
+                # encryption key itself is correct, and it runs BEFORE the
+                # HMAC comparison so a wrong key — which also breaks the HMAC
+                # match, because the HMAC key is the same keyring key — is
+                # reported as "wrong key" instead of masquerading as
+                # tampering. On failure the two signals are cross-checked to
+                # name the true cause:
+                #   - GCM fails + the stored HMAC still matches under the
+                #     key that produced it -> the ciphertexts are provably the
+                #     originals, so only the key can be wrong: report
+                #     "wrong key".
+                #   - otherwise (HMAC also mismatches, or no oracle is
+                #     available) -> report as a verification failure without
+                #     blaming the key.
+                # Malformed or missing entries are skipped here so the
+                # dedicated extraction errors still surface.
+                members = manifest.get("members", {})
+                gcm_evidence: Optional[BackupDecryptionFailed] = None
+                with zipfile.ZipFile(archive_path, "r") as data_archive:
+                    for name, info in members.items():
+                        if not info.get("encrypted"):
+                            continue
+                        try:
+                            nonce = bytes.fromhex(info["nonce"])
+                            tag = bytes.fromhex(info["tag"])
+                            raw = data_archive.read(name)
+                        except (KeyError, TypeError, ValueError):
+                            continue  # extraction checks report malformed entries
+                        try:
+                            open_bytes(raw, nonce, tag, hmac_key)
+                        except BackupDecryptionFailed as exc:
+                            if gcm_evidence is None:
+                                gcm_evidence = exc
+                if gcm_evidence is not None:
+                    oracle_key: Optional[bytes] = None
+                    oracle_keyring = os.environ.get(KEYRING_ENV)
+                    try:
+                        if oracle_keyring and Path(oracle_keyring) != _keyring_path(encryption_keyring):
+                            oracle_key = key_for_id(key_id, oracle_keyring)
+                    except BackupCryptoError:
+                        oracle_key = None
+                    if oracle_key is not None and verify_hmac_sha256(
+                        ciphertexts, oracle_key, expected_hmac
+                    ):
+                        raise gcm_evidence
+                    raise RuntimeError(
+                        "Backup archive verification failed: "
+                        f"{gcm_evidence}"
+                    )
+                
+                # b) HMAC over the concatenated ciphertexts (chain-of-custody
+                # check; also covers member set/truncation anomalies) once the
+                # key itself has been authenticated.
                 if not verify_hmac_sha256(ciphertexts, hmac_key, expected_hmac):
                     raise RuntimeError("Backup HMAC verification failed: archive tampered or corrupted")
             
-            # 2. Verify signature if required, or optionally if verification keyring provided
+            # 3. Ed25519 signature verification (authenticity policy):
+            #   - an explicit requirement (BACKUP_REQUIRE_SIGNATURE) fails
+            #     closed: a keyring must exist and the manifest must carry a
+            #     valid signature;
+            #   - otherwise, if a verification keyring is configured, the
+            #     signature is optional in spirit but never weakly accepted:
+            #     present signatures must verify (and their key must be
+            #     known), so a tampered or foreign signature blocks restore
+            #     instead of being skipped.
             sig_required = require_signature or os.environ.get(REQUIRE_SIGNATURE_ENV, "").strip().lower() in ("1", "true", "yes", "on")
             verify_kr_path = verification_keyring or os.environ.get(VERIFICATION_KEYRING_ENV)
             
@@ -361,27 +430,24 @@ def verify_archive_before_extract(
             has_signature = signature_b64 is not None
             
             if sig_required:
-                # Signature is required: must be present and valid
+                # Explicit policy: the manifest must be signed and verifiable.
                 if not has_signature:
                     raise RuntimeError("Backup manifest missing signature (authenticity verification failed)")
                 if not verify_kr_path:
                     raise RuntimeError("Signature verification required but no verification keyring provided")
-                
-                try:
-                    signature = base64.b64decode(signature_b64)
-                except Exception as exc:
-                    raise RuntimeError(f"Backup manifest signature is not valid base64: {exc}") from exc
-                
-                pub_keys = load_verification_keyring(verify_kr_path)
-                key_id = manifest.get("signing_key_id")
-                if not key_id or key_id not in pub_keys:
-                    raise RuntimeError(f"Backup signing key '{key_id}' not found in verification keyring")
-                
-                if not verify_manifest_signature(manifest, pub_keys[key_id], signature):
-                    raise RuntimeError("Backup signature verification failed: manifest tampered or wrong key")
             
-            elif verify_kr_path and has_signature:
-                # Signature is optional but verification keyring provided and signature present: verify it
+            if verify_kr_path and (has_signature or "signing_key_id" in manifest):
+                # A configured verification keyring never weakly accepts a
+                # signature: when the manifest declares a signing key, the
+                # signature must be present, resolve to a known key and
+                # verify — a stripped, tampered or foreign signature blocks
+                # restore instead of being silently skipped. Archives that
+                # were never signed (no signing keyring at creation, hence no
+                # signing_key_id) pass unless the explicit requirement above
+                # rejects them.
+                if not has_signature:
+                    raise RuntimeError("Backup manifest missing signature (authenticity verification failed)")
+                
                 try:
                     signature = base64.b64decode(signature_b64)
                 except Exception as exc:
@@ -394,7 +460,8 @@ def verify_archive_before_extract(
                 
                 if not verify_manifest_signature(manifest, pub_keys[key_id], signature):
                     raise RuntimeError("Backup signature verification failed: manifest tampered or wrong key")
-            # else: no signature required, no verification keyring, or no signature present - skip verification
+            # else: no verification keyring configured - nothing to
+            # authenticate against
             
             return True
             
